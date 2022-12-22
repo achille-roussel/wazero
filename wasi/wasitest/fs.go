@@ -19,7 +19,7 @@ type CloseFS func()
 
 // MakeReadOnlyFS is a function type used to instentiate read-only file systems
 // during tests.
-type MakeReadOnlyFS func(fstest.MapFS) (wasi.FS, CloseFS, error)
+type MakeReadOnlyFS func(fs.FS) (wasi.FS, CloseFS, error)
 
 // MakeReadWriteFS is a function type used to instantiate read-write file
 // systems during tests.
@@ -54,13 +54,17 @@ func TestReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 }
 
 func testReadOnlyFSCreateEmpty(t *testing.T, newFS MakeReadOnlyFS) {
-	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) { return newFS(nil) })
+	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) {
+		return newFS(fstest.MapFS{})
+	})
 	defer closeFS()
 	testFS(t, fsys, nil)
 }
 
 func testReadOnlyFSOpenNotExist(t *testing.T, newFS MakeReadOnlyFS) {
-	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) { return newFS(nil) })
+	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) {
+		return newFS(fstest.MapFS{})
+	})
 	defer closeFS()
 
 	_, err := fsys.OpenFile("/test", 0, 0)

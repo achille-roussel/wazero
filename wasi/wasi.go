@@ -4,22 +4,8 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"os"
 
 	"github.com/tetratelabs/wazero/wasi/syscall"
-)
-
-const (
-	O_RDONLY = os.O_RDONLY
-	O_WRONLY = os.O_WRONLY
-	O_RDWR   = os.O_RDWR
-	O_APPEND = os.O_APPEND
-	O_CREATE = os.O_CREATE
-	O_EXCL   = os.O_EXCL
-	O_SYNC   = os.O_SYNC
-	O_TRUNC  = os.O_TRUNC
-
-	// TODO: figure out O_DIRECTORY and other flags
 )
 
 func makeErrno(err error) syscall.Errno {
@@ -73,6 +59,7 @@ func makeError(errno syscall.Errno) error {
 }
 
 func makeOpenFileFlags(dirflags syscall.Lookupflags, oflags syscall.Oflags, fsRightsBase, fsRightsInheriting syscall.Rights, fdflags syscall.Fdflags) (flags int, perm fs.FileMode) {
+	flags = makeDefaultFlags(dirflags)
 	if (oflags & syscall.O_CREAT) != 0 {
 		flags |= O_CREATE
 	}
@@ -85,7 +72,13 @@ func makeOpenFileFlags(dirflags syscall.Lookupflags, oflags syscall.Oflags, fsRi
 	if (fdflags & syscall.F_APPEND) != 0 {
 		flags |= O_APPEND
 	}
-	if (fdflags & (syscall.F_DSYNC | syscall.F_RSYNC | syscall.F_SYNC)) != 0 {
+	if (fdflags & syscall.F_DSYNC) != 0 {
+		flags |= O_DSYNC
+	}
+	if (fdflags & syscall.F_RSYNC) != 0 {
+		flags |= O_RSYNC
+	}
+	if (fdflags & syscall.F_SYNC) != 0 {
 		flags |= O_SYNC
 	}
 	switch {
@@ -147,12 +140,16 @@ func makePathOpenFlags(flags int, perm fs.FileMode) (dirflags syscall.Lookupflag
 }
 
 func makeLookupflags(flags int) (dirflags syscall.Lookupflags) {
-	// TODO
+	if (flags & O_NOFOLLOW) == 0 {
+		dirflags |= syscall.SymlinkFollow
+	}
 	return
 }
 
-func makeStatFileFlags(dirflags syscall.Lookupflags) (flags int) {
-	// TODO
+func makeDefaultFlags(dirflags syscall.Lookupflags) (flags int) {
+	if (dirflags & syscall.SymlinkFollow) == 0 {
+		dirflags |= O_NOFOLLOW
+	}
 	return
 }
 

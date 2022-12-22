@@ -263,13 +263,13 @@ func (ctx *Context) PathFilestatGet(fd syscall.Fd, flags syscall.Lookupflags, pa
 	var err error
 
 	if fd == syscall.None || strings.HasPrefix(path, "/") {
-		info, err = ctx.fsys.StatFile(path, makeStatFileFlags(flags))
+		info, err = ctx.fsys.StatFile(path, makeDefaultFlags(flags))
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
 			return syscall.Filestat{}, syscall.EBADF
 		}
-		info, err = f.StatFile(path, makeStatFileFlags(flags))
+		info, err = f.StatFile(path, makeDefaultFlags(flags))
 	}
 
 	if err != nil {

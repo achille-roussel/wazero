@@ -1,4 +1,7 @@
 // Package syscall defines the types of WASI in Go.
+//
+// Applications should not take a direct dependency on this package an instead
+// use the top-level wasi package only.
 package syscall
 
 import (
