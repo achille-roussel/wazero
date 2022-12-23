@@ -1,9 +1,96 @@
-package wasi
+package wasi_snapshot_preview1
 
 import (
+	"io"
+	"io/fs"
 	"math/bits"
 
-	"github.com/tetratelabs/wazero/wasi/syscall"
+	"github.com/tetratelabs/wazero/wasi"
+)
+
+type file struct {
+	base               wasi.File
+	fsRightsBase       Rights
+	fsRightsInheriting Rights
+	dircookie          Dircookie
+	direntries         []fs.DirEntry
+}
+
+func (f *file) Name() string { return f.base.Name() }
+
+func (f *file) Close() error { return f.base.Close() }
+
+func (f *file) OpenFile(path string, flags int, perm fs.FileMode) (wasi.File, error) {
+	if !f.fsRightsBase.Has(PATH_OPEN) {
+		return nil, fs.ErrPermission
+	}
+	return f.base.OpenFile(path, flags, perm)
+}
+
+func (f *file) Read(b []byte) (int, error) {
+	if !f.fsRightsBase.Has(FD_READ) {
+		return 0, fs.ErrPermission
+	}
+	return f.base.Read(b)
+}
+
+func (f *file) ReadAt(b []byte, off int64) (int, error) {
+	if !f.fsRightsBase.Has(FD_READ | FD_SEEK) {
+		return 0, fs.ErrPermission
+	}
+	return f.base.ReadAt(b, off)
+}
+
+func (f *file) Write(b []byte) (int, error) {
+	if !f.fsRightsBase.Has(FD_WRITE) {
+		return 0, fs.ErrPermission
+	}
+	return f.base.Write(b)
+}
+
+func (f *file) WriteAt(b []byte, off int64) (int, error) {
+	if !f.fsRightsBase.Has(FD_WRITE | FD_SEEK) {
+		return 0, fs.ErrPermission
+	}
+	return f.base.WriteAt(b, off)
+}
+
+func (f *file) Seek(offset int64, whence int) (int64, error) {
+	rights := Rights(0)
+	if offset == 0 && whence == io.SeekCurrent {
+		rights = FD_TELL
+	} else {
+		rights = FD_SEEK
+	}
+	if !f.fsRightsBase.Has(rights) {
+		return -1, fs.ErrPermission
+	}
+	return f.base.Seek(offset, whence)
+}
+
+func (f *file) Stat() (fs.FileInfo, error) {
+	if !f.fsRightsBase.Has(FD_FILESTAT_GET) {
+		return nil, fs.ErrPermission
+	}
+	return f.base.Stat()
+}
+
+func (f *file) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if !f.fsRightsBase.Has(FD_FILESTAT_GET) {
+		return nil, fs.ErrPermission
+	}
+	return f.base.StatFile(path, flags)
+}
+
+func (f *file) ReadDir(n int) ([]fs.DirEntry, error) {
+	if !f.fsRightsBase.Has(FD_READDIR) {
+		return nil, fs.ErrPermission
+	}
+	return f.base.ReadDir(n)
+}
+
+var (
+	_ wasi.File = (*file)(nil)
 )
 
 // Table is a data structure mapping 32 bit keys to items of arbitrary type.
@@ -68,7 +155,7 @@ func (t *fileTable) grow(n int) {
 //
 // The method does not perform deduplication, it is possible for the same file
 // to be inserted multiple times, each insertion will return a different fd.
-func (t *fileTable) insert(file *file) (fd syscall.Fd) {
+func (t *fileTable) insert(file *file) (fd Fd) {
 	offset := 0
 insert:
 	// TODO: this loop could be made a lot more efficient using vectorized
@@ -78,7 +165,7 @@ insert:
 		if ^mask != 0 { // not full?
 			shift := bits.TrailingZeros64(^mask)
 			index += offset
-			fd = syscall.Fd(index)*64 + syscall.Fd(shift)
+			fd = Fd(index)*64 + Fd(shift)
 			t.files[fd] = file
 			t.masks[index] = mask | uint64(1<<shift)
 			return fd
@@ -96,7 +183,7 @@ insert:
 }
 
 // lookup returns the file associated with the given fd (may be nil).
-func (t *fileTable) lookup(fd syscall.Fd) *file {
+func (t *fileTable) lookup(fd Fd) *file {
 	if i := int(fd); i >= 0 && i < len(t.files) {
 		return t.files[i]
 	}
@@ -105,7 +192,7 @@ func (t *fileTable) lookup(fd syscall.Fd) *file {
 
 // delete deletes the file stored at the given fd from the table, returning the
 // deleted file (may be nil).
-func (t *fileTable) delete(fd syscall.Fd) (file *file) {
+func (t *fileTable) delete(fd Fd) (file *file) {
 	if index, shift := fd/64, fd%64; int(index) < len(t.masks) {
 		mask := t.masks[index]
 		if (mask & (1 << shift)) != 0 {
@@ -119,12 +206,12 @@ func (t *fileTable) delete(fd syscall.Fd) (file *file) {
 
 // scan calls f for each file and its associated fd in the table. The function
 // f might return false to interupt the iteration.
-func (t *fileTable) scan(f func(syscall.Fd, *file) bool) {
+func (t *fileTable) scan(f func(Fd, *file) bool) {
 	for i, mask := range t.masks {
 		if mask != 0 {
-			for j := syscall.Fd(0); j < 64; j++ {
+			for j := Fd(0); j < 64; j++ {
 				if (mask & (1 << j)) != 0 {
-					if fd := syscall.Fd(i)*64 + j; !f(fd, t.files[fd]) {
+					if fd := Fd(i)*64 + j; !f(fd, t.files[fd]) {
 						return
 					}
 				}

@@ -1,12 +1,8 @@
-package wasi
+package wasi_snapshot_preview1
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/tetratelabs/wazero/wasi/syscall"
-)
-
-func TestTable(t *testing.T) {
+func TestFileTable(t *testing.T) {
 	table := new(fileTable)
 
 	if n := table.len(); n != 0 {
@@ -22,7 +18,7 @@ func TestTable(t *testing.T) {
 	k2 := table.insert(v2)
 
 	for _, lookup := range []struct {
-		key syscall.Fd
+		key Fd
 		val *file
 	}{
 		{key: k0, val: v0},
@@ -43,7 +39,7 @@ func TestTable(t *testing.T) {
 	k0Found := false
 	k1Found := false
 	k2Found := false
-	table.scan(func(k syscall.Fd, v *file) bool {
+	table.scan(func(k Fd, v *file) bool {
 		var want *file
 		switch k {
 		case k0:
@@ -60,7 +56,7 @@ func TestTable(t *testing.T) {
 	})
 
 	for _, found := range []struct {
-		key syscall.Fd
+		key Fd
 		ok  bool
 	}{
 		{key: k0, ok: k0Found},
@@ -73,7 +69,7 @@ func TestTable(t *testing.T) {
 	}
 
 	for i, deletion := range []struct {
-		key syscall.Fd
+		key Fd
 		val *file
 	}{
 		{key: k1, val: v1},
@@ -91,7 +87,7 @@ func TestTable(t *testing.T) {
 	}
 }
 
-func BenchmarkTableInsert(b *testing.B) {
+func BenchmarkFileTableInsert(b *testing.B) {
 	table := new(fileTable)
 	file := new(file)
 
@@ -104,10 +100,10 @@ func BenchmarkTableInsert(b *testing.B) {
 	}
 }
 
-func BenchmarkTableLookup(b *testing.B) {
+func BenchmarkFileTableLookup(b *testing.B) {
 	const N = 65536
 	table := new(fileTable)
-	keys := make([]syscall.Fd, N)
+	keys := make([]Fd, N)
 	sentinel := new(file)
 
 	for i := range keys {

@@ -1,9 +1,91 @@
-// Package wasi_snapshot_preview1 is an internal helper to remove package
-// cycles re-using errno
 package wasi_snapshot_preview1
 
-import (
-	"fmt"
+import "fmt"
+
+type Errno uint32
+
+func (e Errno) Name() string { return ErrnoName(uint32(e)) }
+
+func (e Errno) Error() string { return e.Name() }
+
+const (
+	ESUCCESS Errno = iota
+	E2BIG
+	EACCES
+	EADDRINUSE
+	EADDRNOTAVAIL
+	EAFNOSUPPORT
+	EAGAIN
+	EALREADY
+	EBADF
+	EBADMSG
+	EBUSY
+	ECANCELED
+	ECHILD
+	ECONNABORTED
+	ECONNREFUSED
+	ECONNRESET
+	EDEADLK
+	EDESTADDRREQ
+	EDOM
+	EDQUOT
+	EEXIST
+	EFAULT
+	EFBIG
+	EHOSTUNREACH
+	EIDRM
+	EILSEQ
+	EINPROGRESS
+	EINTR
+	EINVAL
+	EIO
+	EISCONN
+	EISDIR
+	ELOOP
+	EMFILE
+	EMLINK
+	EMSGSIZE
+	EMULTIHOP
+	ENAMETOOLONG
+	ENETDOWN
+	ENETRESET
+	ENETUNREACH
+	ENFILE
+	ENOBUFS
+	ENODEV
+	ENOENT
+	ENOEXEC
+	ENOLCK
+	ENOLINK
+	ENOMEM
+	ENOMSG
+	ENOPROTOOPT
+	ENOSPC
+	ENOSYS
+	ENOTCONN
+	ENOTDIR
+	ENOTEMPTY
+	ENOTRECOVERABLE
+	ENOTSOCK
+	ENOTSUP
+	ENOTTY
+	ENXIO
+	EOVERFLOW
+	EOWNERDEAD
+	EPERM
+	EPIPE
+	EPROTO
+	EPROTONOSUPPORT
+	EPROTOTYPE
+	ERANGE
+	EROFS
+	ESPIPE
+	ESRCH
+	ESTALE
+	ETIMEDOUT
+	ETXTBSY
+	EXDEV
+	ENOTCAPABLE
 )
 
 // ErrnoName returns the POSIX error code name, except ErrnoSuccess, which is not an error. e.g. Errno2big -> "E2BIG"

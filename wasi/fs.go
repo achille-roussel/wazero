@@ -8,17 +8,27 @@ import (
 	fspath "path"
 )
 
-const (
-	// MaxPathLen is a constant representing the maximum supported length of
-	// file system paths.
-	MaxPathLen = 1024
-)
-
 var (
 	// ErrNotImplemented is returned by FS or File methods when the underlying
 	// type does not provide an implementation for the method being called.
 	ErrNotImplemented = errors.New("not implemented")
 )
+
+type File interface {
+	io.Closer
+	io.Reader
+	io.ReaderAt
+	io.Writer
+	io.WriterAt
+	io.Seeker
+	fs.ReadDirFile
+
+	Name() string
+
+	OpenFile(path string, flags int, perm fs.FileMode) (File, error)
+
+	StatFile(path string, flags int) (fs.FileInfo, error)
+}
 
 // FS is an interface satisfied by types that implement file systems compatible
 // with the WASI standard.

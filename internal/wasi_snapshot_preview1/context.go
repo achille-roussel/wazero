@@ -1,4 +1,4 @@
-package wasi
+package wasi_snapshot_preview1
 
 import (
 	"context"
@@ -9,44 +9,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tetratelabs/wazero/wasi/syscall"
+	"github.com/tetratelabs/wazero/wasi"
 )
 
 // Context represents the execution context of a WASI program.
 type Context struct {
-	fsys  FS
+	FileSystem wasi.FS
+
 	files fileTable
-}
-
-// ContextOption is an interface used to represent configuration options when
-// creating contexts.
-type ContextOption interface {
-	ConfigureContext(*Context)
-}
-
-type contextOption func(*Context)
-
-func (opt contextOption) ConfigureContext(ctx *Context) { opt(ctx) }
-
-// FileSystem is a configuration option to define the file system mounted into
-// a context.
-func FileSystem(fsys FS) ContextOption {
-	return contextOption(func(ctx *Context) { ctx.fsys = fsys })
-}
-
-// NewContext constructs a new Context instance using the options passed as
-// arguments.
-func NewContext(options ...ContextOption) *Context {
-	ctx := new(Context)
-	for _, opt := range options {
-		opt.ConfigureContext(ctx)
-	}
-	return ctx
 }
 
 // Close closes the context, releasing all resources that were held.
 func (ctx *Context) Close() error {
-	ctx.files.scan(func(fd syscall.Fd, f *file) bool {
+	ctx.files.scan(func(fd Fd, f *file) bool {
 		f.Close()
 		return true
 	})
@@ -54,127 +29,127 @@ func (ctx *Context) Close() error {
 	return nil
 }
 
-// FdClose is the implementation of the "fd_close" syscall.
+// FdClose is the implementation of the "fd_close"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_close
-func (ctx *Context) FdClose(fd syscall.Fd) syscall.Errno {
+func (ctx *Context) FdClose(fd Fd) Errno {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return syscall.EBADF
+		return EBADF
 	}
 	if err := f.Close(); err != nil {
 		return makeErrno(err)
 	}
 	ctx.files.delete(fd)
-	return syscall.ESUCCESS
+	return ESUCCESS
 }
 
-// FdSeek is the implementation of the "fd_seek" syscall.
+// FdSeek is the implementation of the "fd_seek"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_seek
-func (ctx *Context) FdSeek(fd syscall.Fd, offset syscall.Filedelta, whence syscall.Whence) (syscall.Filesize, syscall.Errno) {
+func (ctx *Context) FdSeek(fd Fd, offset Filedelta, whence Whence) (Filesize, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return 0, syscall.EBADF
+		return 0, EBADF
 	}
 	i := int64(offset)
 	w := int(0)
 	switch whence {
-	case syscall.Set:
+	case Set:
 		w = io.SeekStart
-	case syscall.Cur:
+	case Cur:
 		w = io.SeekCurrent
-	case syscall.End:
+	case End:
 		w = io.SeekEnd
 	default:
-		return 0, syscall.EINVAL
+		return 0, EINVAL
 	}
 	seek, err := f.Seek(i, w)
-	return syscall.Filesize(seek), makeErrno(err)
+	return Filesize(seek), makeErrno(err)
 }
 
-// FdTell is the implementation of the "fd_tell" syscall.
+// FdTell is the implementation of the "fd_tell"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_tell
-func (ctx *Context) FdTell(fd syscall.Fd) (syscall.Filesize, syscall.Errno) {
+func (ctx *Context) FdTell(fd Fd) (Filesize, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return 0, syscall.EBADF
+		return 0, EBADF
 	}
 	tell, err := f.Seek(0, io.SeekCurrent)
-	return syscall.Filesize(tell), makeErrno(err)
+	return Filesize(tell), makeErrno(err)
 }
 
-// FdFilestatGet is the implementation of the "fd_filestat_get" syscall.
+// FdFilestatGet is the implementation of the "fd_filestat_get"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_filestat_get
-func (ctx *Context) FdFilestatGet(fd syscall.Fd) (syscall.Filestat, syscall.Errno) {
+func (ctx *Context) FdFilestatGet(fd Fd) (Filestat, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return syscall.Filestat{}, syscall.EBADF
+		return Filestat{}, EBADF
 	}
 	s, err := f.Stat()
 	if err != nil {
-		return syscall.Filestat{}, makeErrno(err)
+		return Filestat{}, makeErrno(err)
 	}
-	return makeFilestat(s), syscall.ESUCCESS
+	return makeFilestat(s), ESUCCESS
 }
 
-// FdPread is the implementation of the "fd_pread" syscall.
+// FdPread is the implementation of the "fd_pread"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_pread
-func (ctx *Context) FdPread(fd syscall.Fd, iovs [][]byte, offset syscall.Filesize) (syscall.Size, syscall.Errno) {
+func (ctx *Context) FdPread(fd Fd, iovs [][]byte, offset Filesize) (Size, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return 0, syscall.EBADF
+		return 0, EBADF
 	}
-	size := syscall.Size(0)
+	size := Size(0)
 	for _, buf := range iovs {
 		n, err := f.ReadAt(buf, int64(offset))
-		offset += syscall.Filesize(n)
-		size += syscall.Size(n)
+		offset += Filesize(n)
+		size += Size(n)
 		if err != nil {
 			return size, makeErrno(err)
 		}
 	}
-	return size, syscall.ESUCCESS
+	return size, ESUCCESS
 }
 
-// FdRead is the implementation of the "fd_read" syscall.
+// FdRead is the implementation of the "fd_read"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_read
-func (ctx *Context) FdRead(fd syscall.Fd, iovs [][]byte) (syscall.Size, syscall.Errno) {
+func (ctx *Context) FdRead(fd Fd, iovs [][]byte) (Size, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return 0, syscall.EBADF
+		return 0, EBADF
 	}
-	size := syscall.Size(0)
+	size := Size(0)
 	for _, buf := range iovs {
 		n, err := f.Read(buf)
-		size += syscall.Size(n)
+		size += Size(n)
 		if err != nil {
 			return size, makeErrno(err)
 		}
 	}
-	return size, syscall.ESUCCESS
+	return size, ESUCCESS
 }
 
-// FdReaddir is the implementation of the "fd_readdir" syscall.
+// FdReaddir is the implementation of the "fd_readdir"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_readdir
-func (ctx *Context) FdReaddir(fd syscall.Fd, buf []byte, dircookie syscall.Dircookie) (syscall.Size, syscall.Errno) {
+func (ctx *Context) FdReaddir(fd Fd, buf []byte, dircookie Dircookie) (Size, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
-		return 0, syscall.EBADF
+		return 0, EBADF
 	}
 	if dircookie < f.dircookie {
-		return 0, syscall.EINVAL
+		return 0, EINVAL
 	}
 
 	const readDirChunkSize = 10
 	for f.dircookie < dircookie {
 		d := dircookie - f.dircookie
-		n := syscall.Dircookie(len(f.direntries))
+		n := Dircookie(len(f.direntries))
 		if d > n {
 			d = n
 		}
@@ -189,8 +164,8 @@ func (ctx *Context) FdReaddir(fd syscall.Fd, buf []byte, dircookie syscall.Dirco
 		}
 	}
 
-	size := syscall.Size(0)
-	for size < syscall.Size(len(buf)) {
+	size := Size(0)
+	for size < Size(len(buf)) {
 		if len(f.direntries) == 0 {
 			var err error
 			f.direntries, err = f.base.ReadDir(readDirChunkSize)
@@ -203,48 +178,52 @@ func (ctx *Context) FdReaddir(fd syscall.Fd, buf []byte, dircookie syscall.Dirco
 		name := dirent.Name()
 		mode := dirent.Type()
 
-		d := syscall.Dirent{
+		d := Dirent{
 			Next:    f.dircookie + 1,
 			Ino:     0, // TODO?
-			Namelen: syscall.Dirnamlen(len(name)),
+			Namelen: Dirnamlen(len(name)),
 			Type:    makeFiletype(mode),
 		}
 
-		r := syscall.Size(len(buf)) - size
+		r := Size(len(buf)) - size
 		n := d.Size()
 		b := d.Marshal()
-		size += syscall.Size(copy(buf[size:], b[:]))
-		size += syscall.Size(copy(buf[size:], name))
+		size += Size(copy(buf[size:], b[:]))
+		size += Size(copy(buf[size:], name))
 
 		if n <= r {
 			f.dircookie++
 			f.direntries = f.direntries[1:]
 		}
 	}
-	return size, syscall.ESUCCESS
+	return size, ESUCCESS
 }
 
-// PathOpen is the implementation of the "path_open" syscall.
+// PathOpen is the implementation of the "path_open"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#path_open
-func (ctx *Context) PathOpen(fd syscall.Fd, dirflags syscall.Lookupflags, path string, oflags syscall.Oflags, fsRightsBase, fsRightsInheriting syscall.Rights, fdflags syscall.Fdflags) (syscall.Fd, syscall.Errno) {
-	var base File
+func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Oflags, fsRightsBase, fsRightsInheriting Rights, fdflags Fdflags) (Fd, Errno) {
+	var base wasi.File
 	var err error
 
+	if ctx.FileSystem == nil {
+		return None, ENOENT
+	}
+
 	flags, perm := makeOpenFileFlags(dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags)
-	if fd == syscall.None || strings.HasPrefix(path, "/") {
-		base, err = ctx.fsys.OpenFile(path, flags, perm)
+	if fd == None || strings.HasPrefix(path, "/") {
+		base, err = ctx.FileSystem.OpenFile(path, flags, perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
-			return syscall.None, syscall.EBADF
+			return None, EBADF
 		}
 		fsRightsBase &= ^f.fsRightsInheriting
 		fsRightsInheriting &= ^f.fsRightsInheriting
 		base, err = f.OpenFile(path, flags, perm)
 	}
 	if err != nil {
-		return syscall.None, makeErrno(err)
+		return None, makeErrno(err)
 	}
 
 	newFd := ctx.files.insert(&file{
@@ -252,34 +231,38 @@ func (ctx *Context) PathOpen(fd syscall.Fd, dirflags syscall.Lookupflags, path s
 		fsRightsBase:       fsRightsBase,
 		fsRightsInheriting: fsRightsInheriting,
 	})
-	return newFd, syscall.ESUCCESS
+	return newFd, ESUCCESS
 }
 
-// PathFilestatGet is the implementation of the "path_filestat_get" syscall.
+// PathFilestatGet is the implementation of the "path_filestat_get"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#path_filestat_get
-func (ctx *Context) PathFilestatGet(fd syscall.Fd, flags syscall.Lookupflags, path string) (syscall.Filestat, syscall.Errno) {
+func (ctx *Context) PathFilestatGet(fd Fd, flags Lookupflags, path string) (Filestat, Errno) {
 	var info fs.FileInfo
 	var err error
 
-	if fd == syscall.None || strings.HasPrefix(path, "/") {
-		info, err = ctx.fsys.StatFile(path, makeDefaultFlags(flags))
+	if ctx.FileSystem == nil {
+		return Filestat{}, ENOENT
+	}
+
+	if fd == None || strings.HasPrefix(path, "/") {
+		info, err = ctx.FileSystem.StatFile(path, makeDefaultFlags(flags))
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
-			return syscall.Filestat{}, syscall.EBADF
+			return Filestat{}, EBADF
 		}
 		info, err = f.StatFile(path, makeDefaultFlags(flags))
 	}
 
 	if err != nil {
-		return syscall.Filestat{}, makeErrno(err)
+		return Filestat{}, makeErrno(err)
 	}
-	return makeFilestat(info), syscall.ESUCCESS
+	return makeFilestat(info), ESUCCESS
 }
 
 // FS returns a file system backed by the context that it is called on.
-func (ctx *Context) FS() FS { return contextFS{ctx} }
+func (ctx *Context) FS() wasi.FS { return contextFS{ctx} }
 
 type contextFS struct{ ctx *Context }
 
@@ -287,9 +270,9 @@ func (fsys contextFS) Open(name string) (fs.File, error) {
 	return fsys.OpenFile(name, 0, 0)
 }
 
-func (fsys contextFS) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+func (fsys contextFS) OpenFile(path string, flags int, perm fs.FileMode) (wasi.File, error) {
 	dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags := makePathOpenFlags(flags, perm)
-	fd, errno := fsys.ctx.PathOpen(syscall.None, dirflags, path, oflags, fsRightsBase, fsRightsInheriting, fdflags)
+	fd, errno := fsys.ctx.PathOpen(None, dirflags, path, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	if err := makeError(errno); err != nil {
 		return nil, err
 	}
@@ -301,7 +284,7 @@ func (fsys contextFS) Stat(path string) (fs.FileInfo, error) {
 }
 
 func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
-	stat, errno := fsys.ctx.PathFilestatGet(syscall.None, makeLookupflags(flags), path)
+	stat, errno := fsys.ctx.PathFilestatGet(None, makeLookupflags(flags), path)
 	if err := makeError(errno); err != nil {
 		return nil, err
 	}
@@ -310,10 +293,10 @@ func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 
 type contextFile struct {
 	ctx  *Context
-	fd   syscall.Fd
+	fd   Fd
 	name string
 	// iterator state used when calling ReadDir
-	dircookie syscall.Dircookie
+	dircookie Dircookie
 	dirbuffer []byte
 }
 
@@ -323,11 +306,11 @@ func (f *contextFile) Name() string {
 
 func (f *contextFile) Close() error {
 	fd := f.fd
-	f.fd = syscall.None
+	f.fd = None
 	return makeError(f.ctx.FdClose(fd))
 }
 
-func (f *contextFile) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+func (f *contextFile) OpenFile(path string, flags int, perm fs.FileMode) (wasi.File, error) {
 	dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags := makePathOpenFlags(flags, perm)
 	fd, errno := f.ctx.PathOpen(f.fd, dirflags, path, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	if err := makeError(errno); err != nil {
@@ -338,15 +321,15 @@ func (f *contextFile) OpenFile(path string, flags int, perm fs.FileMode) (File, 
 
 func (f *contextFile) Read(b []byte) (int, error) {
 	size, errno := f.ctx.FdRead(f.fd, [][]byte{b})
-	if size == 0 && errno == syscall.ESUCCESS && len(b) != 0 {
+	if size == 0 && errno == ESUCCESS && len(b) != 0 {
 		return 0, io.EOF
 	}
 	return int(size), makeError(errno)
 }
 
 func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
-	size, errno := f.ctx.FdPread(f.fd, [][]byte{b}, syscall.Filesize(off))
-	if size < syscall.Size(len(b)) && errno == syscall.ESUCCESS {
+	size, errno := f.ctx.FdPread(f.fd, [][]byte{b}, Filesize(off))
+	if size < Size(len(b)) && errno == ESUCCESS {
 		return int(size), io.EOF
 	}
 	return int(size), makeError(errno)
@@ -361,23 +344,23 @@ func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
 
 	for n == 0 || len(ent) < n {
 		b := buf[:]
-		size := syscall.Size(0)
-		errno := syscall.Errno(0)
+		size := Size(0)
+		errno := Errno(0)
 
 		if len(f.dirbuffer) == 0 {
 			size, errno = f.ctx.FdReaddir(f.fd, b, f.dircookie)
 			b = b[:size]
 		} else {
 			b, f.dirbuffer = f.dirbuffer, f.dirbuffer[:0]
-			size = syscall.Size(len(b))
+			size = Size(len(b))
 		}
 
 		for len(b) >= 24 && (n == 0 || len(ent) < n) {
-			d := syscall.Dirent{}
+			d := Dirent{}
 			d.Unmarshal(*(*[24]byte)(b))
 			b = b[24:]
 
-			if d.Namelen > syscall.Dirnamlen(len(b)) {
+			if d.Namelen > Dirnamlen(len(b)) {
 				b = b[len(b):]
 			} else {
 				ent = append(ent, &contextDirEntry{
@@ -395,7 +378,7 @@ func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
 			f.dirbuffer = append(f.dirbuffer[:0], b...)
 		}
 
-		if errno != syscall.ESUCCESS {
+		if errno != ESUCCESS {
 			err = makeError(errno)
 			break
 		}
@@ -418,20 +401,20 @@ func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
 }
 
 func (f *contextFile) Write(b []byte) (int, error) {
-	return 0, ErrNotImplemented
+	return 0, wasi.ErrNotImplemented
 }
 
 func (f *contextFile) WriteAt(b []byte, off int64) (int, error) {
-	return 0, ErrNotImplemented
+	return 0, wasi.ErrNotImplemented
 }
 
 func (f *contextFile) Seek(offset int64, whence int) (int64, error) {
-	var size syscall.Filesize
-	var errno syscall.Errno
+	var size Filesize
+	var errno Errno
 	if offset == 0 && whence == io.SeekCurrent {
 		size, errno = f.ctx.FdTell(f.fd)
 	} else {
-		size, errno = f.ctx.FdSeek(f.fd, syscall.Filedelta(offset), syscall.Whence(whence))
+		size, errno = f.ctx.FdSeek(f.fd, Filedelta(offset), Whence(whence))
 	}
 	return int64(size), makeError(errno)
 }
@@ -454,7 +437,7 @@ func (f *contextFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 
 type contextFileInfo struct {
 	name string
-	stat syscall.Filestat
+	stat Filestat
 }
 
 func (f *contextFileInfo) Name() string       { return f.name }
