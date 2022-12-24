@@ -15,6 +15,12 @@ var (
 	ErrNotImplemented = errors.New("not implemented")
 )
 
+// File is an interface implemented by files opened by FS instsances.
+//
+// The interfance is similar to fs.File, it may represent different types of
+// files, including regular files and directories.
+//
+// See FS for more details.
 type File interface {
 	io.Closer
 	io.Reader
@@ -23,13 +29,14 @@ type File interface {
 	io.WriterAt
 	io.Seeker
 	fs.ReadDirFile
-
+	// Name returns the base name of the receiver.
 	Name() string
-
+	// OpenFile opens a file at the given path, relative to the receiver.
 	OpenFile(path string, flags int, perm fs.FileMode) (File, error)
-
+	// StatFile returns information about the file at the given path, relative
+	// to the receiver.
 	StatFile(path string, flags int) (fs.FileInfo, error)
-
+	// CreateDir creates a file at the given path, relative to the reicever.
 	CreateDir(path string, perm fs.FileMode) error
 }
 
@@ -164,6 +171,12 @@ func (f *fsFile) CreateDir(path string, perm fs.FileMode) error { return fs.ErrP
 
 func (f *fsFile) pathTo(path string) string { return fspath.Join(f.path, path) }
 
+// DirFS returns a file system backed by the given root directory.
+//
+// This function is similar in behavior to os.DirFS, and therefore does not
+// provide a strong isolation model; the application will be able to access
+// files outside of the root by following symlinks or opening the parent
+// directory.
 func DirFS(root string) (FS, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -261,6 +274,12 @@ func (f *dirFile) pathTo(path string) string {
 	return filepath.Join(f.File.Name(), filepath.FromSlash(path))
 }
 
+// SubFS returns a file system based on fsys rooted at the given directory path.
+//
+// This function is similar in behavior to fs.Sub, and therefore does not
+// provide a strong isolation model; the application will be able to access
+// files outside of the root by following symlinks or opening the parent
+// directory.
 func Sub(fsys FS, dir string) (FS, error) {
 	f, err := fsys.OpenFile(dir, 0, 0755)
 	if err != nil {

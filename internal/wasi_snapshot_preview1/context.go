@@ -238,6 +238,9 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 	return newFd, ESUCCESS
 }
 
+// PathCreateDirectory is the implementation of the "path_create_directory"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#path_create_directory
 func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 	var err error
 
