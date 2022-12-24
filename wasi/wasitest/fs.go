@@ -34,19 +34,6 @@ func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
 	})
 }
 
-func testReadWriteFSCreateDirectoryHasPermissions(t *testing.T, newFS MakeReadWriteFS) {
-	fsys, closeFS := assertNewFS(t, newFS)
-	defer assertCloseFS(t, closeFS)
-
-	assertErrorIs(t, fsys.CreateDir("A", 0755), nil)
-	assertErrorIs(t, fsys.CreateDir("B", 0700), nil)
-	assertErrorIs(t, fsys.CreateDir("C", 0500), nil)
-
-	assertPermission(t, fsys, "A", 0755)
-	assertPermission(t, fsys, "B", 0700)
-	assertPermission(t, fsys, "C", 0500)
-}
-
 func assertNewFS(t *testing.T, newFS func() (wasi.FS, CloseFS, error)) (wasi.FS, CloseFS) {
 	t.Helper()
 	fsys, closeFS, err := newFS()
@@ -94,16 +81,16 @@ func assertPathData(t *testing.T, fsys wasi.FS, path, data string) {
 	}
 }
 
-func assertCreateDir(t *testing.T, fsys wasi.FS, path string) {
+func assertCreateDir(t *testing.T, fsys wasi.FS, path string, perm fs.FileMode) {
 	t.Helper()
-	assertErrorIs(t, fsys.CreateDir(path, 0755), nil)
+	assertErrorIs(t, fsys.CreateDir(path, perm), nil)
 	s, err := fsys.Stat(path)
 	if err != nil {
 		t.Error(err)
 	} else if !s.IsDir() {
 		t.Errorf("%s: not a directory", path)
-	} else if perm := s.Mode() & 0777; perm != 0755 {
-		t.Errorf("%s: permissions mismatch: want=%03o got=%03o", path, 0755, perm)
+	} else if mode := s.Mode() & fs.ModePerm; mode != perm {
+		t.Errorf("%s: permissions mismatch: want=%03o got=%03o", path, perm, mode)
 	}
 }
 
@@ -138,19 +125,6 @@ func assertSetFileTimes(t *testing.T, fsys wasi.FS, path string, atim, mtim time
 			if !mtim.Equal(statMtim) {
 				t.Errorf("modification time mismatch: want=%v got=%v", mtim, statMtim)
 			}
-		}
-	}
-}
-
-func assertPermission(t *testing.T, fsys wasi.FS, path string, want fs.FileMode) {
-	t.Helper()
-	s, err := fsys.StatFile(path, 0)
-	if err != nil {
-		t.Error(err)
-	} else {
-		perm := s.Mode() & 0777
-		if perm != want {
-			t.Errorf("%s: permissions mismatch: want=%03o got=%03o", path, want, perm)
 		}
 	}
 }
