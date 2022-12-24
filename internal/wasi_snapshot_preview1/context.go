@@ -348,7 +348,7 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 		if ctx.FileSystem == nil {
 			return ENOENT
 		}
-		err = ctx.FileSystem.CreateDir(path, perm)
+		err = ctx.FileSystem.MakeDir(path, perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -357,7 +357,7 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 		if !f.fsRightsBase.Has(PATH_CREATE_DIRECTORY) {
 			return EPERM
 		}
-		err = f.base.CreateDir(path, perm)
+		err = f.base.MakeDir(path, perm)
 	}
 	return makeErrno(err)
 }
@@ -451,7 +451,7 @@ func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return &contextFileInfo{name: fspath.Base(path), stat: stat}, nil
 }
 
-func (fsys contextFS) CreateDir(path string, perm fs.FileMode) error {
+func (fsys contextFS) MakeDir(path string, perm fs.FileMode) error {
 	subctx := *fsys.ctx
 	subctx.Umask |= ^perm
 	return makeError(subctx.PathCreateDirectory(None, path))
@@ -506,7 +506,7 @@ func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
 	return int(size), makeError(errno)
 }
 
-func (f *contextFile) CreateDir(path string, perm fs.FileMode) error {
+func (f *contextFile) MakeDir(path string, perm fs.FileMode) error {
 	subctx := *f.ctx
 	subctx.Umask |= ^perm
 	return makeError(subctx.PathCreateDirectory(f.fd, path))

@@ -26,7 +26,7 @@ func TestReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := baseFS.CreateDir("mnt", 0755); err != nil {
+			if err := baseFS.MakeDir("mnt", 0755); err != nil {
 				closeFS()
 				return nil, nil, err
 			}
@@ -115,9 +115,9 @@ func testReadWriteFSCreateDirectory(t *testing.T, newFS MakeReadWriteFS) {
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer assertCloseFS(t, closeFS)
 
-	assertCreateDir(t, fsys, "etc", 0755)
-	assertCreateDir(t, fsys, "var", 0755)
-	assertCreateDir(t, fsys, "tmp", 0755)
+	assertMakeDir(t, fsys, "etc", 0755)
+	assertMakeDir(t, fsys, "var", 0755)
+	assertMakeDir(t, fsys, "tmp", 0755)
 
 	testFS(t, fsys, fstest.MapFS{
 		"etc": nil,
@@ -130,9 +130,9 @@ func testReadWriteFSCreateSubDirectory(t *testing.T, newFS MakeReadWriteFS) {
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer assertCloseFS(t, closeFS)
 
-	assertCreateDir(t, fsys, "1", 0755)
-	assertCreateDir(t, fsys, "1/2", 0755)
-	assertCreateDir(t, fsys, "1/2/3", 0755)
+	assertMakeDir(t, fsys, "1", 0755)
+	assertMakeDir(t, fsys, "1/2", 0755)
+	assertMakeDir(t, fsys, "1/2/3", 0755)
 
 	testFS(t, fsys, fstest.MapFS{
 		"1/2/3": nil,
@@ -143,17 +143,17 @@ func testReadWriteFSCreateExistingDirectory(t *testing.T, newFS MakeReadWriteFS)
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer assertCloseFS(t, closeFS)
 
-	assertCreateDir(t, fsys, "tmp", 0755)
-	assertErrorIs(t, fsys.CreateDir("tmp", 0755), fs.ErrExist)
+	assertMakeDir(t, fsys, "tmp", 0755)
+	assertErrorIs(t, fsys.MakeDir("tmp", 0755), fs.ErrExist)
 }
 
 func testReadWriteFSCreateDirectoryHasPermissions(t *testing.T, newFS MakeReadWriteFS) {
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer assertCloseFS(t, closeFS)
 
-	assertCreateDir(t, fsys, "A", 0755)
-	assertCreateDir(t, fsys, "B", 0700)
-	assertCreateDir(t, fsys, "C", 0500)
+	assertMakeDir(t, fsys, "A", 0755)
+	assertMakeDir(t, fsys, "B", 0700)
+	assertMakeDir(t, fsys, "C", 0500)
 }
 
 func testReadWriteFSCreateFileWithOpen(t *testing.T, newFS MakeReadWriteFS) {
@@ -208,7 +208,7 @@ func testReadWriteFSSetFileAccessTime(t *testing.T, newFS MakeReadWriteFS) {
 	defer assertCloseFS(t, closeFS)
 
 	now := time.Now().Add(time.Hour)
-	assertCreateDir(t, fsys, "tmp", 0755)
+	assertMakeDir(t, fsys, "tmp", 0755)
 	assertSetFileTimes(t, fsys, "tmp", now, time.Time{})
 }
 
@@ -217,7 +217,7 @@ func testReadWriteFSSetFileModTime(t *testing.T, newFS MakeReadWriteFS) {
 	defer assertCloseFS(t, closeFS)
 
 	now := time.Now().Add(time.Hour)
-	assertCreateDir(t, fsys, "tmp", 0755)
+	assertMakeDir(t, fsys, "tmp", 0755)
 	assertSetFileTimes(t, fsys, "tmp", time.Time{}, now)
 }
 
@@ -226,6 +226,6 @@ func testReadWriteFSSetFileTimes(t *testing.T, newFS MakeReadWriteFS) {
 	defer assertCloseFS(t, closeFS)
 
 	now := time.Now().Add(time.Hour)
-	assertCreateDir(t, fsys, "tmp", 0755)
+	assertMakeDir(t, fsys, "tmp", 0755)
 	assertSetFileTimes(t, fsys, "tmp", now, now)
 }

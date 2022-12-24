@@ -81,9 +81,9 @@ func assertPathData(t *testing.T, fsys wasi.FS, path, data string) {
 	}
 }
 
-func assertCreateDir(t *testing.T, fsys wasi.FS, path string, perm fs.FileMode) {
+func assertMakeDir(t *testing.T, fsys wasi.FS, path string, perm fs.FileMode) {
 	t.Helper()
-	assertErrorIs(t, fsys.CreateDir(path, perm), nil)
+	assertErrorIs(t, fsys.MakeDir(path, perm), nil)
 	s, err := fsys.Stat(path)
 	if err != nil {
 		t.Error(err)
