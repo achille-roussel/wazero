@@ -249,12 +249,61 @@ func (ctx *Context) FdReaddir(fd Fd, buf []byte, dircookie Dircookie) (Size, Err
 	return size, ESUCCESS
 }
 
+// FdWrite is the implementation of the "fd_write"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_write
+func (ctx *Context) FdWrite(fd Fd, iovs [][]byte) (Size, Errno) {
+	f := ctx.files.lookup(fd)
+	if f == nil {
+		return 0, EBADF
+	}
+	if !f.fsRightsBase.Has(FD_WRITE) {
+		return 0, EPERM
+	}
+	size := Size(0)
+	for _, buf := range iovs {
+		n, err := f.base.Write(buf)
+		size += Size(n)
+		if err != nil {
+			return size, makeErrno(err)
+		}
+	}
+	return size, ESUCCESS
+}
+
+// FdPwrite is the implementation of the "fd_pwrite"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_pwrite
+func (ctx *Context) FdPwrite(fd Fd, iovs [][]byte, offset Filesize) (Size, Errno) {
+	f := ctx.files.lookup(fd)
+	if f == nil {
+		return 0, EBADF
+	}
+	if !f.fsRightsBase.Has(FD_WRITE | FD_SEEK) {
+		return 0, EPERM
+	}
+	size := Size(0)
+	for _, buf := range iovs {
+		n, err := f.base.WriteAt(buf, int64(offset))
+		offset += Filesize(n)
+		size += Size(n)
+		if err != nil {
+			return size, makeErrno(err)
+		}
+	}
+	return size, ESUCCESS
+}
+
 // PathOpen is the implementation of the "path_open"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#path_open
 func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Oflags, fsRightsBase, fsRightsInheriting Rights, fdflags Fdflags) (Fd, Errno) {
 	var base wasi.File
 	var err error
+
+	if truncate := (oflags & O_TRUNC) != 0; truncate && !fsRightsBase.Has(PATH_FILESTAT_SET_SIZE) {
+		return None, EPERM
+	}
 
 	flags, perm := makeOpenFileFlags(dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	perm &= ^ctx.umask()
@@ -529,11 +578,13 @@ func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
 }
 
 func (f *contextFile) Write(b []byte) (int, error) {
-	return 0, wasi.ErrNotImplemented
+	size, errno := f.ctx.FdWrite(f.fd, [][]byte{b})
+	return int(size), makeError(errno)
 }
 
 func (f *contextFile) WriteAt(b []byte, off int64) (int, error) {
-	return 0, wasi.ErrNotImplemented
+	size, errno := f.ctx.FdPwrite(f.fd, [][]byte{b}, Filesize(off))
+	return int(size), makeError(errno)
 }
 
 func (f *contextFile) Seek(offset int64, whence int) (int64, error) {

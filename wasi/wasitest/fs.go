@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"sort"
+	"strings"
 	"syscall"
 	"testing"
 	"testing/fstest"
@@ -215,6 +216,21 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 		},
 
 		{
+			scenario: "files are created when opened with wasi.O_CREATE",
+			function: testReadWriteFSCreateFileWithOpen,
+		},
+
+		{
+			scenario: "files cannot be recreated when opened with wasi.O_EXCL",
+			function: testReadWriteFSCannotCreateExistingFile,
+		},
+
+		{
+			scenario: "files can be truncated when opened with wasi.O_TRUNC",
+			function: testReadWriteFSTruncateFileWithOpen,
+		},
+
+		{
 			scenario: "set access time on file",
 			function: testReadWriteFSSetFileAccessTime,
 		},
@@ -274,6 +290,53 @@ func testReadWriteFSCreateExistingDirectory(t *testing.T, newFS MakeReadWriteFS)
 
 	assertCreateDir(t, fsys, "tmp")
 	assertErrorIs(t, fsys.CreateDir("tmp", 0755), fs.ErrExist)
+}
+
+func testReadWriteFSCreateFileWithOpen(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f0 := assertOpenFile(t, fsys, "foo", wasi.O_CREATE, 0644)
+	defer assertClose(t, f0)
+
+	// OK because O_EXCL is not set
+	f1 := assertOpenFile(t, fsys, "foo", wasi.O_CREATE, 0644)
+	defer assertClose(t, f1)
+}
+
+func testReadWriteFSCannotCreateExistingFile(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f0 := assertOpenFile(t, fsys, "foo", wasi.O_CREATE, 0644)
+	assertClose(t, f0)
+
+	_, err := fsys.OpenFile("foo", wasi.O_CREATE|wasi.O_EXCL, 0644)
+	assertErrorIs(t, err, fs.ErrExist)
+}
+
+func testReadWriteFSTruncateFileWithOpen(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f0 := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_CREATE, 0644)
+	defer assertClose(t, f0)
+
+	assertWrite(t, f0, "Hello World!")
+
+	f1 := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_TRUNC, 0)
+	defer assertClose(t, f1)
+
+	assertSeek(t, f0, 0, io.SeekStart)
+	b0 := assertRead(t, f0)
+	if len(b0) != 0 {
+		t.Errorf("original file still has access to content after truncation: %q", b0)
+	}
+
+	b1 := assertRead(t, f1)
+	if len(b1) != 0 {
+		t.Errorf("second file still has access to content after truncation: %q", b1)
+	}
 }
 
 func testReadWriteFSSetFileAccessTime(t *testing.T, newFS MakeReadWriteFS) {
@@ -353,6 +416,16 @@ func assertOpenFile(t *testing.T, fsys wasi.FS, path string, oflags int, perm fs
 	t.Helper()
 	f, err := fsys.OpenFile(path, oflags, perm)
 	assertErrorIs(t, err, nil)
+	if (oflags & wasi.O_CREATE) != 0 {
+		s, err := f.Stat()
+		if err != nil {
+			t.Error(err)
+		} else {
+			if mode := s.Mode() & fs.ModePerm; mode != perm {
+				t.Errorf("file permissions mismatch: want=%s got=%s", perm, mode)
+			}
+		}
+	}
 	return f
 }
 
@@ -432,5 +505,33 @@ func assertErrorIs(t *testing.T, got, want error) {
 	t.Helper()
 	if !errors.Is(got, want) {
 		t.Errorf("error mismatch\nwant: %v\ngot:  %v", want, got)
+	}
+}
+
+func assertSeek(t *testing.T, s io.Seeker, offset int64, whence int) {
+	t.Helper()
+	if _, err := s.Seek(offset, whence); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertRead(t *testing.T, r io.Reader) string {
+	t.Helper()
+	s := new(strings.Builder)
+	_, err := io.Copy(s, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.String()
+}
+
+func assertWrite(t *testing.T, w io.Writer, data string) {
+	t.Helper()
+	n, err := io.WriteString(w, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < len(data) {
+		t.Fatal(io.ErrShortWrite)
 	}
 }
