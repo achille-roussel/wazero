@@ -28,6 +28,34 @@ type MakeReadWriteFS func() (wasi.FS, CloseFS, error)
 // TestReadOnlyFS implements a test suite which validate that read-only
 // implementations of the wasi.FS interface behave according to the spec.
 func TestReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
+	t.Run("root", func(t *testing.T) {
+		testReadOnlyFS(t, newFS)
+	})
+	t.Run("sub", func(t *testing.T) {
+		testReadOnlyFS(t, func(files fs.FS) (wasi.FS, CloseFS, error) {
+			mapFiles := files.(fstest.MapFS)
+			subFiles := make(fstest.MapFS, len(mapFiles))
+			for name, file := range mapFiles {
+				subFiles["mnt/subfs/"+name] = file
+			}
+			baseFS, closeFS, err := newFS(subFiles)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(subFiles) == 0 {
+				return baseFS, closeFS, nil
+			}
+			subFS, err := wasi.Sub(baseFS, "mnt/subfs")
+			if err != nil {
+				closeFS()
+				return nil, nil, err
+			}
+			return subFS, closeFS, nil
+		})
+	})
+}
+
+func testReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 	tests := []struct {
 		scenario string
 		function func(*testing.T, MakeReadOnlyFS)
@@ -113,6 +141,30 @@ func readOnlyFile(modTime time.Time, data string) *fstest.MapFile {
 // TestReadOnlyFS implements a test suite which validate that read-write
 // implementations of the wasi.FS interface behave according to the spec.
 func TestReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
+	t.Run("root", func(t *testing.T) {
+		testReadWriteFS(t, newFS)
+	})
+	t.Run("sub", func(t *testing.T) {
+		testReadWriteFS(t, func() (wasi.FS, CloseFS, error) {
+			baseFS, closeFS, err := newFS()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := baseFS.CreateDir("mnt", 0755); err != nil {
+				closeFS()
+				return nil, nil, err
+			}
+			subFS, err := wasi.Sub(baseFS, "mnt")
+			if err != nil {
+				closeFS()
+				return nil, nil, err
+			}
+			return subFS, closeFS, nil
+		})
+	})
+}
+
+func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 	tests := []struct {
 		scenario string
 		function func(*testing.T, MakeReadWriteFS)

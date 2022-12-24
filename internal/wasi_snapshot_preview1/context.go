@@ -213,7 +213,7 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 	}
 
 	flags, perm := makeOpenFileFlags(dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags)
-	perm &= ^ctx.Umask
+	perm &= ^ctx.umask()
 
 	if fd == None || strings.HasPrefix(path, "/") {
 		base, err = ctx.FileSystem.OpenFile(path, flags, perm)
@@ -222,8 +222,8 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 		if f == nil {
 			return None, EBADF
 		}
-		fsRightsBase &= ^f.fsRightsInheriting
-		fsRightsInheriting &= ^f.fsRightsInheriting
+		fsRightsBase &= f.fsRightsInheriting
+		fsRightsInheriting &= f.fsRightsInheriting
 		base, err = f.OpenFile(path, flags, perm)
 	}
 	if err != nil {
@@ -245,7 +245,7 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 		return ENOENT
 	}
 
-	perm := 0777 & ^ctx.Umask
+	perm := 0777 & ^ctx.umask()
 
 	if fd == None || strings.HasPrefix(path, "/") {
 		err = ctx.FileSystem.CreateDir(path, perm)
@@ -288,6 +288,8 @@ func (ctx *Context) PathFilestatGet(fd Fd, flags Lookupflags, path string) (File
 
 // FS returns a file system backed by the context that it is called on.
 func (ctx *Context) FS() wasi.FS { return contextFS{ctx} }
+
+func (ctx *Context) umask() fs.FileMode { return ctx.Umask & 0777 }
 
 type contextFS struct{ ctx *Context }
 

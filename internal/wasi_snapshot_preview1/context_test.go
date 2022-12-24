@@ -10,9 +10,7 @@ import (
 
 func TestContextReadOnlyFS(t *testing.T) {
 	wasitest.TestReadOnlyFS(t, func(baseFS fs.FS) (wasi.FS, wasitest.CloseFS, error) {
-		ctx := &Context{
-			FileSystem: wasi.NewFS(baseFS),
-		}
+		ctx := &Context{FileSystem: wasi.NewFS(baseFS)}
 		return ctx.FS(), ctx.Close, nil
 	})
 }

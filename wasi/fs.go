@@ -118,6 +118,9 @@ func (f *fsFile) Name() string { return fspath.Base(f.path) }
 func (f *fsFile) Close() error { return f.base.Close() }
 
 func (f *fsFile) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+	if !fs.ValidPath(path) {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrInvalid}
+	}
 	return f.fsys.OpenFile(f.pathTo(path), flags, perm)
 }
 
@@ -140,6 +143,9 @@ func (f *fsFile) ReadDir(n int) ([]fs.DirEntry, error) {
 func (f *fsFile) Stat() (fs.FileInfo, error) { return f.base.Stat() }
 
 func (f *fsFile) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if !fs.ValidPath(path) {
+		return nil, &fs.PathError{Op: "stat", Path: path, Err: fs.ErrInvalid}
+	}
 	return f.fsys.StatFile(f.pathTo(path), flags)
 }
 
@@ -178,21 +184,21 @@ func (fsys *dirFS) Stat(path string) (fs.FileInfo, error) {
 
 func (fsys *dirFS) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
 	if !fs.ValidPath(path) {
-		return nil, fs.ErrInvalid
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrInvalid}
 	}
 	return fsys.openFile(fsys.pathTo(path), flags, perm)
 }
 
 func (fsys *dirFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	if !fs.ValidPath(path) {
-		return nil, fs.ErrInvalid
+		return nil, &fs.PathError{Op: "stat", Path: path, Err: fs.ErrInvalid}
 	}
 	return fsys.statFile(fsys.pathTo(path), flags)
 }
 
 func (fsys *dirFS) CreateDir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
-		return fs.ErrInvalid
+		return &fs.PathError{Op: "createdir", Path: path, Err: fs.ErrInvalid}
 	}
 	return fsys.createDir(fsys.pathTo(path), perm)
 }
@@ -232,21 +238,21 @@ func (f *dirFile) Name() string {
 
 func (f *dirFile) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
 	if !fs.ValidPath(path) {
-		return nil, fs.ErrInvalid
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrInvalid}
 	}
 	return f.fsys.openFile(f.pathTo(path), flags, perm)
 }
 
 func (f *dirFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	if !fs.ValidPath(path) {
-		return nil, fs.ErrInvalid
+		return nil, &fs.PathError{Op: "stat", Path: path, Err: fs.ErrInvalid}
 	}
 	return f.fsys.statFile(f.pathTo(path), flags)
 }
 
 func (f *dirFile) CreateDir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
-		return fs.ErrInvalid
+		return &fs.PathError{Op: "createdir", Path: path, Err: fs.ErrInvalid}
 	}
 	return f.fsys.createDir(f.pathTo(path), perm)
 }
@@ -254,3 +260,16 @@ func (f *dirFile) CreateDir(path string, perm fs.FileMode) error {
 func (f *dirFile) pathTo(path string) string {
 	return filepath.Join(f.File.Name(), filepath.FromSlash(path))
 }
+
+func Sub(fsys FS, dir string) (FS, error) {
+	f, err := fsys.OpenFile(dir, 0, 0755)
+	if err != nil {
+		return nil, err
+	}
+	return &subFS{File: f}, nil
+}
+
+type subFS struct{ File }
+
+func (fsys *subFS) Open(path string) (fs.File, error)     { return fsys.OpenFile(path, 0, 0) }
+func (fsys *subFS) Stat(path string) (fs.FileInfo, error) { return fsys.StatFile(path, 0) }
