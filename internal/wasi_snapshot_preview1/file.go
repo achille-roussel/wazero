@@ -82,6 +82,13 @@ func (f *file) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return f.base.StatFile(path, flags)
 }
 
+func (f *file) CreateDir(path string, perm fs.FileMode) error {
+	if !f.fsRightsBase.Has(PATH_CREATE_DIRECTORY) {
+		return fs.ErrPermission
+	}
+	return f.base.CreateDir(path, perm)
+}
+
 func (f *file) ReadDir(n int) ([]fs.DirEntry, error) {
 	if !f.fsRightsBase.Has(FD_READDIR) {
 		return nil, fs.ErrPermission

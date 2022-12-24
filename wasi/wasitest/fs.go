@@ -15,7 +15,7 @@ import (
 // CloseFS is a function returned by MakeReadOnlyFS and MakeReadWriteFS which is
 // used to tear down resources associated with a file system instance created
 // during a test.
-type CloseFS func()
+type CloseFS func() error
 
 // MakeReadOnlyFS is a function type used to instentiate read-only file systems
 // during tests.
@@ -38,13 +38,18 @@ func TestReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 		},
 
 		{
-			scenario: "opening a file which does not exist gives ErrNotExist",
+			scenario: "opening a file which does not exist gives fs.ErrNotExist",
 			function: testReadOnlyFSOpenNotExist,
 		},
 
 		{
 			scenario: "existing files can be open and read",
 			function: testReadOnlyFSOpenAndRead,
+		},
+
+		{
+			scenario: "creating a directory errors with fs.ErrPermission",
+			function: testReadOnlyFSCreateDirectory,
 		},
 	}
 
@@ -54,18 +59,14 @@ func TestReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 }
 
 func testReadOnlyFSCreateEmpty(t *testing.T, newFS MakeReadOnlyFS) {
-	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) {
-		return newFS(fstest.MapFS{})
-	})
-	defer closeFS()
+	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
+	defer assertCloseFS(t, closeFS)
 	testFS(t, fsys, nil)
 }
 
 func testReadOnlyFSOpenNotExist(t *testing.T, newFS MakeReadOnlyFS) {
-	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) {
-		return newFS(fstest.MapFS{})
-	})
-	defer closeFS()
+	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
+	defer assertCloseFS(t, closeFS)
 
 	_, err := fsys.OpenFile("/test", 0, 0)
 	assertErrorIs(t, err, fs.ErrNotExist)
@@ -80,14 +81,25 @@ func testReadOnlyFSOpenAndRead(t *testing.T, newFS MakeReadOnlyFS) {
 		"file-2": readOnlyFile(now, ``),
 	}
 
-	fsys, closeFS := assertNewFS(t, func() (wasi.FS, CloseFS, error) { return newFS(files) })
-	defer closeFS()
+	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, files))
+	defer assertCloseFS(t, closeFS)
 
 	assertPathData(t, fsys, "file-0", `Hello World!`)
 	assertPathData(t, fsys, "file-1", `42`)
 	assertPathData(t, fsys, "file-2", ``)
 
 	testFS(t, fsys, files)
+}
+
+func testReadOnlyFSCreateDirectory(t *testing.T, newFS MakeReadOnlyFS) {
+	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
+	defer assertCloseFS(t, closeFS)
+
+	assertErrorIs(t, fsys.CreateDir("tmp", 0755), fs.ErrPermission)
+}
+
+func readOnlyFS(newFS MakeReadOnlyFS, files fstest.MapFS) func() (wasi.FS, CloseFS, error) {
+	return func() (wasi.FS, CloseFS, error) { return newFS(files) }
 }
 
 func readOnlyFile(modTime time.Time, data string) *fstest.MapFile {
@@ -109,6 +121,26 @@ func TestReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 			scenario: "create a file system with an empty state",
 			function: testReadWriteFSCreateEmpty,
 		},
+
+		{
+			scenario: "the file system can create directories",
+			function: testReadWriteFSCreateDirectory,
+		},
+
+		{
+			scenario: "the file system can create sub-directories",
+			function: testReadWriteFSCreateSubDirectory,
+		},
+
+		{
+			scenario: "creating an existing directory errors with fs.ErrExist",
+			function: testReadWriteFSCreateExistingDirectory,
+		},
+
+		{
+			scenario: "permissions are set on directories",
+			function: testReadWriteFSCreateDirectoryHasPermissions,
+		},
 	}
 
 	for _, test := range tests {
@@ -118,7 +150,43 @@ func TestReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 
 func testReadWriteFSCreateEmpty(t *testing.T, newFS MakeReadWriteFS) {
 	_, closeFS := assertNewFS(t, newFS)
-	closeFS()
+	assertCloseFS(t, closeFS)
+}
+
+func testReadWriteFSCreateDirectory(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	assertCreateDir(t, fsys, "etc")
+	assertCreateDir(t, fsys, "var")
+	assertCreateDir(t, fsys, "tmp")
+
+	testFS(t, fsys, fstest.MapFS{
+		"etc": nil,
+		"var": nil,
+		"tmp": nil,
+	})
+}
+
+func testReadWriteFSCreateSubDirectory(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	assertCreateDir(t, fsys, "1")
+	assertCreateDir(t, fsys, "1/2")
+	assertCreateDir(t, fsys, "1/2/3")
+
+	testFS(t, fsys, fstest.MapFS{
+		"1/2/3": nil,
+	})
+}
+
+func testReadWriteFSCreateExistingDirectory(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	assertCreateDir(t, fsys, "tmp")
+	assertErrorIs(t, fsys.CreateDir("tmp", 0755), fs.ErrExist)
 }
 
 func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
@@ -135,6 +203,19 @@ func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
 	})
 }
 
+func testReadWriteFSCreateDirectoryHasPermissions(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	assertErrorIs(t, fsys.CreateDir("A", 0755), nil)
+	assertErrorIs(t, fsys.CreateDir("B", 0700), nil)
+	assertErrorIs(t, fsys.CreateDir("C", 0500), nil)
+
+	assertPermission(t, fsys, "A", 0755)
+	assertPermission(t, fsys, "B", 0700)
+	assertPermission(t, fsys, "C", 0500)
+}
+
 func assertNewFS(t *testing.T, newFS func() (wasi.FS, CloseFS, error)) (wasi.FS, CloseFS) {
 	t.Helper()
 	fsys, closeFS, err := newFS()
@@ -147,6 +228,11 @@ func assertNewFS(t *testing.T, newFS func() (wasi.FS, CloseFS, error)) (wasi.FS,
 func assertClose(t *testing.T, c io.Closer) {
 	t.Helper()
 	assertErrorIs(t, c.Close(), nil)
+}
+
+func assertCloseFS(t *testing.T, closeFS CloseFS) {
+	t.Helper()
+	assertErrorIs(t, closeFS(), nil)
 }
 
 func assertOpenFile(t *testing.T, fsys wasi.FS, path string, oflags int, perm fs.FileMode) wasi.File {
@@ -164,6 +250,32 @@ func assertPathData(t *testing.T, fsys wasi.FS, path, data string) {
 	assertErrorIs(t, err, nil)
 	if string(b) != data {
 		t.Errorf("%s: content mismatch\nwant: %q\ngot:  %q", path, data, b)
+	}
+}
+
+func assertCreateDir(t *testing.T, fsys wasi.FS, path string) {
+	t.Helper()
+	assertErrorIs(t, fsys.CreateDir(path, 0755), nil)
+	s, err := fsys.Stat(path)
+	if err != nil {
+		t.Error(err)
+	} else if !s.IsDir() {
+		t.Errorf("%s: not a directory", path)
+	} else if perm := s.Mode() & 0777; perm != 0755 {
+		t.Errorf("%s: permissions mismatch: want=%03o got=%03o", path, 0755, perm)
+	}
+}
+
+func assertPermission(t *testing.T, fsys wasi.FS, path string, want fs.FileMode) {
+	t.Helper()
+	s, err := fsys.StatFile(path, 0)
+	if err != nil {
+		t.Error(err)
+	} else {
+		perm := s.Mode() & 0777
+		if perm != want {
+			t.Errorf("%s: permissions mismatch: want=%03o got=%03o", path, want, perm)
+		}
 	}
 }
 

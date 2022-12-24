@@ -16,6 +16,8 @@ import (
 type Context struct {
 	FileSystem wasi.FS
 
+	Umask fs.FileMode
+
 	files fileTable
 }
 
@@ -211,6 +213,8 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 	}
 
 	flags, perm := makeOpenFileFlags(dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags)
+	perm &= ^ctx.Umask
+
 	if fd == None || strings.HasPrefix(path, "/") {
 		base, err = ctx.FileSystem.OpenFile(path, flags, perm)
 	} else {
@@ -232,6 +236,27 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 		fsRightsInheriting: fsRightsInheriting,
 	})
 	return newFd, ESUCCESS
+}
+
+func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
+	var err error
+
+	if ctx.FileSystem == nil {
+		return ENOENT
+	}
+
+	perm := 0777 & ^ctx.Umask
+
+	if fd == None || strings.HasPrefix(path, "/") {
+		err = ctx.FileSystem.CreateDir(path, perm)
+	} else {
+		f := ctx.files.lookup(fd)
+		if f == nil {
+			return EBADF
+		}
+		err = f.CreateDir(path, perm)
+	}
+	return makeErrno(err)
 }
 
 // PathFilestatGet is the implementation of the "path_filestat_get"
@@ -291,6 +316,12 @@ func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return &contextFileInfo{name: fspath.Base(path), stat: stat}, nil
 }
 
+func (fsys contextFS) CreateDir(path string, perm fs.FileMode) error {
+	subctx := *fsys.ctx
+	subctx.Umask |= ^perm
+	return makeError(subctx.PathCreateDirectory(None, path))
+}
+
 type contextFile struct {
 	ctx  *Context
 	fd   Fd
@@ -333,6 +364,10 @@ func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
 		return int(size), io.EOF
 	}
 	return int(size), makeError(errno)
+}
+
+func (f *contextFile) CreateDir(path string, _ fs.FileMode) error {
+	return makeError(f.ctx.PathCreateDirectory(f.fd, path))
 }
 
 func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {

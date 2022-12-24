@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	fspath "path"
+	"path/filepath"
 )
 
 var (
@@ -28,6 +29,8 @@ type File interface {
 	OpenFile(path string, flags int, perm fs.FileMode) (File, error)
 
 	StatFile(path string, flags int) (fs.FileInfo, error)
+
+	CreateDir(path string, perm fs.FileMode) error
 }
 
 // FS is an interface satisfied by types that implement file systems compatible
@@ -53,14 +56,12 @@ type FS interface {
 	fs.StatFS
 	// OpenFile is a method similar to Open but it returns a wasi.File which may
 	// allow write operations (depending on flags).
-	//
-	// This method backs the implementation of the "path_open" syscall.
 	OpenFile(path string, flags int, perm fs.FileMode) (File, error)
 	// StatFile is a method similar to Stat but it allows passing flags to
 	// configure the behavior of the path lookup.
-	//
-	// This method backs the implementation of the "path_filestat_get" syscall.
 	StatFile(path string, flags int) (fs.FileInfo, error)
+	// CreateDir creates a directory at the given path.
+	CreateDir(path string, perm fs.FileMode) error
 }
 
 // NewFS constructs a FS from a standard fs.FS which only permits read
@@ -68,15 +69,15 @@ type FS interface {
 //
 // If base is nil, the returned file system contains nothing and returns
 // fs.ErrNotExist on all attempts to open files.
-func NewFS(base fs.FS) FS { return &fsFileSystem{base: base} }
+func NewFS(base fs.FS) FS { return &fsFS{base: base} }
 
-type fsFileSystem struct{ base fs.FS }
+type fsFS struct{ base fs.FS }
 
-func (fsys *fsFileSystem) Open(path string) (fs.File, error) {
+func (fsys *fsFS) Open(path string) (fs.File, error) {
 	return fsys.OpenFile(path, 0, 0)
 }
 
-func (fsys *fsFileSystem) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+func (fsys *fsFS) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
 	if flags != os.O_RDONLY {
 		return nil, fs.ErrInvalid
 	}
@@ -90,11 +91,11 @@ func (fsys *fsFileSystem) OpenFile(path string, flags int, perm fs.FileMode) (Fi
 	return &fsFile{fsys: fsys, base: f, path: path}, nil
 }
 
-func (fsys *fsFileSystem) Stat(path string) (fs.FileInfo, error) {
+func (fsys *fsFS) Stat(path string) (fs.FileInfo, error) {
 	return fsys.StatFile(path, 0)
 }
 
-func (fsys *fsFileSystem) StatFile(path string, flags int) (fs.FileInfo, error) {
+func (fsys *fsFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	if flags != 0 {
 		return nil, fs.ErrInvalid
 	}
@@ -103,6 +104,8 @@ func (fsys *fsFileSystem) StatFile(path string, flags int) (fs.FileInfo, error) 
 	}
 	return fs.Stat(fsys.base, path)
 }
+
+func (fsys *fsFS) CreateDir(path string, perm fs.FileMode) error { return fs.ErrPermission }
 
 type fsFile struct {
 	fsys FS
@@ -151,4 +154,103 @@ func (f *fsFile) Write([]byte) (int, error) { return 0, fs.ErrPermission }
 
 func (f *fsFile) WriteAt([]byte, int64) (int, error) { return 0, fs.ErrPermission }
 
+func (f *fsFile) CreateDir(path string, perm fs.FileMode) error { return fs.ErrPermission }
+
 func (f *fsFile) pathTo(path string) string { return fspath.Join(f.path, path) }
+
+func DirFS(root string) (FS, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	return &dirFS{root: root}, nil
+}
+
+type dirFS struct{ root string }
+
+func (fsys *dirFS) Open(path string) (fs.File, error) {
+	return fsys.OpenFile(path, 0, 0)
+}
+
+func (fsys *dirFS) Stat(path string) (fs.FileInfo, error) {
+	return fsys.StatFile(path, 0)
+}
+
+func (fsys *dirFS) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+	if !fs.ValidPath(path) {
+		return nil, fs.ErrInvalid
+	}
+	return fsys.openFile(fsys.pathTo(path), flags, perm)
+}
+
+func (fsys *dirFS) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if !fs.ValidPath(path) {
+		return nil, fs.ErrInvalid
+	}
+	return fsys.statFile(fsys.pathTo(path), flags)
+}
+
+func (fsys *dirFS) CreateDir(path string, perm fs.FileMode) error {
+	if !fs.ValidPath(path) {
+		return fs.ErrInvalid
+	}
+	return fsys.createDir(fsys.pathTo(path), perm)
+}
+
+func (fsys *dirFS) pathTo(path string) string {
+	return filepath.Join(fsys.root, filepath.FromSlash(path))
+}
+
+func (fsys *dirFS) openFile(path string, flags int, perm fs.FileMode) (File, error) {
+	f, err := os.OpenFile(path, flags, perm)
+	if err != nil {
+		return nil, err
+	}
+	return &dirFile{fsys: fsys, File: f}, nil
+}
+
+func (fsys *dirFS) statFile(path string, flags int) (fs.FileInfo, error) {
+	if (flags & O_NOFOLLOW) != 0 {
+		return os.Lstat(path)
+	} else {
+		return os.Stat(path)
+	}
+}
+
+func (fsys *dirFS) createDir(path string, perm fs.FileMode) error {
+	return os.Mkdir(path, perm)
+}
+
+type dirFile struct {
+	fsys *dirFS
+	*os.File
+}
+
+func (f *dirFile) Name() string {
+	return filepath.Base(f.File.Name())
+}
+
+func (f *dirFile) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+	if !fs.ValidPath(path) {
+		return nil, fs.ErrInvalid
+	}
+	return f.fsys.openFile(f.pathTo(path), flags, perm)
+}
+
+func (f *dirFile) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if !fs.ValidPath(path) {
+		return nil, fs.ErrInvalid
+	}
+	return f.fsys.statFile(f.pathTo(path), flags)
+}
+
+func (f *dirFile) CreateDir(path string, perm fs.FileMode) error {
+	if !fs.ValidPath(path) {
+		return fs.ErrInvalid
+	}
+	return f.fsys.createDir(f.pathTo(path), perm)
+}
+
+func (f *dirFile) pathTo(path string) string {
+	return filepath.Join(f.File.Name(), filepath.FromSlash(path))
+}
