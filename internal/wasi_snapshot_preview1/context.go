@@ -14,17 +14,22 @@ import (
 
 // Context represents the execution context of a WASI program.
 type Context struct {
+	// The file system mounted in this context. If nil, the context acts
+	// as if it had an empty file system.
 	FileSystem wasi.FS
-
+	// The value of umask in this context.
 	Umask fs.FileMode
-
+	// ---
 	files fileTable
 }
 
 // Close closes the context, releasing all resources that were held.
+//
+// Calling this method is useful to close all open files tracked by the context
+// that the application may have have left open.
 func (ctx *Context) Close() error {
 	ctx.files.scan(func(fd Fd, f *file) bool {
-		f.Close()
+		f.base.Close()
 		return true
 	})
 	ctx.files.reset()
@@ -39,7 +44,7 @@ func (ctx *Context) FdClose(fd Fd) Errno {
 	if f == nil {
 		return EBADF
 	}
-	if err := f.Close(); err != nil {
+	if err := f.base.Close(); err != nil {
 		return makeErrno(err)
 	}
 	ctx.files.delete(fd)
@@ -54,6 +59,17 @@ func (ctx *Context) FdSeek(fd Fd, offset Filedelta, whence Whence) (Filesize, Er
 	if f == nil {
 		return 0, EBADF
 	}
+
+	var rights Rights
+	if offset == 0 && whence == Cur {
+		rights = FD_TELL
+	} else {
+		rights = FD_SEEK
+	}
+	if !f.fsRightsBase.Has(rights) {
+		return 0, EPERM
+	}
+
 	i := int64(offset)
 	w := int(0)
 	switch whence {
@@ -66,7 +82,7 @@ func (ctx *Context) FdSeek(fd Fd, offset Filedelta, whence Whence) (Filesize, Er
 	default:
 		return 0, EINVAL
 	}
-	seek, err := f.Seek(i, w)
+	seek, err := f.base.Seek(i, w)
 	return Filesize(seek), makeErrno(err)
 }
 
@@ -78,7 +94,10 @@ func (ctx *Context) FdTell(fd Fd) (Filesize, Errno) {
 	if f == nil {
 		return 0, EBADF
 	}
-	tell, err := f.Seek(0, io.SeekCurrent)
+	if !f.fsRightsBase.Has(FD_TELL) {
+		return 0, EPERM
+	}
+	tell, err := f.base.Seek(0, io.SeekCurrent)
 	return Filesize(tell), makeErrno(err)
 }
 
@@ -90,11 +109,31 @@ func (ctx *Context) FdFilestatGet(fd Fd) (Filestat, Errno) {
 	if f == nil {
 		return Filestat{}, EBADF
 	}
-	s, err := f.Stat()
+	if !f.fsRightsBase.Has(FD_FILESTAT_GET) {
+		return Filestat{}, EPERM
+	}
+	s, err := f.base.Stat()
 	if err != nil {
 		return Filestat{}, makeErrno(err)
 	}
 	return makeFilestat(s), ESUCCESS
+}
+
+// FdFilestatSetTimes is the implementation of the "fd_filestat_set_times"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_filestat_set_times
+func (ctx *Context) FdFilestatSetTimes(fd Fd, atim, mtim Timestamp, flags Fstflags) Errno {
+	f := ctx.files.lookup(fd)
+	if f == nil {
+		return EBADF
+	}
+	if !f.fsRightsBase.Has(FD_FILESTAT_SET_TIMES) {
+		return EPERM
+	}
+	if err := f.base.SetTimes(makeFileTimes(atim, mtim, flags)); err != nil {
+		return makeErrno(err)
+	}
+	return ESUCCESS
 }
 
 // FdPread is the implementation of the "fd_pread"
@@ -105,9 +144,12 @@ func (ctx *Context) FdPread(fd Fd, iovs [][]byte, offset Filesize) (Size, Errno)
 	if f == nil {
 		return 0, EBADF
 	}
+	if !f.fsRightsBase.Has(FD_READ | FD_SEEK) {
+		return 0, EPERM
+	}
 	size := Size(0)
 	for _, buf := range iovs {
-		n, err := f.ReadAt(buf, int64(offset))
+		n, err := f.base.ReadAt(buf, int64(offset))
 		offset += Filesize(n)
 		size += Size(n)
 		if err != nil {
@@ -125,9 +167,12 @@ func (ctx *Context) FdRead(fd Fd, iovs [][]byte) (Size, Errno) {
 	if f == nil {
 		return 0, EBADF
 	}
+	if !f.fsRightsBase.Has(FD_READ) {
+		return 0, EPERM
+	}
 	size := Size(0)
 	for _, buf := range iovs {
-		n, err := f.Read(buf)
+		n, err := f.base.Read(buf)
 		size += Size(n)
 		if err != nil {
 			return size, makeErrno(err)
@@ -143,6 +188,9 @@ func (ctx *Context) FdReaddir(fd Fd, buf []byte, dircookie Dircookie) (Size, Err
 	f := ctx.files.lookup(fd)
 	if f == nil {
 		return 0, EBADF
+	}
+	if !f.fsRightsBase.Has(FD_READDIR) {
+		return 0, EPERM
 	}
 	if dircookie < f.dircookie {
 		return 0, EINVAL
@@ -208,23 +256,25 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 	var base wasi.File
 	var err error
 
-	if ctx.FileSystem == nil {
-		return None, ENOENT
-	}
-
 	flags, perm := makeOpenFileFlags(dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	perm &= ^ctx.umask()
 
-	if fd == None || strings.HasPrefix(path, "/") {
+	if fd == None || isAbs(path) {
+		if ctx.FileSystem == nil {
+			return None, ENOENT
+		}
 		base, err = ctx.FileSystem.OpenFile(path, flags, perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
 			return None, EBADF
 		}
+		if !f.fsRightsBase.Has(PATH_OPEN) {
+			return None, EPERM
+		}
 		fsRightsBase &= f.fsRightsInheriting
 		fsRightsInheriting &= f.fsRightsInheriting
-		base, err = f.OpenFile(path, flags, perm)
+		base, err = f.base.OpenFile(path, flags, perm)
 	}
 	if err != nil {
 		return None, makeErrno(err)
@@ -242,22 +292,23 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#path_create_directory
 func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
+	var perm = fs.ModePerm & ^ctx.umask()
 	var err error
 
-	if ctx.FileSystem == nil {
-		return ENOENT
-	}
-
-	perm := 0777 & ^ctx.umask()
-
-	if fd == None || strings.HasPrefix(path, "/") {
+	if fd == None || isAbs(path) {
+		if ctx.FileSystem == nil {
+			return ENOENT
+		}
 		err = ctx.FileSystem.CreateDir(path, perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
 			return EBADF
 		}
-		err = f.CreateDir(path, perm)
+		if !f.fsRightsBase.Has(PATH_CREATE_DIRECTORY) {
+			return EPERM
+		}
+		err = f.base.CreateDir(path, perm)
 	}
 	return makeErrno(err)
 }
@@ -269,18 +320,20 @@ func (ctx *Context) PathFilestatGet(fd Fd, flags Lookupflags, path string) (File
 	var info fs.FileInfo
 	var err error
 
-	if ctx.FileSystem == nil {
-		return Filestat{}, ENOENT
-	}
-
-	if fd == None || strings.HasPrefix(path, "/") {
+	if fd == None || isAbs(path) {
+		if ctx.FileSystem == nil {
+			return Filestat{}, ENOENT
+		}
 		info, err = ctx.FileSystem.StatFile(path, makeDefaultFlags(flags))
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
 			return Filestat{}, EBADF
 		}
-		info, err = f.StatFile(path, makeDefaultFlags(flags))
+		if !f.fsRightsBase.Has(PATH_FILESTAT_GET) {
+			return Filestat{}, EPERM
+		}
+		info, err = f.base.StatFile(path, makeDefaultFlags(flags))
 	}
 
 	if err != nil {
@@ -289,10 +342,38 @@ func (ctx *Context) PathFilestatGet(fd Fd, flags Lookupflags, path string) (File
 	return makeFilestat(info), ESUCCESS
 }
 
+// PathFilestatSetTimes is the implementation of the "path_filestat_set_times"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#path_filestat_set_times
+func (ctx *Context) PathFilestatSetTimes(fd Fd, flags Lookupflags, path string, atim, mtim Timestamp, fstflags Fstflags) Errno {
+	var a, m = makeFileTimes(atim, mtim, fstflags)
+	var err error
+
+	if fd == None || isAbs(path) {
+		if ctx.FileSystem == nil {
+			return ENOENT
+		}
+		err = ctx.FileSystem.SetFileTimes(path, makeDefaultFlags(flags), a, m)
+	} else {
+		f := ctx.files.lookup(fd)
+		if f == nil {
+			return EBADF
+		}
+		if !f.fsRightsBase.Has(PATH_FILESTAT_SET_TIMES) {
+			return EPERM
+		}
+		err = f.base.SetFileTimes(path, makeDefaultFlags(flags), a, m)
+	}
+
+	return makeErrno(err)
+}
+
 // FS returns a file system backed by the context that it is called on.
 func (ctx *Context) FS() wasi.FS { return contextFS{ctx} }
 
-func (ctx *Context) umask() fs.FileMode { return ctx.Umask & 0777 }
+func (ctx *Context) umask() fs.FileMode { return ctx.Umask & fs.ModePerm }
+
+func isAbs(path string) bool { return strings.HasPrefix(path, "/") }
 
 type contextFS struct{ ctx *Context }
 
@@ -325,6 +406,11 @@ func (fsys contextFS) CreateDir(path string, perm fs.FileMode) error {
 	subctx := *fsys.ctx
 	subctx.Umask |= ^perm
 	return makeError(subctx.PathCreateDirectory(None, path))
+}
+
+func (fsys contextFS) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+	a, m, f := makeTimestampsAndFstflags(atim, mtim)
+	return makeError(fsys.ctx.PathFilestatSetTimes(None, makeLookupflags(flags), path, a, m, f))
 }
 
 type contextFile struct {
@@ -371,8 +457,10 @@ func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
 	return int(size), makeError(errno)
 }
 
-func (f *contextFile) CreateDir(path string, _ fs.FileMode) error {
-	return makeError(f.ctx.PathCreateDirectory(f.fd, path))
+func (f *contextFile) CreateDir(path string, perm fs.FileMode) error {
+	subctx := *f.ctx
+	subctx.Umask |= ^perm
+	return makeError(subctx.PathCreateDirectory(f.fd, path))
 }
 
 func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
@@ -449,13 +537,7 @@ func (f *contextFile) WriteAt(b []byte, off int64) (int, error) {
 }
 
 func (f *contextFile) Seek(offset int64, whence int) (int64, error) {
-	var size Filesize
-	var errno Errno
-	if offset == 0 && whence == io.SeekCurrent {
-		size, errno = f.ctx.FdTell(f.fd)
-	} else {
-		size, errno = f.ctx.FdSeek(f.fd, Filedelta(offset), Whence(whence))
-	}
+	size, errno := f.ctx.FdSeek(f.fd, Filedelta(offset), Whence(whence))
 	return int64(size), makeError(errno)
 }
 
@@ -475,6 +557,16 @@ func (f *contextFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return &contextFileInfo{name: fspath.Base(path), stat: stat}, nil
 }
 
+func (f *contextFile) SetTimes(atim, mtim time.Time) error {
+	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
+	return makeError(f.ctx.FdFilestatSetTimes(f.fd, a, m, fst))
+}
+
+func (f *contextFile) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
+	return makeError(f.ctx.PathFilestatSetTimes(f.fd, makeLookupflags(flags), path, a, m, fst))
+}
+
 type contextFileInfo struct {
 	name string
 	stat Filestat
@@ -482,8 +574,8 @@ type contextFileInfo struct {
 
 func (f *contextFileInfo) Name() string       { return f.name }
 func (f *contextFileInfo) Size() int64        { return int64(f.stat.Size) }
-func (f *contextFileInfo) Mode() fs.FileMode  { return makeFileMode(f.stat.Filetype) }
-func (f *contextFileInfo) ModTime() time.Time { return time.Unix(0, int64(f.stat.Mtim)) }
+func (f *contextFileInfo) Mode() fs.FileMode  { return f.stat.FileMode() }
+func (f *contextFileInfo) ModTime() time.Time { return f.stat.Mtim.Time() }
 func (f *contextFileInfo) IsDir() bool        { return f.Mode().IsDir() }
 func (f *contextFileInfo) Sys() interface{}   { return &f.stat }
 func (f *contextFileInfo) String() string {

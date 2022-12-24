@@ -70,16 +70,14 @@ func TestFileTable(t *testing.T) {
 
 	for i, deletion := range []struct {
 		key Fd
-		val *file
 	}{
-		{key: k1, val: v1},
-		{key: k0, val: v0},
-		{key: k2, val: v2},
+		{key: k1},
+		{key: k0},
+		{key: k2},
 	} {
-		if v := table.delete(deletion.key); v == nil {
-			t.Errorf("no values were deleted for key '%v'", deletion.key)
-		} else if v != deletion.val {
-			t.Errorf("wrong value returned when deleting '%v': want=%q got=%q", deletion.key, deletion.val, v)
+		table.delete(deletion.key)
+		if table.lookup(deletion.key) != nil {
+			t.Errorf("item found after deletion of '%v'", deletion.key)
 		}
 		if n, want := table.len(), 3-(i+1); n != want {
 			t.Errorf("wrong table length after deletion: want=%d got=%d", want, n)

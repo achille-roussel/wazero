@@ -3,8 +3,11 @@ package wasi_snapshot_preview1
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"syscall"
+	"time"
 
 	"github.com/tetratelabs/wazero/wasi"
 )
@@ -26,20 +29,26 @@ type Filedelta int64
 type Filesize uint64
 
 type Filestat struct {
-	Dev      Device
-	Ino      Inode
-	Filetype Filetype
-	Nlink    Linkcount
-	Size     Filesize
-	Atim     Timestamp
-	Mtim     Timestamp
-	Ctim     Timestamp
+	Dev   Device
+	Ino   Inode
+	Type  Filetype
+	Mode  Filemode
+	Nlink Linkcount
+	Size  Filesize
+	Atim  Timestamp
+	Mtim  Timestamp
+	Ctim  Timestamp
+}
+
+func (s *Filestat) FileMode() fs.FileMode {
+	return makeFileMode(s.Type) | fs.FileMode(s.Mode)
 }
 
 func (s *Filestat) Marshal() (b [64]byte) {
 	binary.LittleEndian.PutUint64(b[0:], uint64(s.Dev))
 	binary.LittleEndian.PutUint64(b[8:], uint64(s.Ino))
-	binary.LittleEndian.PutUint64(b[16:], uint64(s.Filetype))
+	binary.LittleEndian.PutUint16(b[16:], uint16(s.Type))
+	binary.LittleEndian.PutUint16(b[18:], uint16(s.Mode))
 	binary.LittleEndian.PutUint64(b[24:], uint64(s.Nlink))
 	binary.LittleEndian.PutUint64(b[32:], uint64(s.Size))
 	binary.LittleEndian.PutUint64(b[40:], uint64(s.Atim))
@@ -50,13 +59,14 @@ func (s *Filestat) Marshal() (b [64]byte) {
 
 func (s *Filestat) Unmarshal(b [64]byte) {
 	s.Dev = Device(binary.LittleEndian.Uint64(b[0:]))
-	s.Ino = Inode(binary.LittleEndian.Uint64(b[0:]))
-	s.Filetype = Filetype(binary.LittleEndian.Uint64(b[0:]))
-	s.Nlink = Linkcount(binary.LittleEndian.Uint64(b[0:]))
-	s.Size = Filesize(binary.LittleEndian.Uint64(b[0:]))
-	s.Atim = Timestamp(binary.LittleEndian.Uint64(b[0:]))
-	s.Mtim = Timestamp(binary.LittleEndian.Uint64(b[0:]))
-	s.Ctim = Timestamp(binary.LittleEndian.Uint64(b[0:]))
+	s.Ino = Inode(binary.LittleEndian.Uint64(b[8:]))
+	s.Type = Filetype(binary.LittleEndian.Uint16(b[16:]))
+	s.Mode = Filemode(binary.LittleEndian.Uint16(b[18:]))
+	s.Nlink = Linkcount(binary.LittleEndian.Uint64(b[24:]))
+	s.Size = Filesize(binary.LittleEndian.Uint64(b[32:]))
+	s.Atim = Timestamp(binary.LittleEndian.Uint64(b[40:]))
+	s.Mtim = Timestamp(binary.LittleEndian.Uint64(b[48:]))
+	s.Ctim = Timestamp(binary.LittleEndian.Uint64(b[56:]))
 }
 
 type Filetype uint8
@@ -72,7 +82,25 @@ const (
 	SymbolicLink
 )
 
+// Filemode is not part of the WASI spec but it is useful to bridge with unix
+// file systems.
+//
+// The only use of this type is within Filestat, where it is packed within the
+// alignment of Filetype.
+type Filemode uint16
+
 type Timestamp uint64
+
+func (t Timestamp) Time() time.Time {
+	return time.Unix(0, int64(t))
+}
+
+func makeTimestamp(t time.Time) Timestamp {
+	if t.IsZero() {
+		return 0
+	}
+	return Timestamp(t.UnixNano())
+}
 
 type Inode uint64
 
@@ -85,6 +113,7 @@ type Dirent struct {
 	Ino     Inode
 	Namelen Dirnamlen
 	Type    Filetype
+	Mode    Filemode
 }
 
 func (d *Dirent) Size() Size { return 24 + Size(d.Namelen) }
@@ -93,7 +122,8 @@ func (d *Dirent) Marshal() (b [24]byte) {
 	binary.LittleEndian.PutUint64(b[0:], uint64(d.Next))
 	binary.LittleEndian.PutUint64(b[8:], uint64(d.Ino))
 	binary.LittleEndian.PutUint32(b[16:], uint32(d.Namelen))
-	binary.LittleEndian.PutUint32(b[20:], uint32(d.Type))
+	binary.LittleEndian.PutUint16(b[20:], uint16(d.Type))
+	binary.LittleEndian.PutUint16(b[22:], uint16(d.Mode))
 	return b
 }
 
@@ -101,7 +131,8 @@ func (d *Dirent) Unmarshal(b [24]byte) {
 	d.Next = Dircookie(binary.LittleEndian.Uint64(b[0:]))
 	d.Ino = Inode(binary.LittleEndian.Uint64(b[8:]))
 	d.Namelen = Dirnamlen(binary.LittleEndian.Uint32(b[16:]))
-	d.Type = Filetype(binary.LittleEndian.Uint32(b[20:]))
+	d.Type = Filetype(binary.LittleEndian.Uint16(b[20:]))
+	d.Mode = Filemode(binary.LittleEndian.Uint16(b[22:]))
 }
 
 type Whence uint8
@@ -124,8 +155,6 @@ const (
 	SymlinkFollow Lookupflags = 1 << iota
 )
 
-func (f Lookupflags) Has(flags Lookupflags) bool { return (f & flags) == flags }
-
 type Oflags uint16
 
 const (
@@ -134,8 +163,6 @@ const (
 	O_EXCL
 	O_TRUNC
 )
-
-func (f Oflags) Has(flags Oflags) bool { return (f & flags) == flags }
 
 type Fdflags uint16
 
@@ -147,7 +174,14 @@ const (
 	F_SYNC
 )
 
-func (f Fdflags) Has(flags Fdflags) bool { return (f & flags) == flags }
+type Fstflags uint16
+
+const (
+	ATIM = 1 << iota
+	ATIM_NOW
+	MTIM
+	MTIM_NOW
+)
 
 type Rights uint64
 
@@ -184,7 +218,20 @@ const (
 	SOCK_ACCEPT
 )
 
+const (
+	defaultRights = FD_SEEK |
+		FD_TELL |
+		FD_FILESTAT_GET |
+		PATH_OPEN |
+		PATH_CREATE_DIRECTORY |
+		PATH_FILESTAT_GET |
+		PATH_FILESTAT_SET_TIMES
+	readRights  = FD_READ | FD_READDIR
+	writeRights = FD_WRITE | FD_FILESTAT_SET_TIMES
+)
+
 func (r Rights) Has(rights Rights) bool { return (r & rights) == rights }
+func (r Rights) String() string         { return fmt.Sprintf("%064b", uint64(r)) }
 
 func makeErrno(err error) Errno {
 	if errno, ok := err.(Errno); ok {
@@ -207,6 +254,8 @@ func makeErrno(err error) Errno {
 		return EBADF
 	case errors.Is(err, wasi.ErrNotImplemented):
 		return ENOSYS
+	case errors.Is(err, wasi.ErrReadOnly):
+		return EROFS
 	}
 	var errno Errno
 	if errors.As(err, &errno) {
@@ -231,6 +280,8 @@ func makeError(errno Errno) error {
 		return fs.ErrClosed
 	case ENOSYS:
 		return wasi.ErrNotImplemented
+	case EROFS:
+		return wasi.ErrReadOnly
 	default:
 		return errno
 	}
@@ -272,12 +323,6 @@ func makeOpenFileFlags(dirflags Lookupflags, oflags Oflags, fsRightsBase, fsRigh
 }
 
 func makePathOpenFlags(flags int, perm fs.FileMode) (dirflags Lookupflags, oflags Oflags, fsRightsBase, fsRightsInheriting Rights, fdflags Fdflags) {
-	const (
-		defaultRights = FD_SEEK | FD_TELL | FD_FILESTAT_GET | PATH_OPEN
-		readRights    = FD_READ | FD_READDIR
-		writeRights   = FD_WRITE
-	)
-
 	switch {
 	case (flags & wasi.O_RDWR) != 0:
 		fsRightsBase = defaultRights | readRights | writeRights
@@ -332,15 +377,43 @@ func makeDefaultFlags(dirflags Lookupflags) (flags int) {
 }
 
 func makeFilestat(info fs.FileInfo) Filestat {
+	mode := info.Mode()
+	atim := time.Time{}
+	mtim := time.Time{}
+	ctim := time.Time{}
+	dev := uint64(0)
+	ino := uint64(0)
+	nlink := uint64(0)
+
+	switch s := info.Sys().(type) {
+	case *Filestat:
+		dev = uint64(s.Dev)
+		ino = uint64(s.Ino)
+		nlink = uint64(s.Nlink)
+		atim = s.Atim.Time()
+		mtim = s.Mtim.Time()
+		ctim = s.Ctim.Time()
+	case *syscall.Stat_t:
+		dev = s.Dev
+		ino = s.Ino
+		nlink = s.Nlink
+		atim = time.Unix(s.Atim.Unix())
+		mtim = time.Unix(s.Mtim.Unix())
+		ctim = time.Unix(s.Ctim.Unix())
+	default:
+		mtim = info.ModTime()
+	}
+
 	return Filestat{
-		Dev:      Device(0), // TODO?
-		Ino:      Inode(0),  // TODO?
-		Filetype: makeFiletype(info.Mode()),
-		Nlink:    Linkcount(0), // TODO?
-		Size:     Filesize(info.Size()),
-		Atim:     Timestamp(0), // TODO?
-		Mtim:     Timestamp(info.ModTime().UnixNano()),
-		Ctim:     Timestamp(0), // TODO?
+		Dev:   Device(dev),
+		Ino:   Inode(ino),
+		Type:  makeFiletype(mode),
+		Mode:  Filemode(mode & fs.ModePerm),
+		Nlink: Linkcount(nlink),
+		Size:  Filesize(info.Size()),
+		Atim:  makeTimestamp(atim),
+		Mtim:  makeTimestamp(mtim),
+		Ctim:  makeTimestamp(ctim),
 	}
 }
 
@@ -380,4 +453,38 @@ func makeFiletype(mode fs.FileMode) Filetype {
 	default:
 		return RegularFile
 	}
+}
+
+func makeFileTimes(atim, mtim Timestamp, flags Fstflags) (a, m time.Time) {
+	var now time.Time
+
+	if (flags & (ATIM_NOW | MTIM_NOW)) != 0 {
+		now = time.Now()
+	}
+
+	if (flags & ATIM) != 0 {
+		a = atim.Time()
+	}
+	if (flags & ATIM_NOW) != 0 {
+		a = now
+	}
+	if (flags & MTIM) != 0 {
+		m = mtim.Time()
+	}
+	if (flags & MTIM_NOW) != 0 {
+		m = now
+	}
+	return a, m
+}
+
+func makeTimestampsAndFstflags(atim, mtim time.Time) (a, m Timestamp, f Fstflags) {
+	if !atim.IsZero() {
+		f |= ATIM
+	}
+	if !mtim.IsZero() {
+		f |= MTIM
+	}
+	a = makeTimestamp(atim)
+	m = makeTimestamp(mtim)
+	return a, m, f
 }

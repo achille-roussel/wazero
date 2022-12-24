@@ -5,10 +5,12 @@ import (
 	"io"
 	"io/fs"
 	"sort"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/wasi"
 )
 
@@ -76,8 +78,13 @@ func testReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 		},
 
 		{
-			scenario: "creating a directory errors with fs.ErrPermission",
+			scenario: "creating a directory errors with wasi.ErrReadOnly",
 			function: testReadOnlyFSCreateDirectory,
+		},
+
+		{
+			scenario: "setting file times errors with wasi.ErrReadOnly",
+			function: testReadOnlyFSSetFileTimes,
 		},
 	}
 
@@ -123,7 +130,20 @@ func testReadOnlyFSCreateDirectory(t *testing.T, newFS MakeReadOnlyFS) {
 	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
 	defer assertCloseFS(t, closeFS)
 
-	assertErrorIs(t, fsys.CreateDir("tmp", 0755), fs.ErrPermission)
+	err := fsys.CreateDir("tmp", 0755)
+	assertErrorIs(t, err, wasi.ErrReadOnly)
+}
+
+func testReadOnlyFSSetFileTimes(t *testing.T, newFS MakeReadOnlyFS) {
+	now := time.Now()
+
+	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, fstest.MapFS{
+		"hello": readOnlyFile(now, "world"),
+	}))
+	defer assertCloseFS(t, closeFS)
+
+	err := fsys.SetFileTimes("hello", 0, now.Add(time.Second), now)
+	assertErrorIs(t, err, wasi.ErrReadOnly)
 }
 
 func readOnlyFS(newFS MakeReadOnlyFS, files fstest.MapFS) func() (wasi.FS, CloseFS, error) {
@@ -193,6 +213,21 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 			scenario: "permissions are set on directories",
 			function: testReadWriteFSCreateDirectoryHasPermissions,
 		},
+
+		{
+			scenario: "set access time on file",
+			function: testReadWriteFSSetFileAccessTime,
+		},
+
+		{
+			scenario: "set modification time on file",
+			function: testReadWriteFSSetFileModTime,
+		},
+
+		{
+			scenario: "set access and modification times on file",
+			function: testReadWriteFSSetFileTimes,
+		},
 	}
 
 	for _, test := range tests {
@@ -239,6 +274,33 @@ func testReadWriteFSCreateExistingDirectory(t *testing.T, newFS MakeReadWriteFS)
 
 	assertCreateDir(t, fsys, "tmp")
 	assertErrorIs(t, fsys.CreateDir("tmp", 0755), fs.ErrExist)
+}
+
+func testReadWriteFSSetFileAccessTime(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	now := time.Now().Add(time.Hour)
+	assertCreateDir(t, fsys, "tmp")
+	assertSetFileTimes(t, fsys, "tmp", now, time.Time{})
+}
+
+func testReadWriteFSSetFileModTime(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	now := time.Now().Add(time.Hour)
+	assertCreateDir(t, fsys, "tmp")
+	assertSetFileTimes(t, fsys, "tmp", time.Time{}, now)
+}
+
+func testReadWriteFSSetFileTimes(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	now := time.Now().Add(time.Hour)
+	assertCreateDir(t, fsys, "tmp")
+	assertSetFileTimes(t, fsys, "tmp", now, now)
 }
 
 func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
@@ -315,6 +377,41 @@ func assertCreateDir(t *testing.T, fsys wasi.FS, path string) {
 		t.Errorf("%s: not a directory", path)
 	} else if perm := s.Mode() & 0777; perm != 0755 {
 		t.Errorf("%s: permissions mismatch: want=%03o got=%03o", path, 0755, perm)
+	}
+}
+
+func assertSetFileTimes(t *testing.T, fsys wasi.FS, path string, atim, mtim time.Time) {
+	t.Helper()
+	assertErrorIs(t, fsys.SetFileTimes(path, 0, atim, mtim), nil)
+	s, err := fsys.Stat(path)
+	if err != nil {
+		t.Error(err)
+	} else {
+		statAtim := time.Time{}
+		statMtim := time.Time{}
+
+		switch stat := s.Sys().(type) {
+		case *wasi_snapshot_preview1.Filestat:
+			statAtim = stat.Atim.Time()
+			statMtim = stat.Mtim.Time()
+		case *syscall.Stat_t:
+			statAtim = time.Unix(stat.Atim.Unix())
+			statMtim = time.Unix(stat.Mtim.Unix())
+		default:
+			t.Error("unsupported file stat is neither wasi_snapshot_preview1.Filestat nor syscall.Stat_t")
+		}
+
+		if !atim.IsZero() {
+			if !atim.Equal(statAtim) {
+				t.Errorf("access time mismatch: want=%v got=%v", atim, statAtim)
+			}
+		}
+
+		if !mtim.IsZero() {
+			if !mtim.Equal(statMtim) {
+				t.Errorf("modification time mismatch: want=%v got=%v", mtim, statMtim)
+			}
+		}
 	}
 }
 

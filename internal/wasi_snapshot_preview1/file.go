@@ -1,7 +1,6 @@
 package wasi_snapshot_preview1
 
 import (
-	"io"
 	"io/fs"
 	"math/bits"
 
@@ -16,89 +15,7 @@ type file struct {
 	direntries         []fs.DirEntry
 }
 
-func (f *file) Name() string { return f.base.Name() }
-
-func (f *file) Close() error { return f.base.Close() }
-
-func (f *file) OpenFile(path string, flags int, perm fs.FileMode) (wasi.File, error) {
-	if !f.fsRightsBase.Has(PATH_OPEN) {
-		return nil, fs.ErrPermission
-	}
-	return f.base.OpenFile(path, flags, perm)
-}
-
-func (f *file) Read(b []byte) (int, error) {
-	if !f.fsRightsBase.Has(FD_READ) {
-		return 0, fs.ErrPermission
-	}
-	return f.base.Read(b)
-}
-
-func (f *file) ReadAt(b []byte, off int64) (int, error) {
-	if !f.fsRightsBase.Has(FD_READ | FD_SEEK) {
-		return 0, fs.ErrPermission
-	}
-	return f.base.ReadAt(b, off)
-}
-
-func (f *file) Write(b []byte) (int, error) {
-	if !f.fsRightsBase.Has(FD_WRITE) {
-		return 0, fs.ErrPermission
-	}
-	return f.base.Write(b)
-}
-
-func (f *file) WriteAt(b []byte, off int64) (int, error) {
-	if !f.fsRightsBase.Has(FD_WRITE | FD_SEEK) {
-		return 0, fs.ErrPermission
-	}
-	return f.base.WriteAt(b, off)
-}
-
-func (f *file) Seek(offset int64, whence int) (int64, error) {
-	rights := Rights(0)
-	if offset == 0 && whence == io.SeekCurrent {
-		rights = FD_TELL
-	} else {
-		rights = FD_SEEK
-	}
-	if !f.fsRightsBase.Has(rights) {
-		return -1, fs.ErrPermission
-	}
-	return f.base.Seek(offset, whence)
-}
-
-func (f *file) Stat() (fs.FileInfo, error) {
-	if !f.fsRightsBase.Has(FD_FILESTAT_GET) {
-		return nil, fs.ErrPermission
-	}
-	return f.base.Stat()
-}
-
-func (f *file) StatFile(path string, flags int) (fs.FileInfo, error) {
-	if !f.fsRightsBase.Has(FD_FILESTAT_GET) {
-		return nil, fs.ErrPermission
-	}
-	return f.base.StatFile(path, flags)
-}
-
-func (f *file) CreateDir(path string, perm fs.FileMode) error {
-	if !f.fsRightsBase.Has(PATH_CREATE_DIRECTORY) {
-		return fs.ErrPermission
-	}
-	return f.base.CreateDir(path, perm)
-}
-
-func (f *file) ReadDir(n int) ([]fs.DirEntry, error) {
-	if !f.fsRightsBase.Has(FD_READDIR) {
-		return nil, fs.ErrPermission
-	}
-	return f.base.ReadDir(n)
-}
-
-var (
-	_ wasi.File = (*file)(nil)
-)
+func (f *file) String() string { return f.base.Name() }
 
 // Table is a data structure mapping 32 bit keys to items of arbitrary type.
 //
@@ -197,18 +114,15 @@ func (t *fileTable) lookup(fd Fd) *file {
 	return nil
 }
 
-// delete deletes the file stored at the given fd from the table, returning the
-// deleted file (may be nil).
-func (t *fileTable) delete(fd Fd) (file *file) {
+// delete deletes the file stored at the given fd from the table.
+func (t *fileTable) delete(fd Fd) {
 	if index, shift := fd/64, fd%64; int(index) < len(t.masks) {
 		mask := t.masks[index]
 		if (mask & (1 << shift)) != 0 {
-			file = t.files[fd]
 			t.files[fd] = nil
 			t.masks[index] = mask & ^uint64(1<<shift)
 		}
 	}
-	return file
 }
 
 // scan calls f for each file and its associated fd in the table. The function
