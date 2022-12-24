@@ -40,7 +40,7 @@ type File interface {
 	// StatFile returns information about the file at the given path, relative
 	// to the receiver.
 	StatFile(path string, flags int) (fs.FileInfo, error)
-	// CreateDir creates a file at the given path, relative to the reicever.
+	// CreateDir creates a file at the given path, relative to the receiver.
 	CreateDir(path string, perm fs.FileMode) error
 	// SetTimes sets the access and modification time of the receiver.
 	SetTimes(atim, mtim time.Time) error

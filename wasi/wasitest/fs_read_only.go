@@ -64,6 +64,11 @@ func testReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 		},
 
 		{
+			scenario: "creating a file errors with wasi.ErrReadOnly",
+			function: testReadOnlyFSCreateFile,
+		},
+
+		{
 			scenario: "creating a directory errors with wasi.ErrReadOnly",
 			function: testReadOnlyFSCreateDirectory,
 		},
@@ -110,6 +115,14 @@ func testReadOnlyFSOpenAndRead(t *testing.T, newFS MakeReadOnlyFS) {
 	assertPathData(t, fsys, "file-2", ``)
 
 	testFS(t, fsys, files)
+}
+
+func testReadOnlyFSCreateFile(t *testing.T, newFS MakeReadOnlyFS) {
+	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
+	defer assertCloseFS(t, closeFS)
+
+	_, err := fsys.OpenFile("tmp", wasi.O_CREATE, 0644)
+	assertErrorIs(t, err, wasi.ErrReadOnly)
 }
 
 func testReadOnlyFSCreateDirectory(t *testing.T, newFS MakeReadOnlyFS) {
