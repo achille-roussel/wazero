@@ -97,7 +97,7 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 
 		{
 			scenario: "set access and modification times on file",
-			function: testReadWriteFSSetFileTimes,
+			function: testReadWriteFSChtimes,
 		},
 	}
 
@@ -209,7 +209,7 @@ func testReadWriteFSSetFileAccessTime(t *testing.T, newFS MakeReadWriteFS) {
 
 	now := time.Now().Add(time.Hour)
 	assertMakeDir(t, fsys, "tmp", 0755)
-	assertSetFileTimes(t, fsys, "tmp", now, time.Time{})
+	assertChtimes(t, fsys, "tmp", now, time.Time{})
 }
 
 func testReadWriteFSSetFileModTime(t *testing.T, newFS MakeReadWriteFS) {
@@ -218,14 +218,14 @@ func testReadWriteFSSetFileModTime(t *testing.T, newFS MakeReadWriteFS) {
 
 	now := time.Now().Add(time.Hour)
 	assertMakeDir(t, fsys, "tmp", 0755)
-	assertSetFileTimes(t, fsys, "tmp", time.Time{}, now)
+	assertChtimes(t, fsys, "tmp", time.Time{}, now)
 }
 
-func testReadWriteFSSetFileTimes(t *testing.T, newFS MakeReadWriteFS) {
+func testReadWriteFSChtimes(t *testing.T, newFS MakeReadWriteFS) {
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer assertCloseFS(t, closeFS)
 
 	now := time.Now().Add(time.Hour)
 	assertMakeDir(t, fsys, "tmp", 0755)
-	assertSetFileTimes(t, fsys, "tmp", now, now)
+	assertChtimes(t, fsys, "tmp", now, now)
 }

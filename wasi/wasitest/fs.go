@@ -94,9 +94,9 @@ func assertMakeDir(t *testing.T, fsys wasi.FS, path string, perm fs.FileMode) {
 	}
 }
 
-func assertSetFileTimes(t *testing.T, fsys wasi.FS, path string, atim, mtim time.Time) {
+func assertChtimes(t *testing.T, fsys wasi.FS, path string, atim, mtim time.Time) {
 	t.Helper()
-	assertErrorIs(t, fsys.SetFileTimes(path, 0, atim, mtim), nil)
+	assertErrorIs(t, fsys.Chtimes(path, 0, atim, mtim), nil)
 	s, err := fsys.Stat(path)
 	if err != nil {
 		t.Error(err)

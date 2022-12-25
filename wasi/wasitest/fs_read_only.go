@@ -75,7 +75,7 @@ func testReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 
 		{
 			scenario: "setting file times errors with wasi.ErrReadOnly",
-			function: testReadOnlyFSSetFileTimes,
+			function: testReadOnlyFSChtimes,
 		},
 	}
 
@@ -133,7 +133,7 @@ func testReadOnlyFSCreateDirectory(t *testing.T, newFS MakeReadOnlyFS) {
 	assertErrorIs(t, err, wasi.ErrReadOnly)
 }
 
-func testReadOnlyFSSetFileTimes(t *testing.T, newFS MakeReadOnlyFS) {
+func testReadOnlyFSChtimes(t *testing.T, newFS MakeReadOnlyFS) {
 	now := time.Now()
 
 	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, fstest.MapFS{
@@ -141,7 +141,7 @@ func testReadOnlyFSSetFileTimes(t *testing.T, newFS MakeReadOnlyFS) {
 	}))
 	defer assertCloseFS(t, closeFS)
 
-	err := fsys.SetFileTimes("hello", 0, now.Add(time.Second), now)
+	err := fsys.Chtimes("hello", 0, now.Add(time.Second), now)
 	assertErrorIs(t, err, wasi.ErrReadOnly)
 }
 

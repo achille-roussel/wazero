@@ -130,7 +130,7 @@ func (ctx *Context) FdFilestatSetTimes(fd Fd, atim, mtim Timestamp, flags Fstfla
 	if !f.fsRightsBase.Has(FD_FILESTAT_SET_TIMES) {
 		return EPERM
 	}
-	if err := f.base.SetTimes(makeFileTimes(atim, mtim, flags)); err != nil {
+	if err := f.base.Chtimes(makeFileTimes(atim, mtim, flags)); err != nil {
 		return makeErrno(err)
 	}
 	return ESUCCESS
@@ -402,7 +402,7 @@ func (ctx *Context) PathFilestatSetTimes(fd Fd, flags Lookupflags, path string, 
 		if ctx.FileSystem == nil {
 			return ENOENT
 		}
-		err = ctx.FileSystem.SetFileTimes(path, makeDefaultFlags(flags), a, m)
+		err = ctx.FileSystem.Chtimes(path, makeDefaultFlags(flags), a, m)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -411,7 +411,7 @@ func (ctx *Context) PathFilestatSetTimes(fd Fd, flags Lookupflags, path string, 
 		if !f.fsRightsBase.Has(PATH_FILESTAT_SET_TIMES) {
 			return EPERM
 		}
-		err = f.base.SetFileTimes(path, makeDefaultFlags(flags), a, m)
+		err = f.base.ChtimesFile(path, makeDefaultFlags(flags), a, m)
 	}
 
 	return makeErrno(err)
@@ -457,7 +457,7 @@ func (fsys contextFS) MakeDir(path string, perm fs.FileMode) error {
 	return makeError(subctx.PathCreateDirectory(None, path))
 }
 
-func (fsys contextFS) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (fsys contextFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
 	a, m, f := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(fsys.ctx.PathFilestatSetTimes(None, makeLookupflags(flags), path, a, m, f))
 }
@@ -608,12 +608,12 @@ func (f *contextFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return &contextFileInfo{name: fspath.Base(path), stat: stat}, nil
 }
 
-func (f *contextFile) SetTimes(atim, mtim time.Time) error {
+func (f *contextFile) Chtimes(atim, mtim time.Time) error {
 	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(f.ctx.FdFilestatSetTimes(f.fd, a, m, fst))
 }
 
-func (f *contextFile) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (f *contextFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
 	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(f.ctx.PathFilestatSetTimes(f.fd, makeLookupflags(flags), path, a, m, fst))
 }

@@ -42,11 +42,11 @@ type File interface {
 	StatFile(path string, flags int) (fs.FileInfo, error)
 	// MakeDir creates a file at the given path, relative to the receiver.
 	MakeDir(path string, perm fs.FileMode) error
-	// SetTimes sets the access and modification time of the receiver.
-	SetTimes(atim, mtim time.Time) error
-	// SetTimes sets the access and modification time of the file at the given
+	// Chtimes sets the access and modification time of the receiver.
+	Chtimes(atim, mtim time.Time) error
+	// ChtimesFile sets the access and modification time of the file at the given
 	// path, relative to the reciever.
-	SetFileTimes(path string, flags int, atim, mtim time.Time) error
+	ChtimesFile(path string, flags int, atim, mtim time.Time) error
 }
 
 // FS is an interface satisfied by types that implement file systems compatible
@@ -78,8 +78,8 @@ type FS interface {
 	StatFile(path string, flags int) (fs.FileInfo, error)
 	// MakeDir creates a directory at the given path.
 	MakeDir(path string, perm fs.FileMode) error
-	// SetFileTimes sets the access and modification time at the given path.
-	SetFileTimes(path string, flags int, atim, mtim time.Time) error
+	// ChtimesFile sets the access and modification time at the given path.
+	Chtimes(path string, flags int, atim, mtim time.Time) error
 }
 
 // NewFS constructs a FS from a standard fs.FS which only permits read
@@ -127,7 +127,7 @@ func (fsys *fsFS) MakeDir(path string, perm fs.FileMode) error {
 	return ErrReadOnly
 }
 
-func (fsys *fsFS) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (fsys *fsFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
 	return ErrReadOnly
 }
 
@@ -167,10 +167,10 @@ func (f *fsFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return f.fsys.StatFile(f.pathTo(path), flags)
 }
 
-func (f *fsFile) SetTimes(atim, mtim time.Time) error { return ErrReadOnly }
+func (f *fsFile) Chtimes(atim, mtim time.Time) error { return ErrReadOnly }
 
-func (f *fsFile) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
-	return f.fsys.SetFileTimes(f.pathTo(path), flags, atim, mtim)
+func (f *fsFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
+	return f.fsys.Chtimes(f.pathTo(path), flags, atim, mtim)
 }
 
 func (f *fsFile) Seek(offset int64, whence int) (int64, error) {
@@ -233,11 +233,11 @@ func (fsys *dirFS) MakeDir(path string, perm fs.FileMode) error {
 	return fsys.createDir(fsys.pathTo(path), perm)
 }
 
-func (fsys *dirFS) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (fsys *dirFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
-	return fsys.setFileTimes(fsys.pathTo(path), flags, atim, mtim)
+	return fsys.chtimes(fsys.pathTo(path), flags, atim, mtim)
 }
 
 func (fsys *dirFS) pathTo(path string) string {
@@ -264,7 +264,7 @@ func (fsys *dirFS) createDir(path string, perm fs.FileMode) error {
 	return os.Mkdir(path, perm)
 }
 
-func (fsys *dirFS) setFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (fsys *dirFS) chtimes(path string, flags int, atim, mtim time.Time) error {
 	if flags != 0 {
 		return fs.ErrInvalid
 	}
@@ -301,15 +301,15 @@ func (f *dirFile) MakeDir(path string, perm fs.FileMode) error {
 	return f.fsys.createDir(f.pathTo(path), perm)
 }
 
-func (f *dirFile) SetTimes(atim, mtim time.Time) error {
-	return f.fsys.setFileTimes(f.File.Name(), O_NOFOLLOW, atim, mtim)
+func (f *dirFile) Chtimes(atim, mtim time.Time) error {
+	return f.fsys.chtimes(f.File.Name(), O_NOFOLLOW, atim, mtim)
 }
 
-func (f *dirFile) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (f *dirFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
-	return f.fsys.setFileTimes(f.pathTo(path), flags, atim, mtim)
+	return f.fsys.chtimes(f.pathTo(path), flags, atim, mtim)
 }
 
 func (f *dirFile) pathTo(path string) string {
@@ -357,9 +357,9 @@ func (fsys *subFS) MakeDir(path string, perm fs.FileMode) error {
 	return fsys.root.MakeDir(path, perm)
 }
 
-func (fsys *subFS) SetFileTimes(path string, flags int, atim, mtim time.Time) error {
+func (fsys *subFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
-	return fsys.root.SetFileTimes(path, flags, atim, mtim)
+	return fsys.root.ChtimesFile(path, flags, atim, mtim)
 }
