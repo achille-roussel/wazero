@@ -58,27 +58,20 @@ func assertOpenFile(t *testing.T, fsys wasi.FS, path string, oflags int, perm fs
 	f, err := fsys.OpenFile(path, oflags, perm)
 	assertErrorIs(t, err, nil)
 	if (oflags & wasi.O_CREATE) != 0 {
-		s, err := f.Stat()
-		if err != nil {
-			t.Error(err)
-		} else {
-			if mode := s.Mode() & fs.ModePerm; mode != perm {
-				t.Errorf("file permissions mismatch: want=%s got=%s", perm, mode)
-			}
+		stat := assertFileStat(t, f)
+		mode := stat.Mode() & fs.ModePerm
+		if mode != perm {
+			t.Errorf("file permissions mismatch: want=%s got=%s", perm, mode)
 		}
 	}
 	return f
 }
 
-func assertPathData(t *testing.T, fsys wasi.FS, path, data string) {
+func assertPathData(t *testing.T, fsys wasi.FS, path, want string) {
 	t.Helper()
 	f := assertOpenFile(t, fsys, path, 0, 0)
 	defer assertClose(t, f)
-	b, err := io.ReadAll(f)
-	assertErrorIs(t, err, nil)
-	if string(b) != data {
-		t.Errorf("%s: content mismatch\nwant: %q\ngot:  %q", path, data, b)
-	}
+	assertFileData(t, f, want)
 }
 
 func assertMakeDir(t *testing.T, fsys wasi.FS, path string, perm fs.FileMode) {
@@ -138,28 +131,57 @@ func assertErrorIs(t *testing.T, got, want error) {
 
 func assertSeek(t *testing.T, s io.Seeker, offset int64, whence int) {
 	t.Helper()
-	if _, err := s.Seek(offset, whence); err != nil {
-		t.Fatal(err)
-	}
+	_, err := s.Seek(offset, whence)
+	assertErrorIs(t, err, nil)
 }
 
 func assertRead(t *testing.T, r io.Reader) string {
 	t.Helper()
 	s := new(strings.Builder)
 	_, err := io.Copy(s, r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assertErrorIs(t, err, nil)
 	return s.String()
 }
 
 func assertWrite(t *testing.T, w io.Writer, data string) {
 	t.Helper()
 	n, err := io.WriteString(w, data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assertErrorIs(t, err, nil)
 	if n < len(data) {
 		t.Fatal(io.ErrShortWrite)
+	}
+	if n > len(data) {
+		t.Fatalf("too many bytes written to file: want=%d got=%d", len(data), n)
+	}
+}
+
+func assertTruncate(t *testing.T, f wasi.File, size int64) {
+	t.Helper()
+	err := f.Truncate(size)
+	assertErrorIs(t, err, nil)
+	assertFileSize(t, f, size)
+}
+
+func assertFileStat(t *testing.T, f wasi.File) fs.FileInfo {
+	t.Helper()
+	s, err := f.Stat()
+	assertErrorIs(t, err, nil)
+	return s
+}
+
+func assertFileData(t *testing.T, f wasi.File, want string) {
+	t.Helper()
+	assertSeek(t, f, 0, io.SeekStart)
+	if got := assertRead(t, f); got != want {
+		t.Errorf("file content mimatch: want=%q got=%q", want, got)
+	}
+}
+
+func assertFileSize(t *testing.T, f wasi.File, want int64) {
+	t.Helper()
+	stat := assertFileStat(t, f)
+	size := stat.Size()
+	if size != want {
+		t.Errorf("file size mismatch: want=%d got=%d", want, size)
 	}
 }

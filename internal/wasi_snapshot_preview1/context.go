@@ -119,6 +119,20 @@ func (ctx *Context) FdFilestatGet(fd Fd) (Filestat, Errno) {
 	return makeFilestat(s), ESUCCESS
 }
 
+// FdFilestatSetSize is the implementation of the "fd_filestat_set_size"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_filestat_set_size
+func (ctx *Context) FdFilestatSetSize(fd Fd, size Filesize) Errno {
+	f := ctx.files.lookup(fd)
+	if f == nil {
+		return EBADF
+	}
+	if !f.fsRightsBase.Has(FD_FILESTAT_SET_SIZE) {
+		return EPERM
+	}
+	return makeErrno(f.base.Truncate(int64(size)))
+}
+
 // FdFilestatSetTimes is the implementation of the "fd_filestat_set_times"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_filestat_set_times
@@ -130,10 +144,7 @@ func (ctx *Context) FdFilestatSetTimes(fd Fd, atim, mtim Timestamp, flags Fstfla
 	if !f.fsRightsBase.Has(FD_FILESTAT_SET_TIMES) {
 		return EPERM
 	}
-	if err := f.base.Chtimes(makeFileTimes(atim, mtim, flags)); err != nil {
-		return makeErrno(err)
-	}
-	return ESUCCESS
+	return makeErrno(f.base.Chtimes(makeFileTimes(atim, mtim, flags)))
 }
 
 // FdPread is the implementation of the "fd_pread"
@@ -616,6 +627,10 @@ func (f *contextFile) Chtimes(atim, mtim time.Time) error {
 func (f *contextFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
 	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(f.ctx.PathFilestatSetTimes(f.fd, makeLookupflags(flags), path, a, m, fst))
+}
+
+func (f *contextFile) Truncate(size int64) error {
+	return makeError(f.ctx.FdFilestatSetSize(f.fd, Filesize(size)))
 }
 
 type contextFileInfo struct {

@@ -228,7 +228,7 @@ const (
 		PATH_FILESTAT_SET_SIZE |
 		PATH_FILESTAT_SET_TIMES
 	readRights  = FD_READ | FD_READDIR
-	writeRights = FD_WRITE | FD_FILESTAT_SET_TIMES
+	writeRights = FD_WRITE | FD_FILESTAT_SET_SIZE | FD_FILESTAT_SET_TIMES
 )
 
 func (r Rights) Has(rights Rights) bool { return (r & rights) == rights }

@@ -7,6 +7,7 @@ import (
 	"os"
 	fspath "path"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -47,6 +48,8 @@ type File interface {
 	// ChtimesFile sets the access and modification time of the file at the given
 	// path, relative to the reciever.
 	ChtimesFile(path string, flags int, atim, mtim time.Time) error
+	// Truncates the file to size.
+	Truncate(size int64) error
 }
 
 // FS is an interface satisfied by types that implement file systems compatible
@@ -172,6 +175,8 @@ func (f *fsFile) Chtimes(atim, mtim time.Time) error { return ErrReadOnly }
 func (f *fsFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
 	return f.fsys.Chtimes(f.pathTo(path), flags, atim, mtim)
 }
+
+func (f *fsFile) Truncate(size int64) error { return ErrReadOnly }
 
 func (f *fsFile) Seek(offset int64, whence int) (int64, error) {
 	if s, ok := f.base.(io.Seeker); ok {
@@ -310,6 +315,28 @@ func (f *dirFile) ChtimesFile(path string, flags int, atim, mtim time.Time) erro
 		return fs.ErrInvalid
 	}
 	return f.fsys.chtimes(f.pathTo(path), flags, atim, mtim)
+}
+
+func (f *dirFile) Truncate(size int64) error {
+	err := f.File.Truncate(size)
+	// POSIX allows EINVAL or EBADF in cases where the file descriptor does not
+	// allow write operations. EINVAL may also be returned when the size
+	// argument is negative or greater thatn the maximum file size.
+	//
+	// We cannot easily guess the maximum file size so we only handle the canse
+	// where the size is negative, and convert these errors to fs.ErrPermission
+	// to satisfy the WASI test suite.
+	//
+	// See ftruncate(2)
+	switch {
+	case errors.Is(err, syscall.EINVAL):
+		if size >= 0 {
+			err = fs.ErrPermission
+		}
+	case errors.Is(err, syscall.EBADF):
+		err = fs.ErrPermission
+	}
+	return err
 }
 
 func (f *dirFile) pathTo(path string) string {

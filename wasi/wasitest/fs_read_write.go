@@ -99,6 +99,31 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 			scenario: "set access and modification times on file",
 			function: testReadWriteFSChtimes,
 		},
+
+		{
+			scenario: "truncating a closed file errors with fs.ErrClosed",
+			function: testReadWriteFSTruncateClosed,
+		},
+
+		{
+			scenario: "truncating a read-only file errors with fs.ErrPermission",
+			function: testReadWriteFSTruncateReadOnly,
+		},
+
+		{
+			scenario: "truncating a file to the same size does not change its content",
+			function: testReadWriteFSTruncateToSameSize,
+		},
+
+		{
+			scenario: "truncating a file to smaller size deletes its content",
+			function: testReadWriteFSTruncateToSmallerSize,
+		},
+
+		{
+			scenario: "truncating a file to larger size fills its content with zeros",
+			function: testReadWriteFSTruncateToLargerSize,
+		},
 	}
 
 	for _, test := range tests {
@@ -228,4 +253,66 @@ func testReadWriteFSChtimes(t *testing.T, newFS MakeReadWriteFS) {
 	now := time.Now().Add(time.Hour)
 	assertMakeDir(t, fsys, "tmp", 0755)
 	assertChtimes(t, fsys, "tmp", now, now)
+}
+
+func testReadWriteFSTruncateClosed(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_CREATE, 0644)
+	assertClose(t, f)
+
+	err := f.Truncate(0)
+	assertErrorIs(t, err, fs.ErrClosed)
+}
+
+func testReadWriteFSTruncateReadOnly(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f0 := assertOpenFile(t, fsys, "foo", wasi.O_WRONLY|wasi.O_CREATE, 0644)
+	defer assertClose(t, f0)
+	assertWrite(t, f0, "123")
+
+	f1 := assertOpenFile(t, fsys, "foo", wasi.O_RDONLY, 0644)
+	defer assertClose(t, f1)
+
+	err := f1.Truncate(0)
+	assertErrorIs(t, err, fs.ErrPermission)
+}
+
+func testReadWriteFSTruncateToSameSize(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_CREATE, 0644)
+	defer assertClose(t, f)
+
+	assertWrite(t, f, "Hello World!")
+	assertTruncate(t, f, 12)
+	assertFileData(t, f, "Hello World!")
+}
+
+func testReadWriteFSTruncateToSmallerSize(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_CREATE, 0644)
+	defer assertClose(t, f)
+
+	assertWrite(t, f, "Hello World!")
+	assertTruncate(t, f, 5)
+	assertFileData(t, f, "Hello")
+}
+
+func testReadWriteFSTruncateToLargerSize(t *testing.T, newFS MakeReadWriteFS) {
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer assertCloseFS(t, closeFS)
+
+	f := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_CREATE, 0644)
+	defer assertClose(t, f)
+
+	assertWrite(t, f, "Hello World!")
+	assertTruncate(t, f, 20)
+	assertFileData(t, f, "Hello World!\x00\x00\x00\x00\x00\x00\x00\x00")
 }
