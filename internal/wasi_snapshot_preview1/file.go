@@ -45,7 +45,7 @@ func (f *file) String() string { return f.base.Name() }
 // applications attempting to damage performance of the host.
 type fileTable struct {
 	masks []uint64
-	files []*file
+	files []file
 }
 
 // len returns the number of files stored in the table.
@@ -66,7 +66,7 @@ func (t *fileTable) grow(n int) {
 		masks := make([]uint64, n)
 		copy(masks, t.masks)
 
-		files := make([]*file, n*64)
+		files := make([]file, n*64)
 		copy(files, t.files)
 
 		t.masks = masks
@@ -79,7 +79,7 @@ func (t *fileTable) grow(n int) {
 //
 // The method does not perform deduplication, it is possible for the same file
 // to be inserted multiple times, each insertion will return a different fd.
-func (t *fileTable) insert(file *file) (fd Fd) {
+func (t *fileTable) insert(file file) (fd Fd) {
 	offset := 0
 insert:
 	// TODO: this loop could be made a lot more efficient using vectorized
@@ -109,7 +109,11 @@ insert:
 // lookup returns the file associated with the given fd (may be nil).
 func (t *fileTable) lookup(fd Fd) *file {
 	if i := int(fd); i >= 0 && i < len(t.files) {
-		return t.files[i]
+		index := uint(fd) / 64
+		shift := uint(fd) % 64
+		if (t.masks[index] & (1 << shift)) != 0 {
+			return &t.files[i]
+		}
 	}
 	return nil
 }
@@ -119,7 +123,7 @@ func (t *fileTable) delete(fd Fd) {
 	if index, shift := fd/64, fd%64; int(index) < len(t.masks) {
 		mask := t.masks[index]
 		if (mask & (1 << shift)) != 0 {
-			t.files[fd] = nil
+			t.files[fd] = file{}
 			t.masks[index] = mask & ^uint64(1<<shift)
 		}
 	}
@@ -132,7 +136,7 @@ func (t *fileTable) scan(f func(Fd, *file) bool) {
 		if mask != 0 {
 			for j := Fd(0); j < 64; j++ {
 				if (mask & (1 << j)) != 0 {
-					if fd := Fd(i)*64 + j; !f(fd, t.files[fd]) {
+					if fd := Fd(i)*64 + j; !f(fd, &t.files[fd]) {
 						return
 					}
 				}
@@ -147,6 +151,6 @@ func (t *fileTable) reset() {
 		t.masks[i] = 0
 	}
 	for i := range t.files {
-		t.files[i] = nil
+		t.files[i] = file{}
 	}
 }

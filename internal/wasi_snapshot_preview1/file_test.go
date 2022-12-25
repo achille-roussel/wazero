@@ -9,9 +9,10 @@ func TestFileTable(t *testing.T) {
 		t.Errorf("new table is not empty: length=%d", n)
 	}
 
-	v0 := new(file)
-	v1 := new(file)
-	v2 := new(file)
+	// The dircookie field is used as a sentinel value.
+	v0 := file{dircookie: 1}
+	v1 := file{dircookie: 2}
+	v2 := file{dircookie: 3}
 
 	k0 := table.insert(v0)
 	k1 := table.insert(v1)
@@ -19,7 +20,7 @@ func TestFileTable(t *testing.T) {
 
 	for _, lookup := range []struct {
 		key Fd
-		val *file
+		val file
 	}{
 		{key: k0, val: v0},
 		{key: k1, val: v1},
@@ -27,8 +28,8 @@ func TestFileTable(t *testing.T) {
 	} {
 		if v := table.lookup(lookup.key); v == nil {
 			t.Errorf("value not found for key '%v'", lookup.key)
-		} else if v != lookup.val {
-			t.Errorf("wrong value returned for key '%v': want=%q got=%q", lookup.key, lookup.val, v)
+		} else if v.dircookie != lookup.val.dircookie {
+			t.Errorf("wrong value returned for key '%v': want=%v got=%v", lookup.key, lookup.val.dircookie, v.dircookie)
 		}
 	}
 
@@ -40,7 +41,7 @@ func TestFileTable(t *testing.T) {
 	k1Found := false
 	k2Found := false
 	table.scan(func(k Fd, v *file) bool {
-		var want *file
+		var want file
 		switch k {
 		case k0:
 			k0Found, want = true, v0
@@ -49,8 +50,8 @@ func TestFileTable(t *testing.T) {
 		case k2:
 			k2Found, want = true, v2
 		}
-		if v != want {
-			t.Errorf("wrong value found ranging over '%v': want=%q got=%q", k, want, v)
+		if v.dircookie != want.dircookie {
+			t.Errorf("wrong value found ranging over '%v': want=%v got=%v", k, want.dircookie, v.dircookie)
 		}
 		return true
 	})
@@ -87,10 +88,9 @@ func TestFileTable(t *testing.T) {
 
 func BenchmarkFileTableInsert(b *testing.B) {
 	table := new(fileTable)
-	file := new(file)
 
 	for i := 0; i < b.N; i++ {
-		table.insert(file)
+		table.insert(file{})
 
 		if (i % 65536) == 0 {
 			table.reset() // to avoid running out of memory
@@ -99,20 +99,20 @@ func BenchmarkFileTableInsert(b *testing.B) {
 }
 
 func BenchmarkFileTableLookup(b *testing.B) {
-	const N = 65536
+	const sentinel = 42
+	const numFiles = 65536
 	table := new(fileTable)
-	keys := make([]Fd, N)
-	sentinel := new(file)
+	files := make([]Fd, numFiles)
 
-	for i := range keys {
-		keys[i] = table.insert(sentinel)
+	for i := range files {
+		files[i] = table.insert(file{dircookie: sentinel})
 	}
 
 	var f *file
 	for i := 0; i < b.N; i++ {
-		f = table.lookup(keys[i%N])
+		f = table.lookup(files[i%numFiles])
 	}
-	if f != sentinel {
+	if f.dircookie != sentinel {
 		b.Error("wrong file returned by lookup")
 	}
 }

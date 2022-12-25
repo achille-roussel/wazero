@@ -329,7 +329,7 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 		return None, makeErrno(err)
 	}
 
-	newFd := ctx.files.insert(&file{
+	newFd := ctx.files.insert(file{
 		base:               base,
 		fsRightsBase:       fsRightsBase,
 		fsRightsInheriting: fsRightsInheriting,
