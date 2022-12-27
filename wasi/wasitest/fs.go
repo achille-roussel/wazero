@@ -34,133 +34,149 @@ func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
 	})
 }
 
+type fileTestCase struct {
+	scenario string
+	function func(wasi.File) error
+}
+
+func testFileError(t *testing.T, file wasi.File, want error, tests ...fileTestCase) {
+	for _, test := range tests {
+		t.Run(test.scenario, func(t *testing.T) {
+			assertErrorIs(t, test.function(file), want)
+		})
+	}
+}
+
+func testFileErrNotExist(t *testing.T, file wasi.File) {
+	testFileError(t, file, fs.ErrNotExist,
+		fileTestCase{
+			scenario: "calling OpenFile for a file which does not exist returns fs.ErrNotExist",
+			function: func(f wasi.File) error {
+				_, err := f.OpenFile("whatever", 0, 0)
+				return err
+			},
+		},
+	)
+}
+
 func testFileErrClosed(t *testing.T, file wasi.File) {
 	assertClose(t, file)
 
-	tests := []struct {
-		methodName string
-		methodCall func(wasi.File) error
-	}{
-		{
-			methodName: "Close",
-			methodCall: func(f wasi.File) error {
+	testFileError(t, file, fs.ErrClosed,
+		fileTestCase{
+			scenario: "calling Close on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				err := f.Close()
 				return err
 			},
 		},
 
-		{
-			methodName: "Read",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling Read on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.Read(nil)
 				return err
 			},
 		},
 
-		{
-			methodName: "ReadAt",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling ReadAt on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.ReadAt(nil, 0)
 				return err
 			},
 		},
 
-		{
-			methodName: "Write",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling Write on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.Write(nil)
 				return err
 			},
 		},
 
-		{
-			methodName: "WriteAt",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling WriteAt on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.WriteAt(nil, 0)
 				return err
 			},
 		},
 
-		{
-			methodName: "Seek",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling Seek on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.Seek(0, io.SeekStart)
 				return err
 			},
 		},
 
-		{
-			methodName: "Stat",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling Stat on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.Stat()
 				return err
 			},
 		},
 
-		{
-			methodName: "ReadDir",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling ReadDir on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.ReadDir(0)
 				return err
 			},
 		},
 
-		{
-			methodName: "OpenFile",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling OpenFile on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.OpenFile("foo", 0, 0)
 				return err
 			},
 		},
 
-		{
-			methodName: "StatFile",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling StatFile on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				_, err := f.StatFile("foo", 0)
 				return err
 			},
 		},
 
-		{
-			methodName: "MakeDir",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling MakeDir on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				err := f.MakeDir("foo", 0755)
 				return err
 			},
 		},
 
-		{
-			methodName: "Chtimes",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling Chtimes on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				now := time.Now()
 				err := f.Chtimes(now, now)
 				return err
 			},
 		},
 
-		{
-			methodName: "ChtimesFile",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling ChtimesFile on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				now := time.Now()
 				err := f.ChtimesFile("foo", 0, now, now)
 				return err
 			},
 		},
 
-		{
-			methodName: "Truncate",
-			methodCall: func(f wasi.File) error {
+		fileTestCase{
+			scenario: "calling Truncate on a closed file returns fs.ErrClosed",
+			function: func(f wasi.File) error {
 				err := f.Truncate(0)
 				return err
 			},
 		},
-	}
-
-	for _, test := range tests {
-		t.Run("calling "+test.methodName+" on a closed file returns fs.ErrClosed", func(t *testing.T) {
-			assertErrorIs(t, test.methodCall(file), fs.ErrClosed)
-		})
-	}
+	)
 }
 
 func assertNewFS(t *testing.T, newFS func() (wasi.FS, CloseFS, error)) (wasi.FS, CloseFS) {

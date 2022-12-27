@@ -87,7 +87,15 @@ func testReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 		"foo": new(fstest.MapFile),
 	}))
 	defer closeFS()
-	testFileErrClosed(t, assertOpenFile(t, fsys, "foo", 0, 0))
+
+	dir := assertOpenFile(t, fsys, ".", 0, 0)
+	defer dir.Close()
+
+	file := assertOpenFile(t, fsys, "foo", 0, 0)
+	defer file.Close()
+
+	testFileErrNotExist(t, dir)
+	testFileErrClosed(t, file)
 }
 
 func testReadOnlyFSCreateEmpty(t *testing.T, newFS MakeReadOnlyFS) {

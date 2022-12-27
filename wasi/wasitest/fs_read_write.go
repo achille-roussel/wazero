@@ -101,11 +101,6 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 		},
 
 		{
-			scenario: "truncating a closed file errors with fs.ErrClosed",
-			function: testReadWriteFSTruncateClosed,
-		},
-
-		{
 			scenario: "truncating a read-only file errors with fs.ErrPermission",
 			function: testReadWriteFSTruncateReadOnly,
 		},
@@ -132,7 +127,16 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer closeFS()
-	testFileErrClosed(t, assertOpenFile(t, fsys, "foo", wasi.O_CREATE, 0644))
+
+	assertMakeDir(t, fsys, "tmp", 0755)
+	dir := assertOpenFile(t, fsys, "tmp", 0, 0)
+	defer dir.Close()
+
+	file := assertOpenFile(t, fsys, "foo", wasi.O_CREATE, 0644)
+	defer file.Close()
+
+	testFileErrNotExist(t, dir)
+	testFileErrClosed(t, file)
 }
 
 func testReadWriteFSCreateEmpty(t *testing.T, newFS MakeReadWriteFS) {
@@ -257,17 +261,6 @@ func testReadWriteFSChtimes(t *testing.T, newFS MakeReadWriteFS) {
 	now := time.Now().Add(time.Hour)
 	assertMakeDir(t, fsys, "tmp", 0755)
 	assertChtimes(t, fsys, "tmp", now, now)
-}
-
-func testReadWriteFSTruncateClosed(t *testing.T, newFS MakeReadWriteFS) {
-	fsys, closeFS := assertNewFS(t, newFS)
-	defer assertCloseFS(t, closeFS)
-
-	f := assertOpenFile(t, fsys, "foo", wasi.O_RDWR|wasi.O_CREATE, 0644)
-	assertClose(t, f)
-
-	err := f.Truncate(0)
-	assertErrorIs(t, err, fs.ErrClosed)
 }
 
 func testReadWriteFSTruncateReadOnly(t *testing.T, newFS MakeReadWriteFS) {
