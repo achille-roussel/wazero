@@ -129,6 +129,10 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 	for _, test := range tests {
 		t.Run(test.scenario, func(t *testing.T) { test.function(t, newFS) })
 	}
+
+	fsys, closeFS := assertNewFS(t, newFS)
+	defer closeFS()
+	testFileErrClosed(t, assertOpenFile(t, fsys, "foo", wasi.O_CREATE, 0644))
 }
 
 func testReadWriteFSCreateEmpty(t *testing.T, newFS MakeReadWriteFS) {

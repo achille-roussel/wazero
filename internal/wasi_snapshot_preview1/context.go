@@ -562,12 +562,18 @@ func (f *contextFile) Name() string {
 }
 
 func (f *contextFile) Close() error {
+	if f.fd == None {
+		return fs.ErrClosed
+	}
 	fd := f.fd
 	f.fd = None
 	return makeError(f.ctx.FdClose(fd))
 }
 
 func (f *contextFile) OpenFile(path string, flags int, perm fs.FileMode) (wasi.File, error) {
+	if f.fd == None {
+		return nil, fs.ErrClosed
+	}
 	dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags := makePathOpenFlags(flags, perm)
 	fd, errno := f.ctx.PathOpen(f.fd, dirflags, path, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	if err := makeError(errno); err != nil {
@@ -577,6 +583,9 @@ func (f *contextFile) OpenFile(path string, flags int, perm fs.FileMode) (wasi.F
 }
 
 func (f *contextFile) Read(b []byte) (int, error) {
+	if f.fd == None {
+		return 0, fs.ErrClosed
+	}
 	size, errno := f.ctx.FdRead(f.fd, [][]byte{b})
 	if size == 0 && errno == ESUCCESS && len(b) != 0 {
 		return 0, io.EOF
@@ -585,6 +594,9 @@ func (f *contextFile) Read(b []byte) (int, error) {
 }
 
 func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
+	if f.fd == None {
+		return 0, fs.ErrClosed
+	}
 	size, errno := f.ctx.FdPread(f.fd, [][]byte{b}, Filesize(off))
 	if size < Size(len(b)) && errno == ESUCCESS {
 		return int(size), io.EOF
@@ -593,12 +605,18 @@ func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
 }
 
 func (f *contextFile) MakeDir(path string, perm fs.FileMode) error {
+	if f.fd == None {
+		return fs.ErrClosed
+	}
 	subctx := *f.ctx
 	subctx.Umask |= ^perm
 	return makeError(subctx.PathCreateDirectory(f.fd, path))
 }
 
 func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
+	if f.fd == None {
+		return nil, fs.ErrClosed
+	}
 	if n < 0 {
 		n = 0
 	}
@@ -664,21 +682,33 @@ func (f *contextFile) ReadDir(n int) (ret []fs.DirEntry, err error) {
 }
 
 func (f *contextFile) Write(b []byte) (int, error) {
+	if f.fd == None {
+		return 0, fs.ErrClosed
+	}
 	size, errno := f.ctx.FdWrite(f.fd, [][]byte{b})
 	return int(size), makeError(errno)
 }
 
 func (f *contextFile) WriteAt(b []byte, off int64) (int, error) {
+	if f.fd == None {
+		return 0, fs.ErrClosed
+	}
 	size, errno := f.ctx.FdPwrite(f.fd, [][]byte{b}, Filesize(off))
 	return int(size), makeError(errno)
 }
 
 func (f *contextFile) Seek(offset int64, whence int) (int64, error) {
+	if f.fd == None {
+		return 0, fs.ErrClosed
+	}
 	size, errno := f.ctx.FdSeek(f.fd, Filedelta(offset), Whence(whence))
 	return int64(size), makeError(errno)
 }
 
 func (f *contextFile) Stat() (fs.FileInfo, error) {
+	if f.fd == None {
+		return nil, fs.ErrClosed
+	}
 	stat, errno := f.ctx.FdFilestatGet(f.fd)
 	if err := makeError(errno); err != nil {
 		return nil, err
@@ -687,6 +717,9 @@ func (f *contextFile) Stat() (fs.FileInfo, error) {
 }
 
 func (f *contextFile) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if f.fd == None {
+		return nil, fs.ErrClosed
+	}
 	stat, errno := f.ctx.PathFilestatGet(f.fd, 0, path)
 	if err := makeError(errno); err != nil {
 		return nil, err
@@ -695,16 +728,25 @@ func (f *contextFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 }
 
 func (f *contextFile) Chtimes(atim, mtim time.Time) error {
+	if f.fd == None {
+		return fs.ErrClosed
+	}
 	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(f.ctx.FdFilestatSetTimes(f.fd, a, m, fst))
 }
 
 func (f *contextFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
+	if f.fd == None {
+		return fs.ErrClosed
+	}
 	a, m, fst := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(f.ctx.PathFilestatSetTimes(f.fd, makeLookupflags(flags), path, a, m, fst))
 }
 
 func (f *contextFile) Truncate(size int64) error {
+	if f.fd == None {
+		return fs.ErrClosed
+	}
 	return makeError(f.ctx.FdFilestatSetSize(f.fd, Filesize(size)))
 }
 

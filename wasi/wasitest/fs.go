@@ -34,6 +34,135 @@ func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
 	})
 }
 
+func testFileErrClosed(t *testing.T, file wasi.File) {
+	assertClose(t, file)
+
+	tests := []struct {
+		methodName string
+		methodCall func(wasi.File) error
+	}{
+		{
+			methodName: "Close",
+			methodCall: func(f wasi.File) error {
+				err := f.Close()
+				return err
+			},
+		},
+
+		{
+			methodName: "Read",
+			methodCall: func(f wasi.File) error {
+				_, err := f.Read(nil)
+				return err
+			},
+		},
+
+		{
+			methodName: "ReadAt",
+			methodCall: func(f wasi.File) error {
+				_, err := f.ReadAt(nil, 0)
+				return err
+			},
+		},
+
+		{
+			methodName: "Write",
+			methodCall: func(f wasi.File) error {
+				_, err := f.Write(nil)
+				return err
+			},
+		},
+
+		{
+			methodName: "WriteAt",
+			methodCall: func(f wasi.File) error {
+				_, err := f.WriteAt(nil, 0)
+				return err
+			},
+		},
+
+		{
+			methodName: "Seek",
+			methodCall: func(f wasi.File) error {
+				_, err := f.Seek(0, io.SeekStart)
+				return err
+			},
+		},
+
+		{
+			methodName: "Stat",
+			methodCall: func(f wasi.File) error {
+				_, err := f.Stat()
+				return err
+			},
+		},
+
+		{
+			methodName: "ReadDir",
+			methodCall: func(f wasi.File) error {
+				_, err := f.ReadDir(0)
+				return err
+			},
+		},
+
+		{
+			methodName: "OpenFile",
+			methodCall: func(f wasi.File) error {
+				_, err := f.OpenFile("foo", 0, 0)
+				return err
+			},
+		},
+
+		{
+			methodName: "StatFile",
+			methodCall: func(f wasi.File) error {
+				_, err := f.StatFile("foo", 0)
+				return err
+			},
+		},
+
+		{
+			methodName: "MakeDir",
+			methodCall: func(f wasi.File) error {
+				err := f.MakeDir("foo", 0755)
+				return err
+			},
+		},
+
+		{
+			methodName: "Chtimes",
+			methodCall: func(f wasi.File) error {
+				now := time.Now()
+				err := f.Chtimes(now, now)
+				return err
+			},
+		},
+
+		{
+			methodName: "ChtimesFile",
+			methodCall: func(f wasi.File) error {
+				now := time.Now()
+				err := f.ChtimesFile("foo", 0, now, now)
+				return err
+			},
+		},
+
+		{
+			methodName: "Truncate",
+			methodCall: func(f wasi.File) error {
+				err := f.Truncate(0)
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run("calling "+test.methodName+" on a closed file returns fs.ErrClosed", func(t *testing.T) {
+			assertErrorIs(t, test.methodCall(file), fs.ErrClosed)
+		})
+	}
+}
+
 func assertNewFS(t *testing.T, newFS func() (wasi.FS, CloseFS, error)) (wasi.FS, CloseFS) {
 	t.Helper()
 	fsys, closeFS, err := newFS()

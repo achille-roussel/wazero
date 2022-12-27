@@ -7,6 +7,7 @@ import (
 	"os"
 	fspath "path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -140,17 +141,36 @@ type fsFile struct {
 	path string
 }
 
-func (f *fsFile) Name() string { return fspath.Base(f.path) }
+func (f *fsFile) Name() string {
+	return fspath.Base(f.path)
+}
 
-func (f *fsFile) Close() error { return f.base.Close() }
+func (f *fsFile) Close() error {
+	if f.base == nil {
+		return fs.ErrClosed
+	}
+	defer func() { f.base = nil }()
+	return f.base.Close()
+}
 
 func (f *fsFile) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
+	if f.base == nil {
+		return nil, fs.ErrClosed
+	}
 	return f.fsys.OpenFile(f.pathTo(path), flags, perm)
 }
 
-func (f *fsFile) Read(b []byte) (int, error) { return f.base.Read(b) }
+func (f *fsFile) Read(b []byte) (int, error) {
+	if f.base == nil {
+		return 0, fs.ErrClosed
+	}
+	return f.base.Read(b)
+}
 
 func (f *fsFile) ReadAt(b []byte, off int64) (int, error) {
+	if f.base == nil {
+		return 0, fs.ErrClosed
+	}
 	if r, ok := f.base.(io.ReaderAt); ok {
 		return r.ReadAt(b, off)
 	}
@@ -158,40 +178,84 @@ func (f *fsFile) ReadAt(b []byte, off int64) (int, error) {
 }
 
 func (f *fsFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	if f.base == nil {
+		return nil, fs.ErrClosed
+	}
 	if r, ok := f.base.(fs.ReadDirFile); ok {
 		return r.ReadDir(n)
 	}
 	return nil, ErrNotImplemented
 }
 
-func (f *fsFile) Stat() (fs.FileInfo, error) { return f.base.Stat() }
+func (f *fsFile) Stat() (fs.FileInfo, error) {
+	if f.base == nil {
+		return nil, fs.ErrClosed
+	}
+	return f.base.Stat()
+}
 
 func (f *fsFile) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if f.base == nil {
+		return nil, fs.ErrClosed
+	}
 	return f.fsys.StatFile(f.pathTo(path), flags)
 }
 
-func (f *fsFile) Chtimes(atim, mtim time.Time) error { return ErrReadOnly }
+func (f *fsFile) Chtimes(atim, mtim time.Time) error {
+	if f.base == nil {
+		return fs.ErrClosed
+	}
+	return ErrReadOnly
+}
 
 func (f *fsFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
+	if f.base == nil {
+		return fs.ErrClosed
+	}
 	return f.fsys.Chtimes(f.pathTo(path), flags, atim, mtim)
 }
 
-func (f *fsFile) Truncate(size int64) error { return ErrReadOnly }
+func (f *fsFile) Truncate(size int64) error {
+	if f.base == nil {
+		return fs.ErrClosed
+	}
+	return ErrReadOnly
+}
 
 func (f *fsFile) Seek(offset int64, whence int) (int64, error) {
+	if f.base == nil {
+		return 0, fs.ErrClosed
+	}
 	if s, ok := f.base.(io.Seeker); ok {
 		return s.Seek(offset, whence)
 	}
 	return 0, ErrNotImplemented
 }
 
-func (f *fsFile) Write([]byte) (int, error) { return 0, ErrReadOnly }
+func (f *fsFile) Write([]byte) (int, error) {
+	if f.base == nil {
+		return 0, fs.ErrClosed
+	}
+	return 0, ErrReadOnly
+}
 
-func (f *fsFile) WriteAt([]byte, int64) (int, error) { return 0, ErrReadOnly }
+func (f *fsFile) WriteAt([]byte, int64) (int, error) {
+	if f.base == nil {
+		return 0, fs.ErrClosed
+	}
+	return 0, ErrReadOnly
+}
 
-func (f *fsFile) MakeDir(path string, perm fs.FileMode) error { return ErrReadOnly }
+func (f *fsFile) MakeDir(path string, perm fs.FileMode) error {
+	if f.base == nil {
+		return fs.ErrClosed
+	}
+	return ErrReadOnly
+}
 
-func (f *fsFile) pathTo(path string) string { return fspath.Join(f.path, path) }
+func (f *fsFile) pathTo(path string) string {
+	return fspath.Join(f.path, path)
+}
 
 // DirFS returns a file system backed by the given root directory.
 //
@@ -203,6 +267,9 @@ func DirFS(root string) (FS, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
+	}
+	if filepath.Separator != '/' {
+		root = strings.ReplaceAll(root, string(filepath.Separator), "/")
 	}
 	return &dirFS{root: root}, nil
 }
@@ -246,18 +313,19 @@ func (fsys *dirFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
 }
 
 func (fsys *dirFS) pathTo(path string) string {
-	return filepath.Join(fsys.root, filepath.FromSlash(path))
+	return fspath.Join(fsys.root, path)
 }
 
 func (fsys *dirFS) openFile(path string, flags int, perm fs.FileMode) (File, error) {
-	f, err := os.OpenFile(path, flags, perm)
+	f, err := os.OpenFile(filepath.FromSlash(path), flags, perm)
 	if err != nil {
 		return nil, err
 	}
-	return &dirFile{fsys: fsys, File: f}, nil
+	return &dirFile{fsys: fsys, file: f, path: path}, nil
 }
 
 func (fsys *dirFS) statFile(path string, flags int) (fs.FileInfo, error) {
+	path = filepath.FromSlash(path)
 	if (flags & O_NOFOLLOW) != 0 {
 		return os.Lstat(path)
 	} else {
@@ -266,35 +334,99 @@ func (fsys *dirFS) statFile(path string, flags int) (fs.FileInfo, error) {
 }
 
 func (fsys *dirFS) createDir(path string, perm fs.FileMode) error {
-	return os.Mkdir(path, perm)
+	return os.Mkdir(filepath.FromSlash(path), perm)
 }
 
 func (fsys *dirFS) chtimes(path string, flags int, atim, mtim time.Time) error {
 	if flags != 0 {
 		return fs.ErrInvalid
 	}
-	return os.Chtimes(path, atim, mtim)
+	return os.Chtimes(filepath.FromSlash(path), atim, mtim)
 }
 
 type dirFile struct {
 	fsys *dirFS
-	*os.File
+	file *os.File
+	path string
 }
 
 func (f *dirFile) Name() string {
-	return filepath.Base(f.File.Name())
+	return fspath.Base(f.path)
+}
+
+func (f *dirFile) Close() error {
+	if f.file == nil {
+		return fs.ErrClosed
+	}
+	defer func() { f.file = nil }()
+	return f.file.Close()
+}
+
+func (f *dirFile) Read(b []byte) (int, error) {
+	if f.file == nil {
+		return 0, fs.ErrClosed
+	}
+	return f.file.Read(b)
+}
+
+func (f *dirFile) ReadAt(b []byte, off int64) (int, error) {
+	if f.file == nil {
+		return 0, fs.ErrClosed
+	}
+	return f.file.ReadAt(b, off)
+}
+
+func (f *dirFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	if f.file == nil {
+		return nil, fs.ErrClosed
+	}
+	return f.file.ReadDir(n)
+}
+
+func (f *dirFile) Write(b []byte) (int, error) {
+	if f.file == nil {
+		return 0, fs.ErrClosed
+	}
+	return f.file.Write(b)
+}
+
+func (f *dirFile) WriteAt(b []byte, off int64) (int, error) {
+	if f.file == nil {
+		return 0, fs.ErrClosed
+	}
+	return f.file.WriteAt(b, off)
+}
+
+func (f *dirFile) Seek(offset int64, whence int) (int64, error) {
+	if f.file == nil {
+		return 0, fs.ErrClosed
+	}
+	return f.file.Seek(offset, whence)
 }
 
 func (f *dirFile) OpenFile(path string, flags int, perm fs.FileMode) (File, error) {
 	if !fs.ValidPath(path) {
 		return nil, fs.ErrInvalid
 	}
+	if f.file == nil {
+		return nil, fs.ErrClosed
+	}
 	return f.fsys.openFile(f.pathTo(path), flags, perm)
+}
+
+func (f *dirFile) Stat() (fs.FileInfo, error) {
+	if f.file == nil {
+		return nil, fs.ErrClosed
+	}
+	return f.file.Stat()
 }
 
 func (f *dirFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	if !fs.ValidPath(path) {
 		return nil, fs.ErrInvalid
+	}
+	if f.file == nil {
+		return nil, fs.ErrClosed
 	}
 	return f.fsys.statFile(f.pathTo(path), flags)
 }
@@ -303,22 +435,34 @@ func (f *dirFile) MakeDir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
+	if f.file == nil {
+		return fs.ErrClosed
+	}
 	return f.fsys.createDir(f.pathTo(path), perm)
 }
 
 func (f *dirFile) Chtimes(atim, mtim time.Time) error {
-	return f.fsys.chtimes(f.File.Name(), O_NOFOLLOW, atim, mtim)
+	if f.file == nil {
+		return fs.ErrClosed
+	}
+	return f.fsys.chtimes(f.path, O_NOFOLLOW, atim, mtim)
 }
 
 func (f *dirFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
+	if f.file == nil {
+		return fs.ErrClosed
+	}
 	return f.fsys.chtimes(f.pathTo(path), flags, atim, mtim)
 }
 
 func (f *dirFile) Truncate(size int64) error {
-	err := f.File.Truncate(size)
+	if f.file == nil {
+		return fs.ErrClosed
+	}
+	err := f.file.Truncate(size)
 	// POSIX allows EINVAL or EBADF in cases where the file descriptor does not
 	// allow write operations. EINVAL may also be returned when the size
 	// argument is negative or greater thatn the maximum file size.
@@ -340,7 +484,7 @@ func (f *dirFile) Truncate(size int64) error {
 }
 
 func (f *dirFile) pathTo(path string) string {
-	return filepath.Join(f.File.Name(), filepath.FromSlash(path))
+	return fspath.Join(f.path, path)
 }
 
 // SubFS returns a file system based on fsys rooted at the given directory path.
