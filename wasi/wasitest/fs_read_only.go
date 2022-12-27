@@ -87,6 +87,7 @@ func testReadOnlyFS(t *testing.T, newFS MakeReadOnlyFS) {
 		"foo": new(fstest.MapFile),
 	}))
 	defer closeFS()
+	testFSErrNotExist(t, fsys)
 
 	dir := assertOpenFile(t, fsys, ".", 0, 0)
 	defer dir.Close()

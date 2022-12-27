@@ -128,10 +128,16 @@ func (fsys *fsFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 }
 
 func (fsys *fsFS) MakeDir(path string, perm fs.FileMode) error {
+	if _, err := fsys.StatFile(fspath.Dir(path), 0); err != nil {
+		return err
+	}
 	return ErrReadOnly
 }
 
 func (fsys *fsFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
+	if _, err := fsys.StatFile(path, 0); err != nil {
+		return err
+	}
 	return ErrReadOnly
 }
 
@@ -201,6 +207,18 @@ func (f *fsFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return f.fsys.StatFile(f.pathTo(path), flags)
 }
 
+func (f *fsFile) testFileExists(op, path string, flags int) error {
+	_, err := f.StatFile(path, flags)
+	if err != nil {
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			pathErr.Op = op
+		}
+		return err
+	}
+	return err
+}
+
 func (f *fsFile) Chtimes(atim, mtim time.Time) error {
 	if f.base == nil {
 		return fs.ErrClosed
@@ -209,8 +227,8 @@ func (f *fsFile) Chtimes(atim, mtim time.Time) error {
 }
 
 func (f *fsFile) ChtimesFile(path string, flags int, atim, mtim time.Time) error {
-	if f.base == nil {
-		return fs.ErrClosed
+	if err := f.testFileExists("chtimes", path, flags); err != nil {
+		return err
 	}
 	return f.fsys.Chtimes(f.pathTo(path), flags, atim, mtim)
 }
@@ -247,8 +265,8 @@ func (f *fsFile) WriteAt([]byte, int64) (int, error) {
 }
 
 func (f *fsFile) MakeDir(path string, perm fs.FileMode) error {
-	if f.base == nil {
-		return fs.ErrClosed
+	if err := f.testFileExists("mkdir", fspath.Dir(path), 0); err != nil {
+		return err
 	}
 	return ErrReadOnly
 }

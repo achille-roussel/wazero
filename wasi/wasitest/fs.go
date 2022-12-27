@@ -34,12 +34,81 @@ func testFS(t *testing.T, fsys fs.FS, files fstest.MapFS) {
 	})
 }
 
+type fsTestCase struct {
+	scenario string
+	function func(wasi.FS) error
+}
+
+func testFSError(t *testing.T, fsys wasi.FS, want error, tests ...fsTestCase) {
+	t.Helper()
+	for _, test := range tests {
+		t.Run(test.scenario, func(t *testing.T) {
+			assertErrorIs(t, test.function(fsys), want)
+		})
+	}
+}
+
+func testFSErrNotExist(t *testing.T, fsys wasi.FS) {
+	t.Helper()
+	testFSError(t, fsys, fs.ErrNotExist,
+		fsTestCase{
+			scenario: "calling Open for a path which does not exist returns fs.ErrNotExist",
+			function: func(fsys wasi.FS) error {
+				_, err := fsys.Open("nope")
+				return err
+			},
+		},
+
+		fsTestCase{
+			scenario: "calling OpenFile for a path which does not exist returns fs.ErrNotExist",
+			function: func(fsys wasi.FS) error {
+				_, err := fsys.OpenFile("nope", 0, 0)
+				return err
+			},
+		},
+
+		fsTestCase{
+			scenario: "calling Stat for a path which does not exist returns fs.ErrNotExist",
+			function: func(fsys wasi.FS) error {
+				_, err := fsys.Stat("nope")
+				return err
+			},
+		},
+
+		fsTestCase{
+			scenario: "calling StatFile for a path which does not exist returns fs.ErrNotExist",
+			function: func(fsys wasi.FS) error {
+				_, err := fsys.StatFile("nope", 0)
+				return err
+			},
+		},
+
+		fsTestCase{
+			scenario: "calling MakeDir for a path which does not exist returns fs.ErrNotExist",
+			function: func(fsys wasi.FS) error {
+				err := fsys.MakeDir("nope/nope/nope", 0755)
+				return err
+			},
+		},
+
+		fsTestCase{
+			scenario: "calling ChtimesFile for a path which does not exist returns fs.ErrNotExist",
+			function: func(fsys wasi.FS) error {
+				now := time.Now()
+				err := fsys.Chtimes("nope", 0, now, now)
+				return err
+			},
+		},
+	)
+}
+
 type fileTestCase struct {
 	scenario string
 	function func(wasi.File) error
 }
 
 func testFileError(t *testing.T, file wasi.File, want error, tests ...fileTestCase) {
+	t.Helper()
 	for _, test := range tests {
 		t.Run(test.scenario, func(t *testing.T) {
 			assertErrorIs(t, test.function(file), want)
@@ -48,11 +117,37 @@ func testFileError(t *testing.T, file wasi.File, want error, tests ...fileTestCa
 }
 
 func testFileErrNotExist(t *testing.T, file wasi.File) {
+	t.Helper()
 	testFileError(t, file, fs.ErrNotExist,
 		fileTestCase{
 			scenario: "calling OpenFile for a file which does not exist returns fs.ErrNotExist",
-			function: func(f wasi.File) error {
-				_, err := f.OpenFile("whatever", 0, 0)
+			function: func(file wasi.File) error {
+				_, err := file.OpenFile("nope", 0, 0)
+				return err
+			},
+		},
+
+		fileTestCase{
+			scenario: "calling StatFile for a file which does not exist returns fs.ErrNotExist",
+			function: func(file wasi.File) error {
+				_, err := file.StatFile("nope", 0)
+				return err
+			},
+		},
+
+		fileTestCase{
+			scenario: "calling MakeDir for a file which does not exist returns fs.ErrNotExist",
+			function: func(file wasi.File) error {
+				err := file.MakeDir("nope/nope/nope", 0755)
+				return err
+			},
+		},
+
+		fileTestCase{
+			scenario: "calling ChtimesFile for a file which does not exist returns fs.ErrNotExist",
+			function: func(file wasi.File) error {
+				now := time.Now()
+				err := file.ChtimesFile("nope", 0, now, now)
 				return err
 			},
 		},
@@ -60,119 +155,120 @@ func testFileErrNotExist(t *testing.T, file wasi.File) {
 }
 
 func testFileErrClosed(t *testing.T, file wasi.File) {
+	t.Helper()
 	assertClose(t, file)
 
 	testFileError(t, file, fs.ErrClosed,
 		fileTestCase{
 			scenario: "calling Close on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				err := f.Close()
+			function: func(file wasi.File) error {
+				err := file.Close()
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling Read on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.Read(nil)
+			function: func(file wasi.File) error {
+				_, err := file.Read(nil)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling ReadAt on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.ReadAt(nil, 0)
+			function: func(file wasi.File) error {
+				_, err := file.ReadAt(nil, 0)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling Write on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.Write(nil)
+			function: func(file wasi.File) error {
+				_, err := file.Write(nil)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling WriteAt on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.WriteAt(nil, 0)
+			function: func(file wasi.File) error {
+				_, err := file.WriteAt(nil, 0)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling Seek on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.Seek(0, io.SeekStart)
+			function: func(file wasi.File) error {
+				_, err := file.Seek(0, io.SeekStart)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling Stat on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.Stat()
+			function: func(file wasi.File) error {
+				_, err := file.Stat()
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling ReadDir on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.ReadDir(0)
+			function: func(file wasi.File) error {
+				_, err := file.ReadDir(0)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling OpenFile on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.OpenFile("foo", 0, 0)
+			function: func(file wasi.File) error {
+				_, err := file.OpenFile("foo", 0, 0)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling StatFile on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				_, err := f.StatFile("foo", 0)
+			function: func(file wasi.File) error {
+				_, err := file.StatFile("foo", 0)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling MakeDir on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				err := f.MakeDir("foo", 0755)
+			function: func(file wasi.File) error {
+				err := file.MakeDir("foo", 0755)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling Chtimes on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
+			function: func(file wasi.File) error {
 				now := time.Now()
-				err := f.Chtimes(now, now)
+				err := file.Chtimes(now, now)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling ChtimesFile on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
+			function: func(file wasi.File) error {
 				now := time.Now()
-				err := f.ChtimesFile("foo", 0, now, now)
+				err := file.ChtimesFile("foo", 0, now, now)
 				return err
 			},
 		},
 
 		fileTestCase{
 			scenario: "calling Truncate on a closed file returns fs.ErrClosed",
-			function: func(f wasi.File) error {
-				err := f.Truncate(0)
+			function: func(file wasi.File) error {
+				err := file.Truncate(0)
 				return err
 			},
 		},

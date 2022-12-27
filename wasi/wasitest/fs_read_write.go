@@ -127,6 +127,7 @@ func testReadWriteFS(t *testing.T, newFS MakeReadWriteFS) {
 
 	fsys, closeFS := assertNewFS(t, newFS)
 	defer closeFS()
+	testFSErrNotExist(t, fsys)
 
 	assertMakeDir(t, fsys, "tmp", 0755)
 	dir := assertOpenFile(t, fsys, "tmp", 0, 0)
