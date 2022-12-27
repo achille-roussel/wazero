@@ -163,7 +163,7 @@ func (l *loggingListener) writeFuncExit(message *strings.Builder, err error, val
 
 func (l *loggingListener) writeResult(message *strings.Builder, i int, vals []uint64) int {
 	if i == l.wasiErrnoPos {
-		message.WriteString(wasi_snapshot_preview1.ErrnoName(uint32(vals[i])))
+		message.WriteString(wasi_snapshot_preview1.Errno(vals[i]).Name())
 		return i + 1
 	}
 

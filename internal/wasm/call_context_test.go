@@ -9,6 +9,8 @@ import (
 	"github.com/tetratelabs/wazero/internal/sys"
 	testfs "github.com/tetratelabs/wazero/internal/testing/fs"
 	"github.com/tetratelabs/wazero/internal/testing/require"
+	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/wasi"
 )
 
 func TestCallContext_WithMemory(t *testing.T) {
@@ -143,26 +145,25 @@ func TestCallContext_Close(t *testing.T) {
 	}
 
 	t.Run("calls Context.Close()", func(t *testing.T) {
-		sysCtx := sys.DefaultContext(testfs.FS{"foo": &testfs.File{}})
-		fsCtx := sysCtx.FS()
+		sysCtx := sys.DefaultContext(wasi.NewFS(testfs.FS{"foo": &testfs.File{}}))
 
-		_, err := fsCtx.OpenFile("/foo")
+		_, err := pathOpen(sysCtx, "/foo")
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)
 		require.NoError(t, err)
 
 		// We use side effects to determine if Close in fact called Context.Close (without repeating sys_test.go).
-		// One side effect of Context.Close is that it clears the openedFiles map. Verify our base case.
-		_, ok := fsCtx.OpenedFile(3)
-		require.True(t, ok, "sysCtx.openedFiles was empty")
+		// One side effect of Context.Close is that it closes all open files. Verify our base case.
+		numFilesBefore := sysCtx.NumFiles()
+		require.True(t, numFilesBefore != 0, "sysCtx has opened files")
 
 		// Closing should not err.
 		require.NoError(t, m.Close(testCtx))
 
 		// Verify our intended side-effect
-		_, ok = fsCtx.OpenedFile(3)
-		require.False(t, ok, "expected no opened files")
+		numFilesAfter := sysCtx.NumFiles()
+		require.False(t, numFilesAfter != 0, "expected no opened files")
 
 		// Verify no error closing again.
 		require.NoError(t, m.Close(testCtx))
@@ -171,10 +172,9 @@ func TestCallContext_Close(t *testing.T) {
 	t.Run("error closing", func(t *testing.T) {
 		// Right now, the only way to err closing the sys context is if a File.Close erred.
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
-		sysCtx := sys.DefaultContext(testFS)
-		fsCtx := sysCtx.FS()
+		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
 
-		_, err := fsCtx.OpenFile("/foo")
+		_, err := pathOpen(sysCtx, "/foo")
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)
@@ -183,8 +183,8 @@ func TestCallContext_Close(t *testing.T) {
 		require.EqualError(t, m.Close(testCtx), "error closing")
 
 		// Verify our intended side-effect
-		_, ok := fsCtx.OpenedFile(3)
-		require.False(t, ok, "expected no opened files")
+		numFiles := sysCtx.NumFiles()
+		require.False(t, numFiles != 0, "expected no opened files")
 	})
 }
 
@@ -239,26 +239,25 @@ func TestCallContext_CallDynamic(t *testing.T) {
 	}
 
 	t.Run("calls Context.Close()", func(t *testing.T) {
-		sysCtx := sys.DefaultContext(testfs.FS{"foo": &testfs.File{}})
-		fsCtx := sysCtx.FS()
+		sysCtx := sys.DefaultContext(wasi.NewFS(testfs.FS{"foo": &testfs.File{}}))
 
-		_, err := fsCtx.OpenFile("/foo")
+		_, err := pathOpen(sysCtx, "/foo")
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)
 		require.NoError(t, err)
 
 		// We use side effects to determine if Close in fact called Context.Close (without repeating sys_test.go).
-		// One side effect of Context.Close is that it clears the openedFiles map. Verify our base case.
-		_, ok := fsCtx.OpenedFile(3)
-		require.True(t, ok, "sysCtx.openedFiles was empty")
+		// One side effect of Context.Close is that it closes all open files. Verify our base case.
+		numFilesBefore := sysCtx.NumFiles()
+		require.True(t, numFilesBefore != 0, "sysCtx has opened files")
 
 		// Closing should not err.
 		require.NoError(t, m.Close(testCtx))
 
 		// Verify our intended side-effect
-		_, ok = fsCtx.OpenedFile(3)
-		require.False(t, ok, "expected no opened files")
+		numFilesAfter := sysCtx.NumFiles()
+		require.False(t, numFilesAfter != 0, "expected no opened files")
 
 		// Verify no error closing again.
 		require.NoError(t, m.Close(testCtx))
@@ -267,10 +266,9 @@ func TestCallContext_CallDynamic(t *testing.T) {
 	t.Run("error closing", func(t *testing.T) {
 		// Right now, the only way to err closing the sys context is if a File.Close erred.
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
-		sysCtx := sys.DefaultContext(testFS)
-		fsCtx := sysCtx.FS()
+		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
 
-		_, err := fsCtx.OpenFile("/foo")
+		_, err := pathOpen(sysCtx, "/foo")
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)
@@ -279,7 +277,23 @@ func TestCallContext_CallDynamic(t *testing.T) {
 		require.EqualError(t, m.Close(testCtx), "error closing")
 
 		// Verify our intended side-effect
-		_, ok := fsCtx.OpenedFile(3)
-		require.False(t, ok, "expected no opened files")
+		numFiles := sysCtx.NumFiles()
+		require.False(t, numFiles != 0, "expected no opened files")
 	})
+}
+
+func pathOpen(sysCtx *sys.Context, path string) (wasi_snapshot_preview1.Fd, error) {
+	fd, errno := sysCtx.PathOpen(
+		wasi_snapshot_preview1.None,
+		0, // lookupflags
+		path,
+		0,                        // oflags
+		wasi_snapshot_preview1.R, // fsRightsBase
+		wasi_snapshot_preview1.R, // fsRightsInheriting
+		0,                        // fdflags
+	)
+	if errno != wasi_snapshot_preview1.ESUCCESS {
+		return wasi_snapshot_preview1.None, errno
+	}
+	return fd, nil
 }

@@ -94,7 +94,7 @@ func testReadOnlyFSOpenNotExist(t *testing.T, newFS MakeReadOnlyFS) {
 	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
 	defer assertCloseFS(t, closeFS)
 
-	_, err := fsys.OpenFile("/test", 0, 0)
+	_, err := fsys.OpenFile("test", 0, 0)
 	assertErrorIs(t, err, fs.ErrNotExist)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
 
@@ -137,17 +138,21 @@ func processClockEvent(ctx context.Context, mod api.Module, inBuf []byte) Errno 
 // processFDEvent returns a validation error or ErrnoNotsup as file or socket
 // subscriptions are not yet supported.
 func processFDEvent(mod api.Module, eventType byte, inBuf []byte) Errno {
-	fd := le.Uint32(inBuf)
-	fsc := mod.(*wasm.CallContext).Sys.FS()
+	fd := wasi_snapshot_preview1.Fd(le.Uint32(inBuf))
+	ctx := mod.(*wasm.CallContext)
+
+	s, errno := ctx.Sys.FdFdstatGet(fd)
+	if errno != 0 {
+		return errno
+	}
 
 	// Choose the best error, which falls back to unsupported, until we support
 	// files.
-	errno := ErrnoNotsup
-	if eventType == eventTypeFdRead && fsc.FdReader(fd) == nil {
+	errno = ErrnoNotsup
+	if eventType == eventTypeFdRead && !s.FsRightsBase.Has(wasi_snapshot_preview1.FD_READ) {
 		errno = ErrnoBadf
-	} else if eventType == eventTypeFdWrite && fsc.FdWriter(fd) == nil {
+	} else if eventType == eventTypeFdWrite && !s.FsRightsBase.Has(wasi_snapshot_preview1.FD_WRITE) {
 		errno = ErrnoBadf
 	}
-
 	return errno
 }

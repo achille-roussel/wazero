@@ -149,6 +149,28 @@ const (
 	None Fd = ^Fd(0)
 )
 
+type Fdstat struct {
+	FsFiletype         Filetype
+	FsFlags            Fdflags
+	FsRightsBase       Rights
+	FsRightsInheriting Rights
+}
+
+func (s *Fdstat) Marshal() (b [24]byte) {
+	binary.LittleEndian.PutUint16(b[0:], uint16(s.FsFiletype))
+	binary.LittleEndian.PutUint16(b[2:], uint16(s.FsFlags))
+	binary.LittleEndian.PutUint64(b[8:], uint64(s.FsRightsBase))
+	binary.LittleEndian.PutUint64(b[16:], uint64(s.FsRightsInheriting))
+	return b
+}
+
+func (s *Fdstat) Unmarshal(b [24]byte) {
+	s.FsFiletype = Filetype(binary.LittleEndian.Uint16(b[0:]))
+	s.FsFlags = Fdflags(binary.LittleEndian.Uint16(b[2:]))
+	s.FsRightsBase = Rights(binary.LittleEndian.Uint64(b[8:]))
+	s.FsRightsInheriting = Rights(binary.LittleEndian.Uint64(b[16:]))
+}
+
 type Lookupflags uint32
 
 const (
@@ -219,7 +241,7 @@ const (
 )
 
 const (
-	defaultRights = FD_SEEK |
+	baseRights = FD_SEEK |
 		FD_TELL |
 		FD_FILESTAT_GET |
 		PATH_OPEN |
@@ -227,8 +249,9 @@ const (
 		PATH_FILESTAT_GET |
 		PATH_FILESTAT_SET_SIZE |
 		PATH_FILESTAT_SET_TIMES
-	readRights  = FD_READ | FD_READDIR
-	writeRights = FD_WRITE | FD_FILESTAT_SET_SIZE | FD_FILESTAT_SET_TIMES
+	R  = baseRights | FD_READ | FD_READDIR
+	W  = baseRights | FD_WRITE | FD_FILESTAT_SET_SIZE | FD_FILESTAT_SET_TIMES
+	RW = R | W
 )
 
 func (r Rights) Has(rights Rights) bool { return (r & rights) == rights }
@@ -262,7 +285,7 @@ func makeErrno(err error) Errno {
 	if errors.As(err, &errno) {
 		return errno
 	}
-	return ENOTCAPABLE
+	return EIO
 }
 
 func makeError(errno Errno) error {
@@ -326,19 +349,19 @@ func makeOpenFileFlags(dirflags Lookupflags, oflags Oflags, fsRightsBase, fsRigh
 func makePathOpenFlags(flags int, perm fs.FileMode) (dirflags Lookupflags, oflags Oflags, fsRightsBase, fsRightsInheriting Rights, fdflags Fdflags) {
 	switch {
 	case (flags & wasi.O_RDWR) != 0:
-		fsRightsBase = defaultRights | readRights | writeRights
+		fsRightsBase = RW
 	case (flags & wasi.O_WRONLY) != 0:
-		fsRightsBase = defaultRights | writeRights
+		fsRightsBase = W
 	default:
-		fsRightsBase = defaultRights | readRights
+		fsRightsBase = R
 	}
 
 	if perm != 0 {
 		if (perm & 0400) == 0 {
-			fsRightsBase &= ^readRights
+			fsRightsBase &= ^R
 		}
 		if (perm & 0200) == 0 {
-			fsRightsBase &= ^writeRights
+			fsRightsBase &= ^W
 		}
 	}
 

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	fspath "path"
-	"strings"
 	"time"
 
 	"github.com/tetratelabs/wazero/wasi"
@@ -28,13 +28,44 @@ type Context struct {
 // Calling this method is useful to close all open files tracked by the context
 // that the application may have have left open.
 func (ctx *Context) Close() error {
+	var lastErr error
 	ctx.files.scan(func(fd Fd, f *file) bool {
-		f.base.Close()
+		if err := f.base.Close(); err != nil {
+			lastErr = err
+		}
 		return true
 	})
 	ctx.files.reset()
+	return lastErr
+}
+
+// Register adds f to the context, returning its file descriptor number.
+//
+// In the current implementation of the WASI context, files descriptor numbers
+// are allocated incrementally, allowing the use of this method to mount
+// standard input and outputs by registering those files before any other
+// files were open in the context.
+func (ctx *Context) Register(f wasi.File, fsRightsBase, fsRightsInheriting Rights) Fd {
+	return ctx.files.insert(file{
+		base:               f,
+		fsRightsBase:       fsRightsBase,
+		fsRightsInheriting: fsRightsInheriting,
+	})
+}
+
+// Lookup returns the file currently associated with the given file descriptor,
+// or nil if the Context does not have an entry for it.
+func (ctx *Context) Lookup(fd Fd) wasi.File {
+	if f := ctx.files.lookup(fd); f != nil {
+		return f.base
+	}
 	return nil
 }
+
+// NumFiles returns the number of files currently opened in this context.
+//
+// After calling Close on a Context, the method will return zero.
+func (ctx *Context) NumFiles() int { return ctx.files.len() }
 
 // FdClose is the implementation of the "fd_close"
 //
@@ -101,6 +132,28 @@ func (ctx *Context) FdTell(fd Fd) (Filesize, Errno) {
 	return Filesize(tell), makeErrno(err)
 }
 
+// FdFdstatGet is the implementation of the "fd_fdstat_get"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_filestat_get
+func (ctx *Context) FdFdstatGet(fd Fd) (Fdstat, Errno) {
+	f := ctx.files.lookup(fd)
+	if f == nil {
+		return Fdstat{}, EBADF
+	}
+	// There is no FD_FDSTAT_GET right, this operation is always allowed.
+	s, err := f.base.Stat()
+	if err != nil {
+		return Fdstat{}, makeErrno(err)
+	}
+	fdstat := Fdstat{
+		FsFiletype:         makeFiletype(s.Mode()),
+		FsFlags:            0, // TODO
+		FsRightsBase:       f.fsRightsBase,
+		FsRightsInheriting: f.fsRightsInheriting,
+	}
+	return fdstat, ESUCCESS
+}
+
 // FdFilestatGet is the implementation of the "fd_filestat_get"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_filestat_get
@@ -147,6 +200,28 @@ func (ctx *Context) FdFilestatSetTimes(fd Fd, atim, mtim Timestamp, flags Fstfla
 	return makeErrno(f.base.Chtimes(makeFileTimes(atim, mtim, flags)))
 }
 
+// FdRead is the implementation of the "fd_read"
+//
+// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_read
+func (ctx *Context) FdRead(fd Fd, iovs [][]byte) (Size, Errno) {
+	f := ctx.files.lookup(fd)
+	if f == nil {
+		return 0, EBADF
+	}
+	if !f.fsRightsBase.Has(FD_READ) {
+		return 0, EPERM
+	}
+	size := Size(0)
+	for _, buf := range iovs {
+		n, err := f.base.Read(buf)
+		size += Size(n)
+		if err != nil {
+			return size, makeErrno(err)
+		}
+	}
+	return size, ESUCCESS
+}
+
 // FdPread is the implementation of the "fd_pread"
 //
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_pread
@@ -170,31 +245,9 @@ func (ctx *Context) FdPread(fd Fd, iovs [][]byte, offset Filesize) (Size, Errno)
 	return size, ESUCCESS
 }
 
-// FdRead is the implementation of the "fd_read"
-//
-// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_read
-func (ctx *Context) FdRead(fd Fd, iovs [][]byte) (Size, Errno) {
-	f := ctx.files.lookup(fd)
-	if f == nil {
-		return 0, EBADF
-	}
-	if !f.fsRightsBase.Has(FD_READ) {
-		return 0, EPERM
-	}
-	size := Size(0)
-	for _, buf := range iovs {
-		n, err := f.base.Read(buf)
-		size += Size(n)
-		if err != nil {
-			return size, makeErrno(err)
-		}
-	}
-	return size, ESUCCESS
-}
-
 // FdReaddir is the implementation of the "fd_readdir"
 //
-// https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#fd_readdir
+// https://github.com/WebAssexombly/WASI/blob/main/phases/snapshot/docs.md#fd_readdir
 func (ctx *Context) FdReaddir(fd Fd, buf []byte, dircookie Dircookie) (Size, Errno) {
 	f := ctx.files.lookup(fd)
 	if f == nil {
@@ -203,7 +256,16 @@ func (ctx *Context) FdReaddir(fd Fd, buf []byte, dircookie Dircookie) (Size, Err
 	if !f.fsRightsBase.Has(FD_READDIR) {
 		return 0, EPERM
 	}
+	if len(buf) < 24 {
+		return 0, EINVAL
+	}
 	if dircookie < f.dircookie {
+		return 0, EINVAL
+	}
+	// We control the value of the cookie, and it should never be negative.
+	// However, we coerce it to signed to ensure the caller doesn't manipulate
+	// it in such a way that becomes negative.
+	if dircookie > math.MaxInt64 {
 		return 0, EINVAL
 	}
 
@@ -319,11 +381,11 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 	flags, perm := makeOpenFileFlags(dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	perm &= ^ctx.umask()
 
-	if fd == None || isAbs(path) {
+	if fd == None || fspath.IsAbs(path) {
 		if ctx.FileSystem == nil {
 			return None, ENOENT
 		}
-		base, err = ctx.FileSystem.OpenFile(path, flags, perm)
+		base, err = ctx.FileSystem.OpenFile(toRel(path), flags, perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -340,12 +402,7 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 		return None, makeErrno(err)
 	}
 
-	newFd := ctx.files.insert(file{
-		base:               base,
-		fsRightsBase:       fsRightsBase,
-		fsRightsInheriting: fsRightsInheriting,
-	})
-	return newFd, ESUCCESS
+	return ctx.Register(base, fsRightsBase, fsRightsInheriting), ESUCCESS
 }
 
 // PathCreateDirectory is the implementation of the "path_create_directory"
@@ -355,11 +412,11 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 	var perm = fs.ModePerm & ^ctx.umask()
 	var err error
 
-	if fd == None || isAbs(path) {
+	if fd == None || fspath.IsAbs(path) {
 		if ctx.FileSystem == nil {
 			return ENOENT
 		}
-		err = ctx.FileSystem.MakeDir(path, perm)
+		err = ctx.FileSystem.MakeDir(toRel(path), perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -380,11 +437,11 @@ func (ctx *Context) PathFilestatGet(fd Fd, flags Lookupflags, path string) (File
 	var info fs.FileInfo
 	var err error
 
-	if fd == None || isAbs(path) {
+	if fd == None || fspath.IsAbs(path) {
 		if ctx.FileSystem == nil {
 			return Filestat{}, ENOENT
 		}
-		info, err = ctx.FileSystem.StatFile(path, makeDefaultFlags(flags))
+		info, err = ctx.FileSystem.StatFile(toRel(path), makeDefaultFlags(flags))
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -409,11 +466,11 @@ func (ctx *Context) PathFilestatSetTimes(fd Fd, flags Lookupflags, path string, 
 	var a, m = makeFileTimes(atim, mtim, fstflags)
 	var err error
 
-	if fd == None || isAbs(path) {
+	if fd == None || fspath.IsAbs(path) {
 		if ctx.FileSystem == nil {
 			return ENOENT
 		}
-		err = ctx.FileSystem.Chtimes(path, makeDefaultFlags(flags), a, m)
+		err = ctx.FileSystem.Chtimes(toRel(path), makeDefaultFlags(flags), a, m)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -433,7 +490,13 @@ func (ctx *Context) FS() wasi.FS { return contextFS{ctx} }
 
 func (ctx *Context) umask() fs.FileMode { return ctx.Umask & fs.ModePerm }
 
-func isAbs(path string) bool { return strings.HasPrefix(path, "/") }
+func toRel(path string) string {
+	n := 0
+	for n < len(path) && path[n] == '/' {
+		n++
+	}
+	return path[n:]
+}
 
 type contextFS struct{ ctx *Context }
 
@@ -442,6 +505,9 @@ func (fsys contextFS) Open(name string) (fs.File, error) {
 }
 
 func (fsys contextFS) OpenFile(path string, flags int, perm fs.FileMode) (wasi.File, error) {
+	if !fs.ValidPath(path) {
+		return nil, fs.ErrInvalid
+	}
 	dirflags, oflags, fsRightsBase, fsRightsInheriting, fdflags := makePathOpenFlags(flags, perm)
 	fd, errno := fsys.ctx.PathOpen(None, dirflags, path, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	if err := makeError(errno); err != nil {
@@ -455,6 +521,9 @@ func (fsys contextFS) Stat(path string) (fs.FileInfo, error) {
 }
 
 func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
+	if !fs.ValidPath(path) {
+		return nil, fs.ErrInvalid
+	}
 	stat, errno := fsys.ctx.PathFilestatGet(None, makeLookupflags(flags), path)
 	if err := makeError(errno); err != nil {
 		return nil, err
@@ -463,12 +532,18 @@ func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 }
 
 func (fsys contextFS) MakeDir(path string, perm fs.FileMode) error {
+	if !fs.ValidPath(path) {
+		return fs.ErrInvalid
+	}
 	subctx := *fsys.ctx
 	subctx.Umask |= ^perm
 	return makeError(subctx.PathCreateDirectory(None, path))
 }
 
 func (fsys contextFS) Chtimes(path string, flags int, atim, mtim time.Time) error {
+	if !fs.ValidPath(path) {
+		return fs.ErrInvalid
+	}
 	a, m, f := makeTimestampsAndFstflags(atim, mtim)
 	return makeError(fsys.ctx.PathFilestatSetTimes(None, makeLookupflags(flags), path, a, m, f))
 }

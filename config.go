@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	internalsys "github.com/tetratelabs/wazero/internal/sys"
 	"github.com/tetratelabs/wazero/internal/wasm"
 	"github.com/tetratelabs/wazero/sys"
+	"github.com/tetratelabs/wazero/wasi"
 )
 
 // RuntimeConfig controls runtime behavior, with the default implementation as
@@ -343,12 +343,12 @@ type ModuleConfig interface {
 	//	require.NoError(t, err)
 	//
 	//	// "index.html" is accessible as "/index.html".
-	//	config := wazero.NewModuleConfig().WithFS(rooted)
+	//	config := wazero.NewModuleConfig().WithFS(wasi.NewFS(rooted))
 	//
 	// This example sets a mutable file-system:
 	//
 	//	// Files relative to "/work/appA" are accessible as "/".
-	//	config := wazero.NewModuleConfig().WithFS(os.DirFS("/work/appA"))
+	//	config := wazero.NewModuleConfig().WithFS(wasi.DirFS("/work/appA"))
 	//
 	// Isolation
 	//
@@ -359,8 +359,8 @@ type ModuleConfig interface {
 	// Working Directory "."
 	//
 	// Relative path resolution, such as "./config.yml" to "/config.yml" or
-	// otherwise, is compiler-specific. See /RATIONALE.md for notes.
-	WithFS(fs.FS) ModuleConfig
+	// otherwise, may be compiler-specific. See /RATIONALE.md for notes.
+	WithFS(wasi.FS) ModuleConfig
 
 	// WithName configures the module name. Defaults to what was decoded from the name section.
 	WithName(string) ModuleConfig
@@ -512,7 +512,7 @@ type moduleConfig struct {
 	// environKeys allow overwriting of existing values.
 	environKeys map[string]int
 	// fs is the file system to open files with
-	fs fs.FS
+	fs wasi.FS
 }
 
 // NewModuleConfig returns a ModuleConfig that can be used for configuring module instantiation.
@@ -565,7 +565,7 @@ func (c *moduleConfig) WithEnv(key, value string) ModuleConfig {
 }
 
 // WithFS implements ModuleConfig.WithFS
-func (c *moduleConfig) WithFS(fs fs.FS) ModuleConfig {
+func (c *moduleConfig) WithFS(fs wasi.FS) ModuleConfig {
 	ret := c.clone()
 	ret.fs = fs
 	return ret

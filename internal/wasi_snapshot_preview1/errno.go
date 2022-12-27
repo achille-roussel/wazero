@@ -2,9 +2,16 @@ package wasi_snapshot_preview1
 
 import "fmt"
 
-type Errno uint32
+type Errno uint32 // neither uint16 nor an alias for parity with wasm.ValueType
 
-func (e Errno) Name() string { return ErrnoName(uint32(e)) }
+// Name returns the POSIX error code name, except ErrnoSuccess, which is not an
+// error. e.g. Errno2big -> "E2BIG"
+func (e Errno) Name() string {
+	if int(e) < len(errnoToString) {
+		return errnoToString[e]
+	}
+	return fmt.Sprintf("errno(%d)", int(e))
+}
 
 func (e Errno) Error() string { return e.Name() }
 
@@ -87,14 +94,6 @@ const (
 	EXDEV
 	ENOTCAPABLE
 )
-
-// ErrnoName returns the POSIX error code name, except ErrnoSuccess, which is not an error. e.g. Errno2big -> "E2BIG"
-func ErrnoName(errno uint32) string {
-	if int(errno) < len(errnoToString) {
-		return errnoToString[errno]
-	}
-	return fmt.Sprintf("errno(%d)", errno)
-}
 
 var errnoToString = [...]string{
 	"ESUCCESS",

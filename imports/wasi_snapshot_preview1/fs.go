@@ -2,15 +2,16 @@ package wasi_snapshot_preview1
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"io/fs"
 	"math"
-	"path"
 	"syscall"
 
 	"github.com/tetratelabs/wazero/api"
 	internalsys "github.com/tetratelabs/wazero/internal/sys"
+	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
 
@@ -87,13 +88,9 @@ var fdAllocate = stubFunction(
 var fdClose = newHostFunc(fdCloseName, fdCloseFn, []api.ValueType{i32}, "fd")
 
 func fdCloseFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
-	fd := uint32(params[0])
-
-	if ok := fsc.CloseFile(fd); !ok {
-		return ErrnoBadf
-	}
-	return ErrnoSuccess
+	ctx := mod.(*wasm.CallContext)
+	fd := wasi_snapshot_preview1.Fd(params[0])
+	return ctx.Sys.FdClose(fd)
 }
 
 // fdDatasync is the WASI function named fdDatasyncName which synchronizes
@@ -144,9 +141,9 @@ var fdFdstatGet = newHostFunc(fdFdstatGetName, fdFdstatGetFn, []api.ValueType{i3
 // fdFdstatGetFn cannot currently use proxyResultParams because fdstat is larger
 // than api.ValueTypeI64 (i64 == 8 bytes, but fdstat is 24).
 func fdFdstatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
-
-	fd, resultFdstat := uint32(params[0]), uint32(params[1])
+	ctx := mod.(*wasm.CallContext)
+	fd := wasi_snapshot_preview1.Fd(params[0])
+	resultFdstat := uint32(params[1])
 
 	// Ensure we can write the fdstat
 	buf, ok := mod.Memory().Read(resultFdstat, 24)
@@ -154,22 +151,13 @@ func fdFdstatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
 		return ErrnoFault
 	}
 
-	stat, err := fsc.StatFile(fd)
-	if err != nil {
-		return toErrno(err)
+	stat, errno := ctx.Sys.FdFdstatGet(fd)
+	if errno != ErrnoSuccess {
+		return errno
 	}
 
-	filetype := getWasiFiletype(stat.Mode())
-	var fdflags wasiFdflags
-
-	// Determine if it is writeable
-	if w := fsc.FdWriter(fd); w != nil {
-		// TODO: maybe cache flags to open instead
-		fdflags = wasiFdflagsAppend
-	}
-
-	writeFdstat(buf, filetype, fdflags)
-
+	b := stat.Marshal()
+	copy(buf, b[:24])
 	return ErrnoSuccess
 }
 
@@ -277,25 +265,23 @@ const (
 // fdFilestatGetFn cannot currently use proxyResultParams because filestat is
 // larger than api.ValueTypeI64 (i64 == 8 bytes, but filestat is 64).
 func fdFilestatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	return fdFilestatGetFunc(mod, uint32(params[0]), uint32(params[1]))
-}
-
-func fdFilestatGetFunc(mod api.Module, fd, resultBuf uint32) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
+	ctx := mod.(*wasm.CallContext)
+	fd := wasi_snapshot_preview1.Fd(params[0])
+	resultFilestat := uint32(params[1])
 
 	// Ensure we can write the filestat
-	buf, ok := mod.Memory().Read(resultBuf, 64)
+	buf, ok := mod.Memory().Read(resultFilestat, 64)
 	if !ok {
 		return ErrnoFault
 	}
 
-	stat, err := fsc.StatFile(fd)
-	if err != nil {
-		return toErrno(err)
+	stat, errno := ctx.Sys.FdFilestatGet(fd)
+	if errno != ErrnoSuccess {
+		return errno
 	}
 
-	writeFilestat(buf, stat)
-
+	b := stat.Marshal()
+	copy(buf, b[:64])
 	return ErrnoSuccess
 }
 
@@ -369,7 +355,29 @@ var fdPread = newHostFunc(
 )
 
 func fdPreadFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	return fdReadOrPread(mod, params, true)
+	mem := mod.Memory()
+	ctx := mod.(*wasm.CallContext)
+
+	fd := wasi_snapshot_preview1.Fd(params[0])
+	iovs := uint32(params[1])
+	iovsCount := uint32(params[2])
+	offset := wasi_snapshot_preview1.Filesize(params[3])
+	resultNread := uint32(params[4])
+
+	b := make([][]byte, 0, 20)
+	b, errno := appendIovecArray(b, mem, iovs, iovsCount)
+	if errno != ErrnoSuccess {
+		return errno
+	}
+
+	n, errno := ctx.Sys.FdPread(fd, b, offset)
+	if errno != ErrnoSuccess && n == 0 {
+		return errno
+	}
+	if !mem.WriteUint32Le(resultNread, uint32(n)) {
+		return ErrnoFault
+	}
+	return ErrnoSuccess
 }
 
 // fdPrestatGet is the WASI function named fdPrestatGetName which returns
@@ -406,26 +414,8 @@ func fdPreadFn(_ context.Context, mod api.Module, params []uint64) Errno {
 var fdPrestatGet = newHostFunc(fdPrestatGetName, fdPrestatGetFn, []api.ValueType{i32, i32}, "fd", "result.prestat")
 
 func fdPrestatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
-	fd, resultPrestat := uint32(params[0]), uint32(params[1])
-
-	// Currently, we only pre-open the root file descriptor.
-	if fd != internalsys.FdRoot {
-		return ErrnoBadf
-	}
-
-	entry, ok := fsc.OpenedFile(fd)
-	if !ok {
-		return ErrnoBadf
-	}
-
-	// Upper 32-bits are zero because...
-	// * Zero-value 8-bit tag, and 3-byte zero-value padding
-	prestat := uint64(len(entry.Name) << 32)
-	if !mod.Memory().WriteUint64Le(resultPrestat, prestat) {
-		return ErrnoFault
-	}
-	return ErrnoSuccess
+	// There are no pre-open file descriptors.
+	return ErrnoBadf
 }
 
 // fdPrestatDirName is the WASI function named fdPrestatDirNameName which
@@ -465,28 +455,8 @@ var fdPrestatDirName = newHostFunc(
 )
 
 func fdPrestatDirNameFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
-	fd, path, pathLen := uint32(params[0]), uint32(params[1]), uint32(params[2])
-
-	// Currently, we only pre-open the root file descriptor.
-	if fd != internalsys.FdRoot {
-		return ErrnoBadf
-	}
-
-	f, ok := fsc.OpenedFile(fd)
-	if !ok {
-		return ErrnoBadf
-	}
-
-	// Some runtimes may have another semantics. See /RATIONALE.md
-	if uint32(len(f.Name)) < pathLen {
-		return ErrnoNametoolong
-	}
-
-	if !mod.Memory().Write(path, []byte(f.Name)[:pathLen]) {
-		return ErrnoFault
-	}
-	return ErrnoSuccess
+	// There are no pre-open file descriptors.
+	return ErrnoBadf
 }
 
 // fdPwrite is the WASI function named fdPwriteName which writes to a file
@@ -554,73 +524,49 @@ var fdRead = newHostFunc(
 	"fd", "iovs", "iovs_len", "result.nread",
 )
 
-func fdReadFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	return fdReadOrPread(mod, params, false)
-}
-
-func fdReadOrPread(mod api.Module, params []uint64, isPread bool) Errno {
-	mem := mod.Memory()
-	fsc := mod.(*wasm.CallContext).Sys.FS()
-
-	fd := uint32(params[0])
-	iovs := uint32(params[1])
-	iovsCount := uint32(params[2])
-
-	var offset int64
-	var resultNread uint32
-	if isPread {
-		offset = int64(params[3])
-		resultNread = uint32(params[4])
-	} else {
-		resultNread = uint32(params[3])
-	}
-
-	r := fsc.FdReader(fd)
-	if r == nil {
-		return ErrnoBadf
-	}
-
-	if isPread {
-		if s, ok := r.(io.Seeker); ok {
-			if _, err := s.Seek(offset, io.SeekStart); err != nil {
-				return ErrnoFault
-			}
-		} else {
-			return ErrnoInval
-		}
-	}
-
-	var nread uint32
+func appendIovecArray(bufs [][]byte, mem api.Memory, iovs, iovsCount uint32) ([][]byte, Errno) {
 	iovsStop := iovsCount << 3 // iovsCount * 8
 	iovsBuf, ok := mem.Read(iovs, iovsStop)
 	if !ok {
-		return ErrnoFault
+		return bufs, ErrnoFault
 	}
-
 	for iovsPos := uint32(0); iovsPos < iovsStop; iovsPos += 8 {
 		offset := le.Uint32(iovsBuf[iovsPos:])
-		l := le.Uint32(iovsBuf[iovsPos+4:])
+		length := le.Uint32(iovsBuf[iovsPos+4:])
 
-		b, ok := mem.Read(offset, l)
+		b, ok := mem.Read(offset, length)
 		if !ok {
-			return ErrnoFault
+			return bufs, ErrnoFault
 		}
 
-		n, err := r.Read(b)
-		nread += uint32(n)
-
-		shouldContinue, errno := fdRead_shouldContinueRead(uint32(n), l, err)
-		if errno != ErrnoSuccess {
-			return errno
-		} else if !shouldContinue {
-			break
-		}
+		bufs = append(bufs, b)
 	}
-	if !mem.WriteUint32Le(resultNread, nread) {
+	return bufs, ErrnoSuccess
+}
+
+func fdReadFn(_ context.Context, mod api.Module, params []uint64) Errno {
+	mem := mod.Memory()
+	ctx := mod.(*wasm.CallContext)
+
+	fd := wasi_snapshot_preview1.Fd(params[0])
+	iovs := uint32(params[1])
+	iovsCount := uint32(params[2])
+	resultNread := uint32(params[3])
+
+	b := make([][]byte, 0, 20)
+	b, errno := appendIovecArray(b, mem, iovs, iovsCount)
+	if errno != ErrnoSuccess {
+		return errno
+	}
+
+	n, errno := ctx.Sys.FdRead(fd, b)
+	if errno != ErrnoSuccess && n == 0 {
+		return errno
+	}
+	if !mem.WriteUint32Le(resultNread, uint32(n)) {
 		return ErrnoFault
-	} else {
-		return ErrnoSuccess
 	}
+	return ErrnoSuccess
 }
 
 // fdRead_shouldContinueRead decides whether to continue reading the next iovec
@@ -652,89 +598,24 @@ var fdReaddir = newHostFunc(
 
 func fdReaddirFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	mem := mod.Memory()
-	fsc := mod.(*wasm.CallContext).Sys.FS()
+	ctx := mod.(*wasm.CallContext)
 
-	fd := uint32(params[0])
+	fd := wasi_snapshot_preview1.Fd(params[0])
 	buf := uint32(params[1])
 	bufLen := uint32(params[2])
-	// We control the value of the cookie, and it should never be negative.
-	// However, we coerce it to signed to ensure the caller doesn't manipulate
-	// it in such a way that becomes negative.
-	cookie := int64(params[3])
+	cookie := wasi_snapshot_preview1.Dircookie(params[3])
 	resultBufused := uint32(params[4])
 
-	// The bufLen must be enough to write a dirent. Otherwise, the caller can't
-	// read what the next cookie is.
-	if bufLen < direntSize {
-		return ErrnoInval
+	b, ok := mem.Read(buf, bufLen)
+	if !ok {
+		return ErrnoFault
 	}
 
-	// Validate the FD is a directory
-	rd, dir, errno := openedDir(fsc, fd)
+	n, errno := ctx.Sys.FdReaddir(fd, b, cookie)
 	if errno != ErrnoSuccess {
 		return errno
 	}
-
-	// expect a cookie only if we are continuing a read.
-	if cookie == 0 && dir.CountRead > 0 {
-		return ErrnoInval // cookie is minimally one.
-	}
-
-	// First, determine the maximum directory entries that can be encoded as
-	// dirents. The total size is direntSize(24) + nameSize, for each file.
-	// Since a zero-length file name is invalid, the minimum size entry is
-	// 25 (direntSize + 1 character).
-	maxDirEntries := int(bufLen/direntSize + 1)
-
-	// While unlikely maxDirEntries will fit into bufLen, add one more just in
-	// case, as we need to know if we hit the end of the directory or not to
-	// write the correct bufused (e.g. == bufLen unless EOF).
-	//	>> If less than the size of the read buffer, the end of the
-	//	>> directory has been reached.
-	maxDirEntries += 1
-
-	// The host keeps state for any unread entries from the prior call because
-	// we cannot seek to a previous directory position. Collect these entries.
-	entries, errno := lastDirEntries(dir, cookie)
-	if errno != ErrnoSuccess {
-		return errno
-	}
-
-	// Check if we have maxDirEntries, and read more from the FS as needed.
-	if entryCount := len(entries); entryCount < maxDirEntries {
-		if l, err := rd.ReadDir(maxDirEntries - entryCount); err != io.EOF {
-			if err != nil {
-				return ErrnoIo
-			}
-			dir.CountRead += uint64(len(l))
-			entries = append(entries, l...)
-			// Replace the cache with up to maxDirEntries, starting at cookie.
-			dir.Entries = entries
-		}
-	}
-
-	// Determine how many dirents we can write, excluding a potentially
-	// truncated entry.
-	bufused, direntCount, writeTruncatedEntry := maxDirents(entries, bufLen)
-
-	// Now, write entries to the underlying buffer.
-	if bufused > 0 {
-
-		// d_next is the index of the next file in the list, so it should
-		// always be one higher than the requested cookie.
-		d_next := uint64(cookie + 1)
-		// ^^ yes this can overflow to negative, which means our implementation
-		// doesn't support writing greater than max int64 entries.
-
-		dirents, ok := mem.Read(buf, bufused)
-		if !ok {
-			return ErrnoFault
-		}
-
-		writeDirents(entries, direntCount, writeTruncatedEntry, dirents, d_next)
-	}
-
-	if !mem.WriteUint32Le(resultBufused, bufused) {
+	if !mem.WriteUint32Le(resultBufused, uint32(n)) {
 		return ErrnoFault
 	}
 	return ErrnoSuccess
@@ -963,34 +844,16 @@ var fdSeek = newHostFunc(
 )
 
 func fdSeekFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
-	fd := uint32(params[0])
-	offset := params[1]
-	whence := uint32(params[2])
+	ctx := mod.(*wasm.CallContext)
+	fd := wasi_snapshot_preview1.Fd(params[0])
+	offset := wasi_snapshot_preview1.Filedelta(params[1])
+	whence := wasi_snapshot_preview1.Whence(params[2])
 	resultNewoffset := uint32(params[3])
 
-	if fd == internalsys.FdRoot {
-		return ErrnoBadf // cannot seek a directory
+	newOffset, errno := ctx.Sys.FdSeek(fd, offset, whence)
+	if errno != ErrnoSuccess {
+		return errno
 	}
-
-	var seeker io.Seeker
-	// Check to see if the file descriptor is available
-	if f, ok := fsc.OpenedFile(fd); !ok {
-		return ErrnoBadf
-		// fs.FS doesn't declare io.Seeker, but implementations such as os.File implement it.
-	} else if seeker, ok = f.File.(io.Seeker); !ok {
-		return ErrnoBadf
-	}
-
-	if whence > io.SeekEnd /* exceeds the largest valid whence */ {
-		return ErrnoInval
-	}
-
-	newOffset, err := seeker.Seek(int64(offset), int(whence))
-	if err != nil {
-		return ErrnoIo
-	}
-
 	if !mod.Memory().WriteUint64Le(resultNewoffset, uint64(newOffset)) {
 		return ErrnoFault
 	}
@@ -1073,49 +936,26 @@ var fdWrite = newHostFunc(
 	"fd", "iovs", "iovs_len", "result.nwritten",
 )
 
-func fdWriteFn(ctx context.Context, mod api.Module, params []uint64) Errno {
+func fdWriteFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	mem := mod.Memory()
-	fsc := mod.(*wasm.CallContext).Sys.FS()
+	ctx := mod.(*wasm.CallContext)
 
-	fd := uint32(params[0])
+	fd := wasi_snapshot_preview1.Fd(params[0])
 	iovs := uint32(params[1])
 	iovsCount := uint32(params[2])
 	resultNwritten := uint32(params[3])
 
-	writer := fsc.FdWriter(fd)
-	if writer == nil {
-		return ErrnoBadf
+	b := make([][]byte, 0, 20)
+	b, errno := appendIovecArray(b, mem, iovs, iovsCount)
+	if errno != ErrnoSuccess {
+		return errno
 	}
 
-	var err error
-	var nwritten uint32
-	iovsStop := iovsCount << 3 // iovsCount * 8
-	iovsBuf, ok := mem.Read(iovs, iovsStop)
-	if !ok {
-		return ErrnoFault
+	n, errno := ctx.Sys.FdWrite(fd, b)
+	if errno != ErrnoSuccess {
+		return errno
 	}
-
-	for iovsPos := uint32(0); iovsPos < iovsStop; iovsPos += 8 {
-		offset := le.Uint32(iovsBuf[iovsPos:])
-		l := le.Uint32(iovsBuf[iovsPos+4:])
-
-		var n int
-		if writer == io.Discard { // special-case default
-			n = int(l)
-		} else {
-			b, ok := mem.Read(offset, l)
-			if !ok {
-				return ErrnoFault
-			}
-			n, err = writer.Write(b)
-			if err != nil {
-				return ErrnoIo
-			}
-		}
-		nwritten += uint32(n)
-	}
-
-	if !mod.Memory().WriteUint32Le(resultNwritten, nwritten) {
+	if !mod.Memory().WriteUint32Le(resultNwritten, uint32(n)) {
 		return ErrnoFault
 	}
 	return ErrnoSuccess
@@ -1168,50 +1008,31 @@ var pathFilestatGet = newHostFunc(
 // pathFilestatGetFn cannot currently use proxyResultParams because filestat is
 // larger than api.ValueTypeI64 (i64 == 8 bytes, but filestat is 64).
 func pathFilestatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
+	ctx := mod.(*wasm.CallContext)
 
-	dirfd := uint32(params[0])
-
-	// TODO: flags is a lookupflags and it only has one bit: symlink_follow
-	// https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#lookupflags
-	_ /* flags */ = uint32(params[1])
-
+	dirfd := wasi_snapshot_preview1.Fd(params[0])
+	flags := wasi_snapshot_preview1.Lookupflags(params[1])
 	pathOffset := uint32(params[2])
 	pathLen := uint32(params[3])
-
 	resultBuf := uint32(params[4])
 
-	// open_at isn't supported in fs.FS, so we check the path can't escape,
-	// then join it with its parent
-	b, ok := mod.Memory().Read(pathOffset, pathLen)
+	path, ok := mod.Memory().Read(pathOffset, pathLen)
 	if !ok {
 		return ErrnoNametoolong
 	}
-	pathName := string(b)
 
-	// Prepend the path if necessary.
-	if dir, ok := fsc.OpenedFile(dirfd); !ok {
-		return ErrnoBadf
-	} else if _, ok := dir.File.(fs.ReadDirFile); !ok {
-		return ErrnoNotdir // TODO: cache filetype instead of poking.
-	} else {
-		// TODO: consolidate "at" logic with path_open as same issues occur.
-		pathName = path.Join(dir.Name, pathName)
-	}
-
-	// Stat the file without allocating a file descriptor
-	stat, errnoResult := statFile(fsc, pathName)
-	if errnoResult != ErrnoSuccess {
-		return errnoResult
-	}
-
-	// Write the stat result to memory
 	buf, ok := mod.Memory().Read(resultBuf, 64)
 	if !ok {
 		return ErrnoFault
 	}
-	writeFilestat(buf, stat)
 
+	stat, errno := ctx.Sys.PathFilestatGet(dirfd, flags, string(path))
+	if errno != ErrnoSuccess {
+		return errno
+	}
+
+	b := stat.Marshal()
+	copy(buf, b[:64])
 	return ErrnoSuccess
 }
 
@@ -1310,27 +1131,16 @@ const (
 )
 
 func pathOpenFn(_ context.Context, mod api.Module, params []uint64) Errno {
-	fsc := mod.(*wasm.CallContext).Sys.FS()
+	ctx := mod.(*wasm.CallContext)
 
-	dirfd := uint32(params[0])
-
-	// TODO: dirflags is a lookupflags and it only has one bit: symlink_follow
-	// https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#lookupflags
-	_ /* dirflags */ = uint32(params[1])
-
-	path := uint32(params[2])
+	dirfd := wasi_snapshot_preview1.Fd(params[0])
+	dirflags := wasi_snapshot_preview1.Lookupflags(params[1])
+	pathPtr := uint32(params[2])
 	pathLen := uint32(params[3])
-
-	// oflags are currently not something we can pass to the filesystem to
-	// enforce, because fs.FS has no flags parameter. So, we have to validate
-	// them externally, in worst case after the file was already allocated.
-	oflags := wasiOflags(uint32(params[4]))
-
-	// rights aren't used
-	_, _ = params[5], params[6]
-
-	// TODO: only notable fdflag for opening is wasiFdflagsAppend
-	_ /* fdflags */ = wasiFdflags(uint32(params[7]))
+	oflags := wasi_snapshot_preview1.Oflags(params[4])
+	fsRightsBase := wasi_snapshot_preview1.Rights(params[5])
+	fsRightsInheriting := wasi_snapshot_preview1.Rights(params[6])
+	fdflags := wasi_snapshot_preview1.Fdflags(params[7])
 	resultOpenedFd := uint32(params[8])
 
 	// Note: We don't handle AT_FDCWD, as that's resolved in the compiler.
@@ -1338,11 +1148,21 @@ func pathOpenFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	// here in any way except assuming it is "/".
 	//
 	// See https://github.com/WebAssembly/wasi-libc/blob/659ff414560721b1660a19685110e484a081c3d4/libc-bottom-half/sources/at_fdcwd.c#L24-L26
-	if _, ok := fsc.OpenedFile(dirfd); !ok {
-		return ErrnoBadf
+	pathBuf, ok := mod.Memory().Read(pathPtr, pathLen)
+	if !ok {
+		return ErrnoFault
 	}
+	// TODO: if the underlying wasi.FS implementation of Open or OpenFile
+	// does not retain this field, we could optimize away the heap allocation
+	// needed to conver the byte slices to a string.
+	path := string(pathBuf)
 
-	b, ok := mod.Memory().Read(path, pathLen)
+	// Load the result address before performing the operation so we do not
+	// make any changes to the file system if the program is broken.
+	//
+	// TODO: other functions tend to load the result address after performing
+	// the operation, should we change this across the board?
+	resultBuf, ok := mod.Memory().Read(resultOpenedFd, 4)
 	if !ok {
 		return ErrnoFault
 	}
@@ -1353,22 +1173,25 @@ func pathOpenFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	// path="bar", this should open "/tmp/foo/bar" not "/bar".
 	//
 	// See https://linux.die.net/man/2/openat
-	newFD, errno := openFile(fsc, string(b))
+	newFD, errno := ctx.Sys.PathOpen(dirfd, dirflags, path, oflags, fsRightsBase, fsRightsInheriting, fdflags)
 	if errno != ErrnoSuccess {
 		return errno
 	}
 
 	// Check any flags that require the file to evaluate.
-	if oflags&wasiOflagsDirectory != 0 {
-		if errno = failIfNotDirectory(fsc, newFD); errno != ErrnoSuccess {
-			return errno
+	//
+	// TODO: should we fully delegate this responsibility to the file system?
+	// This is currently somewhat broken since we might leave a file on disk if
+	// both O_CREATE and O_DIRECTORY are specified.
+	/*
+		if (oflags & wasi_snapshot_preview1.O_DIRECTORY) != 0 {
+			if errno = failIfNotDirectory(fsc, newFD); errno != ErrnoSuccess {
+				return errno
+			}
 		}
-	}
+	*/
 
-	if !mod.Memory().WriteUint32Le(resultOpenedFd, newFD) {
-		_ = fsc.CloseFile(newFD)
-		return ErrnoFault
-	}
+	binary.LittleEndian.PutUint32(resultBuf, uint32(newFD))
 	return ErrnoSuccess
 }
 
