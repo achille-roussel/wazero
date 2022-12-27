@@ -28,7 +28,7 @@ func Test_fdAdvise(t *testing.T) {
 	log := requireErrnoNosys(t, fdAdviseName, 0, 0, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_advise(fd=0,offset=0,len=0,advice=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -37,7 +37,7 @@ func Test_fdAllocate(t *testing.T) {
 	log := requireErrnoNosys(t, fdAllocateName, 0, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_allocate(fd=0,offset=0,len=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -62,7 +62,7 @@ func Test_fdClose(t *testing.T) {
 	requireErrno(t, ErrnoSuccess, mod, fdCloseName, uint64(fdToClose))
 	require.Equal(t, `
 ==> wasi_snapshot_preview1.fd_close(fd=4)
-<== ESUCCESS
+<== errno=ESUCCESS
 `, "\n"+log.String())
 
 	// Verify fdToClose is closed and removed from the opened FDs.
@@ -78,7 +78,7 @@ func Test_fdClose(t *testing.T) {
 		requireErrno(t, ErrnoBadf, mod, fdCloseName, uint64(42)) // 42 is an arbitrary invalid FD
 		require.Equal(t, `
 ==> wasi_snapshot_preview1.fd_close(fd=42)
-<== EBADF
+<== errno=EBADF
 `, "\n"+log.String())
 	})
 }
@@ -88,7 +88,7 @@ func Test_fdDatasync(t *testing.T) {
 	log := requireErrnoNosys(t, fdDatasyncName, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_datasync(fd=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -130,7 +130,7 @@ func Test_fdFdstatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=0,result.stat=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -144,7 +144,7 @@ func Test_fdFdstatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=1,result.stat=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -158,23 +158,23 @@ func Test_fdFdstatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=2,result.stat=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
-		// 		{
-		// 			name: "root",
-		// 			fd:   internalsys.FdRoot,
-		// 			expectedMemory: []byte{
-		// 				3, 0, // fs_filetype
-		// 				0, 0, 0, 0, 0, 0, // fs_flags
-		// 				0, 0, 0, 0, 0, 0, 0, 0, // fs_rights_base
-		// 				0, 0, 0, 0, 0, 0, 0, 0, // fs_rights_inheriting
-		// 			},
-		// 			expectedLog: `
-		// ==> wasi_snapshot_preview1.fd_fdstat_get(fd=3,result.stat=0)
-		// <== ESUCCESS
-		// `,
-		// 		},
+		{
+			name: "root",
+			fd:   internalsys.FdRoot,
+			expectedMemory: []byte{
+				3, 0, // fs_filetype
+				0, 0, 0, 0, 0, 0, // fs_flags
+				0, 0, 0, 0, 0, 0, 0, 0, // fs_rights_base
+				0, 0, 0, 0, 0, 0, 0, 0, // fs_rights_inheriting
+			},
+			expectedLog: `
+==> wasi_snapshot_preview1.fd_fdstat_get(fd=3,result.stat=0)
+<== errno=ESUCCESS
+`,
+		},
 		{
 			name: "file",
 			fd:   uint32(fileFd),
@@ -186,7 +186,7 @@ func Test_fdFdstatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=4,result.stat=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -200,7 +200,7 @@ func Test_fdFdstatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=5,result.stat=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -209,7 +209,7 @@ func Test_fdFdstatGet(t *testing.T) {
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=-1,result.stat=0)
-<== EBADF
+<== errno=EBADF
 `,
 		},
 		{
@@ -219,7 +219,7 @@ func Test_fdFdstatGet(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_fdstat_get(fd=5,result.stat=65513)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 	}
@@ -247,7 +247,7 @@ func Test_fdFdstatSetFlags(t *testing.T) {
 	log := requireErrnoNosys(t, fdFdstatSetFlagsName, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_fdstat_set_flags(fd=0,flags=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -256,7 +256,7 @@ func Test_fdFdstatSetRights(t *testing.T) {
 	log := requireErrnoNosys(t, fdFdstatSetRightsName, 0, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_fdstat_set_rights(fd=0,fs_rights_base=0,fs_rights_inheriting=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -304,7 +304,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=0,result.buf=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -323,7 +323,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=1,result.buf=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -342,7 +342,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=2,result.buf=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -360,7 +360,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=3,result.buf=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -378,7 +378,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=4,result.buf=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -396,7 +396,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=5,result.buf=0)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -405,7 +405,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=-1,result.buf=0)
-<== EBADF
+<== errno=EBADF
 `,
 		},
 		{
@@ -415,7 +415,7 @@ func Test_fdFilestatGet(t *testing.T) {
 			expectedErrno:  ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_filestat_get(fd=5,result.buf=65473)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 	}
@@ -443,7 +443,7 @@ func Test_fdFilestatSetSize(t *testing.T) {
 	log := requireErrnoNosys(t, fdFilestatSetSizeName, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_filestat_set_size(fd=0,size=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -452,7 +452,7 @@ func Test_fdFilestatSetTimes(t *testing.T) {
 	log := requireErrnoNosys(t, fdFilestatSetTimesName, 0, 0, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_filestat_set_times(fd=0,atim=0,mtim=0,fst_flags=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -492,8 +492,8 @@ func Test_fdPread(t *testing.T) {
 				'?',
 			),
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=1,iovs_len=2,offset=0,result.nread=26)
-<== ESUCCESS
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=1,iovs_len=2,offset=0)
+<== (nread=6,errno=ESUCCESS)
 `,
 		},
 		{
@@ -507,8 +507,8 @@ func Test_fdPread(t *testing.T) {
 				'?',
 			),
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=1,iovs_len=2,offset=2,result.nread=26)
-<== ESUCCESS
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=1,iovs_len=2,offset=2)
+<== (nread=4,errno=ESUCCESS)
 `,
 		},
 	}
@@ -552,8 +552,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			memory:        []byte{'?', '?', '?', '?'}, // pass result.nread validation
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=42,iovs=65532,iovs_len=65532,offset=0,result.nread=65532)
-<== EBADF
+==> wasi_snapshot_preview1.fd_pread(fd=42,iovs=65532,iovs_len=65532,offset=0)
+<== (nread=,errno=EBADF)
 `,
 		},
 		{
@@ -562,8 +562,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			offset:        int64(len(contents) + 1),
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65536,iovs_len=65536,offset=7,result.nread=65536)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65536,iovs_len=65536,offset=7)
+<== (nread=OOM(65536,4),errno=EFAULT)
 `,
 		},
 		{
@@ -573,8 +573,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			memory:        []byte{'?'},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65536,iovs_len=65535,offset=0,result.nread=65535)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65536,iovs_len=65535,offset=0)
+<== (nread=OOM(65535,4),errno=EFAULT)
 `,
 		},
 		{
@@ -587,8 +587,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65532,iovs_len=65532,offset=0,result.nread=65531)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65532,iovs_len=65532,offset=0)
+<== (nread=2367,errno=EFAULT)
 `,
 		},
 		{
@@ -602,8 +602,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65528,iovs_len=65528,offset=0,result.nread=65527)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65528,iovs_len=65528,offset=0)
+<== (nread=16777279,errno=EFAULT)
 `,
 		},
 		{
@@ -618,8 +618,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65527,iovs_len=65527,offset=0,result.nread=65526)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65527,iovs_len=65527,offset=0)
+<== (nread=2367,errno=EFAULT)
 `,
 		},
 		{
@@ -635,8 +635,8 @@ func Test_fdPread_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65527,iovs_len=65527,offset=0,result.nread=65536)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_pread(fd=4,iovs=65527,iovs_len=65527,offset=0)
+<== (nread=OOM(65536,4),errno=EFAULT)
 `,
 		},
 	}
@@ -676,8 +676,8 @@ func Test_fdPrestatGet(t *testing.T) {
 
 	requireErrno(t, ErrnoSuccess, mod, fdPrestatGetName, uint64(fd), uint64(resultPrestat))
 	require.Equal(t, `
-==> wasi_snapshot_preview1.fd_prestat_get(fd=3,result.prestat=1)
-<== ESUCCESS
+==> wasi_snapshot_preview1.fd_prestat_get(fd=3)
+<== (prestat=0000000001000000,errno=ESUCCESS)
 `, "\n"+log.String())
 
 	actual, ok := mod.Memory().Read(0, uint32(len(expectedMemory)))
@@ -704,8 +704,8 @@ func Test_fdPrestatGet_Errors(t *testing.T) {
 			resultPrestat: 0,  // valid offset
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_prestat_get(fd=42,result.prestat=0)
-<== EBADF
+==> wasi_snapshot_preview1.fd_prestat_get(fd=42)
+<== (prestat=,errno=EBADF)
 `,
 		},
 		{
@@ -714,8 +714,8 @@ func Test_fdPrestatGet_Errors(t *testing.T) {
 			resultPrestat: memorySize,
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_prestat_get(fd=3,result.prestat=65536)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_prestat_get(fd=3)
+<== (prestat=OOM(65536,8),errno=EFAULT)
 `,
 		},
 		// TODO: non pre-opened file == api.ErrnoBadf
@@ -748,8 +748,8 @@ func Test_fdPrestatDirName(t *testing.T) {
 
 	requireErrno(t, ErrnoSuccess, mod, fdPrestatDirNameName, uint64(fd), uint64(path), uint64(pathLen))
 	require.Equal(t, `
-==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3,path=1,path_len=0)
-<== ESUCCESS
+==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3)
+<== (path=,errno=ESUCCESS)
 `, "\n"+log.String())
 
 	actual, ok := mod.Memory().Read(0, uint32(len(expectedMemory)))
@@ -763,6 +763,8 @@ func Test_fdPrestatDirName_Errors(t *testing.T) {
 	fd := internalsys.FdRoot // only pre-opened directory currently supported.
 
 	memorySize := mod.Memory().Size()
+	maskMemory(t, mod, 10)
+
 	validAddress := uint32(0) // Arbitrary valid address as arguments to fd_prestat_dir_name. We chose 0 here.
 	pathLen := uint32(len("/"))
 
@@ -781,8 +783,8 @@ func Test_fdPrestatDirName_Errors(t *testing.T) {
 			pathLen:       pathLen,
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3,path=65536,path_len=1)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3)
+<== (path=OOM(65536,1),errno=EFAULT)
 `,
 		},
 		{
@@ -792,8 +794,8 @@ func Test_fdPrestatDirName_Errors(t *testing.T) {
 			pathLen:       pathLen,
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3,path=65536,path_len=1)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3)
+<== (path=OOM(65536,1),errno=EFAULT)
 `,
 		},
 		{
@@ -803,8 +805,8 @@ func Test_fdPrestatDirName_Errors(t *testing.T) {
 			pathLen:       pathLen + 1,
 			expectedErrno: ErrnoNametoolong,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3,path=0,path_len=2)
-<== ENAMETOOLONG
+==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=3)
+<== (path=,errno=ENAMETOOLONG)
 `,
 		},
 		{
@@ -814,8 +816,8 @@ func Test_fdPrestatDirName_Errors(t *testing.T) {
 			pathLen:       pathLen,
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=42,path=0,path_len=1)
-<== EBADF
+==> wasi_snapshot_preview1.fd_prestat_dir_name(fd=42)
+<== (path=,errno=EBADF)
 `,
 		},
 		// TODO: non pre-opened file == ErrnoBadf
@@ -838,7 +840,7 @@ func Test_fdPwrite(t *testing.T) {
 	log := requireErrnoNosys(t, fdPwriteName, 0, 0, 0, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_pwrite(fd=0,iovs=0,iovs_len=0,offset=0,result.nwritten=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -874,8 +876,8 @@ func Test_fdRead(t *testing.T) {
 
 	requireErrno(t, ErrnoSuccess, mod, fdReadName, uint64(fd), uint64(iovs), uint64(iovsCount), uint64(resultNread))
 	require.Equal(t, `
-==> wasi_snapshot_preview1.fd_read(fd=4,iovs=1,iovs_len=2,result.nread=26)
-<== ESUCCESS
+==> wasi_snapshot_preview1.fd_read(fd=4,iovs=1,iovs_len=2)
+<== (nread=6,errno=ESUCCESS)
 `, "\n"+log.String())
 
 	actual, ok := mod.Memory().Read(0, uint32(len(expectedMemory)))
@@ -900,8 +902,8 @@ func Test_fdRead_Errors(t *testing.T) {
 			memory:        []byte{'?', '?', '?', '?'}, // pass result.nread validation
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_read(fd=42,iovs=65532,iovs_len=65532,result.nread=65532)
-<== EBADF
+==> wasi_snapshot_preview1.fd_read(fd=42,iovs=65532,iovs_len=65532)
+<== (nread=,errno=EBADF)
 `,
 		},
 		{
@@ -911,8 +913,8 @@ func Test_fdRead_Errors(t *testing.T) {
 			memory:        []byte{'?'},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65536,iovs_len=65535,result.nread=65535)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65536,iovs_len=65535)
+<== (nread=OOM(65535,4),errno=EFAULT)
 `,
 		},
 		{
@@ -925,8 +927,8 @@ func Test_fdRead_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65532,iovs_len=65532,result.nread=65531)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65532,iovs_len=65532)
+<== (nread=2367,errno=EFAULT)
 `,
 		},
 		{
@@ -940,8 +942,8 @@ func Test_fdRead_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65528,iovs_len=65528,result.nread=65527)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65528,iovs_len=65528)
+<== (nread=16777279,errno=EFAULT)
 `,
 		},
 		{
@@ -956,8 +958,8 @@ func Test_fdRead_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65527,iovs_len=65527,result.nread=65526)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65527,iovs_len=65527)
+<== (nread=2367,errno=EFAULT)
 `,
 		},
 		{
@@ -973,8 +975,8 @@ func Test_fdRead_Errors(t *testing.T) {
 			},
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65527,iovs_len=65527,result.nread=65536)
-<== EFAULT
+==> wasi_snapshot_preview1.fd_read(fd=4,iovs=65527,iovs_len=65527)
+<== (nread=OOM(65536,4),errno=EFAULT)
 `,
 		},
 	}
@@ -1430,7 +1432,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=65536,buf_len=1000,cookie=0,result.bufused=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -1441,7 +1443,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=42,buf=0,buf_len=24,cookie=0,result.bufused=1000)
-<== EBADF
+<== errno=EBADF
 `,
 		},
 		{
@@ -1452,7 +1454,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=5,buf=0,buf_len=24,cookie=0,result.bufused=1000)
-<== EBADF
+<== errno=EBADF
 `,
 		},
 		{
@@ -1463,7 +1465,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=65536,buf_len=1000,cookie=0,result.bufused=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -1474,7 +1476,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=65535,buf_len=1000,cookie=0,result.bufused=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -1485,7 +1487,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoInval,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=0,buf_len=1,cookie=0,result.bufused=1000)
-<== EINVAL
+<== errno=EINVAL
 `,
 		},
 		{
@@ -1497,7 +1499,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoInval,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=0,buf_len=1000,cookie=1,result.bufused=2000)
-<== EINVAL
+<== errno=EINVAL
 `,
 		},
 		{
@@ -1509,7 +1511,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoInval,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=0,buf_len=1000,cookie=1,result.bufused=2000)
-<== EINVAL
+<== errno=EINVAL
 `,
 		},
 		{
@@ -1522,7 +1524,7 @@ func Test_fdReaddir_Errors(t *testing.T) {
 			expectedErrno: ErrnoInval,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_readdir(fd=4,buf=0,buf_len=1000,cookie=-1,result.bufused=2000)
-<== EINVAL
+<== errno=EINVAL
 `,
 		},
 	}
@@ -1778,7 +1780,7 @@ func Test_fdRenumber(t *testing.T) {
 	log := requireErrnoNosys(t, fdRenumberName, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_renumber(fd=0,to=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -1808,7 +1810,7 @@ func Test_fdSeek(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_seek(fd=4,offset=4,whence=0,result.newoffset=1)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -1823,7 +1825,7 @@ func Test_fdSeek(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_seek(fd=4,offset=1,whence=1,result.newoffset=1)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -1838,7 +1840,7 @@ func Test_fdSeek(t *testing.T) {
 			},
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_seek(fd=4,offset=-1,whence=2,result.newoffset=1)
-<== ESUCCESS
+<== errno=ESUCCESS
 `,
 		},
 	}
@@ -1893,7 +1895,7 @@ func Test_fdSeek_Errors(t *testing.T) {
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_seek(fd=42,offset=0,whence=0,result.newoffset=0)
-<== EBADF
+<== errno=EBADF
 `,
 		},
 		{
@@ -1903,7 +1905,7 @@ func Test_fdSeek_Errors(t *testing.T) {
 			expectedErrno: ErrnoInval,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_seek(fd=4,offset=0,whence=3,result.newoffset=0)
-<== EINVAL
+<== errno=EINVAL
 `,
 		},
 		{
@@ -1913,7 +1915,7 @@ func Test_fdSeek_Errors(t *testing.T) {
 			expectedErrno:   ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_seek(fd=4,offset=0,whence=0,result.newoffset=65536)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 	}
@@ -1934,7 +1936,7 @@ func Test_fdSync(t *testing.T) {
 	log := requireErrnoNosys(t, fdSyncName, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_sync(fd=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -1943,7 +1945,7 @@ func Test_fdTell(t *testing.T) {
 	log := requireErrnoNosys(t, fdTellName, 0, 0)
 	require.Equal(t, `
 --> wasi_snapshot_preview1.fd_tell(fd=0,result.offset=0)
-<-- ENOSYS
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -1981,7 +1983,7 @@ func Test_fdWrite(t *testing.T) {
 	requireErrno(t, ErrnoSuccess, mod, fdWriteName, uint64(fd), uint64(iovs), uint64(iovsCount), uint64(resultNwritten))
 	require.Equal(t, `
 ==> wasi_snapshot_preview1.fd_write(fd=4,iovs=1,iovs_len=2,result.nwritten=26)
-<== ESUCCESS
+<== errno=ESUCCESS
 `, "\n"+log.String())
 
 	actual, ok := mod.Memory().Read(0, uint32(len(expectedMemory)))
@@ -2032,7 +2034,7 @@ func Test_fdWrite_discard(t *testing.T) {
 	requireErrno(t, ErrnoSuccess, mod, fdWriteName, uint64(fd), uint64(iovs), uint64(iovsCount), uint64(resultNwritten))
 	require.Equal(t, `
 ==> wasi_snapshot_preview1.fd_write(fd=1,iovs=1,iovs_len=2,result.nwritten=26)
-<== ESUCCESS
+<== errno=ESUCCESS
 `, "\n"+log.String())
 
 	actual, ok := mod.Memory().Read(0, uint32(len(expectedMemory)))
@@ -2062,7 +2064,7 @@ func Test_fdWrite_Errors(t *testing.T) {
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_write(fd=42,iovs=0,iovs_len=1,result.nwritten=0)
-<== EBADF
+<== errno=EBADF
 `,
 		},
 		{
@@ -2072,7 +2074,7 @@ func Test_fdWrite_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_write(fd=4,iovs=65534,iovs_len=1,result.nwritten=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2082,7 +2084,7 @@ func Test_fdWrite_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_write(fd=4,iovs=65532,iovs_len=1,result.nwritten=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2092,7 +2094,7 @@ func Test_fdWrite_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_write(fd=4,iovs=65531,iovs_len=1,result.nwritten=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2102,7 +2104,7 @@ func Test_fdWrite_Errors(t *testing.T) {
 			expectedErrno: ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_write(fd=4,iovs=65527,iovs_len=1,result.nwritten=0)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2112,7 +2114,7 @@ func Test_fdWrite_Errors(t *testing.T) {
 			expectedErrno:  ErrnoFault,
 			expectedLog: `
 ==> wasi_snapshot_preview1.fd_write(fd=4,iovs=0,iovs_len=1,result.nwritten=65536)
-<== EFAULT
+<== errno=EFAULT
 `,
 		},
 	}
@@ -2140,8 +2142,8 @@ func Test_fdWrite_Errors(t *testing.T) {
 func Test_pathCreateDirectory(t *testing.T) {
 	log := requireErrnoNosys(t, pathCreateDirectoryName, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_create_directory(fd=0,path=0,path_len=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_create_directory(fd=0,path=)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2197,8 +2199,8 @@ func Test_pathFilestatGet(t *testing.T) {
 				0x0, 0x82, 0x13, 0x80, 0x6b, 0x16, 0x24, 0x17, // ctim
 			),
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=1,path_len=1,result.buf=2)
-<== ESUCCESS
+==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=a,result.buf=2)
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -2219,8 +2221,8 @@ func Test_pathFilestatGet(t *testing.T) {
 				0x0, 0x82, 0x13, 0x80, 0x6b, 0x16, 0x24, 0x17, // ctim
 			),
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=5,flags=0,path=1,path_len=1,result.buf=2)
-<== ESUCCESS
+==> wasi_snapshot_preview1.path_filestat_get(fd=5,flags=0,path=a,result.buf=2)
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -2241,8 +2243,8 @@ func Test_pathFilestatGet(t *testing.T) {
 				0x0, 0x82, 0x13, 0x80, 0x6b, 0x16, 0x24, 0x17, // ctim
 			),
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=1,path_len=1,result.buf=2)
-<== ESUCCESS
+==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=b,result.buf=2)
+<== errno=ESUCCESS
 `,
 		},
 		{
@@ -2250,8 +2252,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			fd:            math.MaxUint32,
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=-1,flags=0,path=1,path_len=0,result.buf=0)
-<== EBADF
+==> wasi_snapshot_preview1.path_filestat_get(fd=-1,flags=0,path=,result.buf=0)
+<== errno=EBADF
 `,
 		},
 		{
@@ -2262,8 +2264,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			resultFilestat: 2,
 			expectedErrno:  ErrnoNotdir,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=4,flags=0,path=1,path_len=1,result.buf=2)
-<== ENOTDIR
+==> wasi_snapshot_preview1.path_filestat_get(fd=4,flags=0,path=a,result.buf=2)
+<== errno=ENOTDIR
 `,
 		},
 		{
@@ -2274,8 +2276,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			resultFilestat: 2,
 			expectedErrno:  ErrnoNoent,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=1,path_len=1,result.buf=2)
-<== ENOENT
+==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=?,result.buf=2)
+<== errno=ENOENT
 `,
 		},
 		{
@@ -2286,8 +2288,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			resultFilestat: 2,
 			expectedErrno:  ErrnoNoent,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=5,flags=0,path=1,path_len=1,result.buf=2)
-<== ENOENT
+==> wasi_snapshot_preview1.path_filestat_get(fd=5,flags=0,path=?,result.buf=2)
+<== errno=ENOENT
 `,
 		},
 		{
@@ -2298,8 +2300,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			resultFilestat: 7,
 			expectedErrno:  ErrnoNoent,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=5,flags=0,path=1,path_len=6,result.buf=7)
-<== ENOENT
+==> wasi_snapshot_preview1.path_filestat_get(fd=5,flags=0,path=../foo,result.buf=7)
+<== errno=ENOENT
 `,
 		},
 		{
@@ -2309,8 +2311,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			pathLen:       memorySize,
 			expectedErrno: ErrnoNametoolong,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=1,path_len=65536,result.buf=0)
-<== ENAMETOOLONG
+==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=OOM(1,65536),result.buf=0)
+<== errno=ENAMETOOLONG
 `,
 		},
 		{
@@ -2321,8 +2323,8 @@ func Test_pathFilestatGet(t *testing.T) {
 			resultFilestat: memorySize - 64 + 1,
 			expectedErrno:  ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=1,path_len=1,result.buf=65473)
-<== EFAULT
+==> wasi_snapshot_preview1.path_filestat_get(fd=3,flags=0,path=a,result.buf=65473)
+<== errno=EFAULT
 `,
 		},
 	}
@@ -2351,8 +2353,8 @@ func Test_pathFilestatGet(t *testing.T) {
 func Test_pathFilestatSetTimes(t *testing.T) {
 	log := requireErrnoNosys(t, pathFilestatSetTimesName, 0, 0, 0, 0, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_filestat_set_times(fd=0,flags=0,path=0,path_len=0,atim=0,mtim=0,fst_flags=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_filestat_set_times(fd=0,flags=0,path=,atim=0,mtim=0,fst_flags=0)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2360,8 +2362,8 @@ func Test_pathFilestatSetTimes(t *testing.T) {
 func Test_pathLink(t *testing.T) {
 	log := requireErrnoNosys(t, pathLinkName, 0, 0, 0, 0, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_link(old_fd=0,old_flags=0,old_path=0,old_path_len=0,new_fd=0,new_path=0,new_path_len=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_link(old_fd=0,old_flags=0,old_path=,new_fd=0,new_path=)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2399,8 +2401,8 @@ func Test_pathOpen(t *testing.T) {
 	requireErrno(t, ErrnoSuccess, mod, pathOpenName, uint64(rootFD), uint64(dirflags), uint64(path),
 		uint64(pathLen), uint64(oflags), fsRightsBase, fsRightsInheriting, uint64(fdflags), uint64(resultOpenedFd))
 	require.Equal(t, `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=1,path_len=6,oflags=0,fs_rights_base=1,fs_rights_inheriting=2,fdflags=0,result.opened_fd=8)
-<== ESUCCESS
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=wazero,oflags=0,fs_rights_base=1,fs_rights_inheriting=2,fdflags=0,result.opened_fd=8)
+<== errno=ESUCCESS
 `, "\n"+log.String())
 
 	actual, ok := mod.Memory().Read(0, uint32(len(expectedMemory)))
@@ -2439,8 +2441,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			fd:            42, // arbitrary invalid fd
 			expectedErrno: ErrnoBadf,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=42,dirflags=0,path=0,path_len=0,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
-<== EBADF
+==> wasi_snapshot_preview1.path_open(fd=42,dirflags=0,path=,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
+<== errno=EBADF
 `,
 		},
 		{
@@ -2450,8 +2452,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			pathLen:       validPathLen,
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=65536,path_len=6,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
-<== EFAULT
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=OOM(65536,6),oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2462,8 +2464,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			// fstest.MapFS returns file not found instead of invalid on invalid path
 			expectedErrno: ErrnoNoent,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=0,path_len=6,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
-<== ENOENT
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=../foo,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
+<== errno=ENOENT
 `,
 		},
 		{
@@ -2473,8 +2475,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			pathLen:       mod.Memory().Size() + 1, // path is in the valid memory range, but pathLen is out-of-memory for path
 			expectedErrno: ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=0,path_len=65537,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
-<== EFAULT
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=OOM(0,65537),oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2485,8 +2487,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			pathLen:       validPathLen - 1, // this make the path "wazer", which doesn't exit
 			expectedErrno: ErrnoNoent,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=0,path_len=5,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
-<== ENOENT
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=wazer,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
+<== errno=ENOENT
 `,
 		},
 		{
@@ -2498,8 +2500,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			resultOpenedFd: mod.Memory().Size(), // path and pathLen correctly point to the right path, but where to write the opened FD is outside memory.
 			expectedErrno:  ErrnoFault,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=0,path_len=6,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=65536)
-<== EFAULT
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=wazero,oflags=0,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=65536)
+<== errno=EFAULT
 `,
 		},
 		{
@@ -2511,8 +2513,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 			pathLen:       validPathLen,
 			expectedErrno: ErrnoNotdir,
 			expectedLog: `
-==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=0,path_len=6,oflags=3,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
-<== ENOTDIR
+==> wasi_snapshot_preview1.path_open(fd=3,dirflags=0,path=notdir,oflags=3,fs_rights_base=0,fs_rights_inheriting=0,fdflags=0,result.opened_fd=0)
+<== errno=ENOTDIR
 `,
 		},
 	}
@@ -2535,8 +2537,8 @@ func Test_pathOpen_Errors(t *testing.T) {
 func Test_pathReadlink(t *testing.T) {
 	log := requireErrnoNosys(t, pathReadlinkName, 0, 0, 0, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_readlink(fd=0,path=0,path_len=0,buf=0,buf_len=0,result.bufused=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_readlink(fd=0,path=,buf=0,buf_len=0,result.bufused=0)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2544,8 +2546,8 @@ func Test_pathReadlink(t *testing.T) {
 func Test_pathRemoveDirectory(t *testing.T) {
 	log := requireErrnoNosys(t, pathRemoveDirectoryName, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_remove_directory(fd=0,path=0,path_len=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_remove_directory(fd=0,path=)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2553,8 +2555,8 @@ func Test_pathRemoveDirectory(t *testing.T) {
 func Test_pathRename(t *testing.T) {
 	log := requireErrnoNosys(t, pathRenameName, 0, 0, 0, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_rename(fd=0,old_path=0,old_path_len=0,new_fd=0,new_path=0,new_path_len=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_rename(fd=0,old_path=,new_fd=0,new_path=)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2562,8 +2564,8 @@ func Test_pathRename(t *testing.T) {
 func Test_pathSymlink(t *testing.T) {
 	log := requireErrnoNosys(t, pathSymlinkName, 0, 0, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_symlink(old_path=0,old_path_len=0,fd=0,new_path=0,new_path_len=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_symlink(old_path=,fd=0,new_path=)
+<-- errno=ENOSYS
 `, log)
 }
 
@@ -2571,8 +2573,8 @@ func Test_pathSymlink(t *testing.T) {
 func Test_pathUnlinkFile(t *testing.T) {
 	log := requireErrnoNosys(t, pathUnlinkFileName, 0, 0, 0)
 	require.Equal(t, `
---> wasi_snapshot_preview1.path_unlink_file(fd=0,path=0,path_len=0)
-<-- ENOSYS
+--> wasi_snapshot_preview1.path_unlink_file(fd=0,path=)
+<-- errno=ENOSYS
 `, log)
 }
 

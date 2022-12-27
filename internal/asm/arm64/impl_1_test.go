@@ -471,6 +471,18 @@ func Test_CompileRegisterAndConstToNone(t *testing.T) {
 	require.Equal(t, operandTypeNone, actualNode.types.dst)
 }
 
+func Test_CompileRegisterAndConstToRegister(t *testing.T) {
+	a := NewAssembler(RegR10)
+	a.CompileRegisterAndConstToRegister(CMP, RegR27, 10, RegSP)
+	actualNode := a.current
+	require.Equal(t, CMP, actualNode.instruction)
+	require.Equal(t, RegR27, actualNode.srcReg)
+	require.Equal(t, int64(10), actualNode.srcConst)
+	require.Equal(t, RegSP, actualNode.dstReg)
+	require.Equal(t, operandTypeRegisterAndConst, actualNode.types.src)
+	require.Equal(t, operandTypeRegister, actualNode.types.dst)
+}
+
 func Test_CompileLeftShiftedRegisterToRegister(t *testing.T) {
 	a := NewAssembler(RegR10)
 	a.CompileLeftShiftedRegisterToRegister(ADD, RegR27, 10, RegR28, RegR5)
@@ -670,7 +682,7 @@ func TestAssemblerImpl_encodeNoneToNone(t *testing.T) {
 		err := a.encodeNoneToNone(&nodeImpl{instruction: ADD})
 		require.EqualError(t, err, "ADD is unsupported for from:none,to:none type")
 	})
-	t.Run("ok", func(t *testing.T) {
+	t.Run("NOP", func(t *testing.T) {
 		a := NewAssembler(asm.NilRegister)
 		err := a.encodeNoneToNone(&nodeImpl{instruction: NOP})
 		require.NoError(t, err)
@@ -678,6 +690,14 @@ func TestAssemblerImpl_encodeNoneToNone(t *testing.T) {
 		// NOP must be ignored.
 		actual := a.buf.Bytes()
 		require.Zero(t, len(actual))
+	})
+	t.Run("UDF", func(t *testing.T) {
+		a := NewAssembler(asm.NilRegister)
+		err := a.encodeNoneToNone(&nodeImpl{instruction: UDF})
+		require.NoError(t, err)
+
+		actual := a.buf.Bytes()
+		require.Equal(t, []byte{0x0, 0x0, 0x0, 0x0}, actual, hex.EncodeToString(actual))
 	})
 }
 
