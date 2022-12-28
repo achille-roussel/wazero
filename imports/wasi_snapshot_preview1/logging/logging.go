@@ -105,7 +105,7 @@ func isLookupFlags(fnd api.FunctionDefinition, name string) bool {
 }
 
 func logErrno(_ context.Context, _ api.Module, w logging.Writer, _, results []uint64) {
-	errno := wasi_snapshot_preview1.ErrnoName(uint32(results[0]))
+	errno := wasi_snapshot_preview1.Errno(results[0]).Name()
 	w.WriteString("errno=") //nolint
 	w.WriteString(errno)    //nolint
 }
@@ -123,9 +123,9 @@ type logFilestat uint32
 func (i logFilestat) Log(_ context.Context, mod api.Module, w logging.Writer, params []uint64) {
 	offset, byteCount := uint32(params[i]), uint32(64)
 	if buf, ok := mod.Memory().Read(offset, byteCount); ok {
-		w.WriteString("{filetype=")                                 //nolint
-		w.WriteString(wasi_snapshot_preview1.FiletypeName(buf[16])) //nolint
-		w.WriteString(",size=")                                     //nolint
+		w.WriteString("{filetype=")                                    //nolint
+		w.WriteString(wasi_snapshot_preview1.Filetype(buf[16]).Name()) //nolint
+		w.WriteString(",size=")                                        //nolint
 		writeI64(w, le.Uint64(buf[32:]))
 		w.WriteString(",mtim=") //nolint
 		writeI64(w, le.Uint64(buf[40:]))
@@ -138,9 +138,9 @@ type logFdstat uint32
 func (i logFdstat) Log(_ context.Context, mod api.Module, w logging.Writer, params []uint64) {
 	offset, byteCount := uint32(params[i]), uint32(24)
 	if buf, ok := mod.Memory().Read(offset, byteCount); ok {
-		w.WriteString("{filetype=")                                //nolint
-		w.WriteString(wasi_snapshot_preview1.FiletypeName(buf[0])) //nolint
-		w.WriteString(",fdflags=")                                 //nolint
+		w.WriteString("{filetype=")                                   //nolint
+		w.WriteString(wasi_snapshot_preview1.Filetype(buf[0]).Name()) //nolint
+		w.WriteString(",fdflags=")                                    //nolint
 		writeFlags(w, fdflagNames[:], int(le.Uint16(buf[2:])))
 		w.WriteString(",fs_rights_base=") //nolint
 		writeFlags(w, rightNames[:], int(le.Uint16(buf[8:])))

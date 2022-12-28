@@ -7,11 +7,11 @@ import (
 	"os"
 	"testing"
 
+	expsys "github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/internal/sys"
 	testfs "github.com/tetratelabs/wazero/internal/testing/fs"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
-	"github.com/tetratelabs/wazero/wasi"
 )
 
 func TestCallContext_WithMemory(t *testing.T) {
@@ -146,7 +146,7 @@ func TestCallContext_Close(t *testing.T) {
 	}
 
 	t.Run("calls Context.Close()", func(t *testing.T) {
-		sysCtx := sys.DefaultContext(wasi.NewFS(testfs.FS{"foo": &testfs.File{}}))
+		sysCtx := sys.DefaultContext(expsys.NewFS(testfs.FS{"foo": &testfs.File{}}))
 
 		_, err := pathOpen(sysCtx, "/foo")
 		require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestCallContext_Close(t *testing.T) {
 	t.Run("error closing", func(t *testing.T) {
 		// Right now, the only way to err closing the sys context is if a File.Close erred.
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
-		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
+		sysCtx := sys.DefaultContext(expsys.NewFS(testFS))
 
 		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)
@@ -240,7 +240,7 @@ func TestCallContext_CallDynamic(t *testing.T) {
 	}
 
 	t.Run("calls Context.Close()", func(t *testing.T) {
-		sysCtx := sys.DefaultContext(wasi.NewFS(testfs.FS{"foo": &testfs.File{}}))
+		sysCtx := sys.DefaultContext(expsys.NewFS(testfs.FS{"foo": &testfs.File{}}))
 
 		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)
@@ -267,7 +267,7 @@ func TestCallContext_CallDynamic(t *testing.T) {
 	t.Run("error closing", func(t *testing.T) {
 		// Right now, the only way to err closing the sys context is if a File.Close erred.
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
-		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
+		sysCtx := sys.DefaultContext(expsys.NewFS(testFS))
 
 		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)

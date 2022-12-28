@@ -14,13 +14,13 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	expsys "github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/internal/leb128"
 	"github.com/tetratelabs/wazero/internal/sys"
 	internalsys "github.com/tetratelabs/wazero/internal/sys"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/internal/wasm"
-	"github.com/tetratelabs/wazero/wasi"
 )
 
 // Test_fdAdvise only tests it is stubbed for GrainLang per #271
@@ -44,7 +44,7 @@ func Test_fdAllocate(t *testing.T) {
 func Test_fdClose(t *testing.T) {
 	// fd_close needs to close an open file descriptor. Open two files so that we can tell which is closed.
 	path1, path2 := "a", "b"
-	testFS := wasi.NewFS(fstest.MapFS{path1: {Data: make([]byte, 0)}, path2: {Data: make([]byte, 0)}})
+	testFS := expsys.NewFS(fstest.MapFS{path1: {Data: make([]byte, 0)}, path2: {Data: make([]byte, 0)}})
 
 	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(testFS))
 	defer r.Close(testCtx)
@@ -94,7 +94,7 @@ func Test_fdDatasync(t *testing.T) {
 
 func Test_fdFdstatGet(t *testing.T) {
 	file, dir := "a", "b"
-	testFS := wasi.NewFS(fstest.MapFS{
+	testFS := expsys.NewFS(fstest.MapFS{
 		file: {Data: make([]byte, 10), ModTime: time.Unix(1667482413, 0)},
 		dir:  {Mode: fs.ModeDir, ModTime: time.Unix(1667482413, 0)},
 	})
@@ -262,7 +262,7 @@ func Test_fdFdstatSetRights(t *testing.T) {
 
 func Test_fdFilestatGet(t *testing.T) {
 	file, dir := "a", "b"
-	testFS := wasi.NewFS(fstest.MapFS{
+	testFS := expsys.NewFS(fstest.MapFS{
 		".":  {Mode: 0o755 | fs.ModeDir, ModTime: time.Unix(0, 0)},
 		file: {Data: make([]byte, 10), ModTime: time.Unix(1667482413, 0)},
 		dir:  {Mode: fs.ModeDir, ModTime: time.Unix(1667482413, 0)},
@@ -658,7 +658,7 @@ func Test_fdPread_Errors(t *testing.T) {
 }
 
 func Test_fdPrestatGet(t *testing.T) {
-	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(wasi.NewFS(fstest.MapFS{})))
+	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(expsys.NewFS(fstest.MapFS{})))
 	defer r.Close(testCtx)
 	fd := internalsys.FdRoot // only pre-opened directory currently supported.
 
@@ -686,7 +686,7 @@ func Test_fdPrestatGet(t *testing.T) {
 }
 
 func Test_fdPrestatGet_Errors(t *testing.T) {
-	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(wasi.NewFS(fstest.MapFS{})))
+	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(expsys.NewFS(fstest.MapFS{})))
 	defer r.Close(testCtx)
 	fd := internalsys.FdRoot // only pre-opened directory currently supported.
 
@@ -734,7 +734,7 @@ func Test_fdPrestatGet_Errors(t *testing.T) {
 }
 
 func Test_fdPrestatDirName(t *testing.T) {
-	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(wasi.NewFS(fstest.MapFS{})))
+	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(expsys.NewFS(fstest.MapFS{})))
 	defer r.Close(testCtx)
 	fd := internalsys.FdRoot // only pre-opened directory currently supported.
 
@@ -758,7 +758,7 @@ func Test_fdPrestatDirName(t *testing.T) {
 }
 
 func Test_fdPrestatDirName_Errors(t *testing.T) {
-	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(wasi.NewFS(fstest.MapFS{})))
+	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(expsys.NewFS(fstest.MapFS{})))
 	defer r.Close(testCtx)
 	fd := internalsys.FdRoot // only pre-opened directory currently supported.
 
@@ -1125,7 +1125,7 @@ var (
 
 /* TODO: brig back
 func Test_fdReaddir(t *testing.T) {
-	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(wasi.NewFS(fdReadDirFs)))
+	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(expsys.NewFS(fdReadDirFs)))
 	defer r.Close(testCtx)
 
 	ctx := mod.(*wasm.CallContext)
@@ -2149,7 +2149,7 @@ func Test_pathCreateDirectory(t *testing.T) {
 
 func Test_pathFilestatGet(t *testing.T) {
 	file, dir := "a", "b"
-	testFS := wasi.NewFS(fstest.MapFS{
+	testFS := expsys.NewFS(fstest.MapFS{
 		file:             {Data: make([]byte, 10), ModTime: time.Unix(1667482413, 0)},
 		dir:              {Mode: fs.ModeDir, ModTime: time.Unix(1667482413, 0)},
 		dir + "/" + file: {Data: make([]byte, 20), ModTime: time.Unix(1667482413, 0)},
@@ -2385,12 +2385,12 @@ func Test_pathOpen(t *testing.T) {
 	path := uint32(1)
 	pathLen := uint32(len(pathName))
 	oflags := uint32(0)
-	fsRightsBase := uint64(1)       // ignored: rights were removed from WASI.
-	fsRightsInheriting := uint64(2) // ignored: rights were removed from WASI.
+	fsRightsBase := uint64(1)       // ignored: rights were removed from EXPSYS.
+	fsRightsInheriting := uint64(2) // ignored: rights were removed from EXPSYS.
 	fdflags := uint32(0)
 	resultOpenedFd := uint32(len(initialMemory) + 1)
 
-	testFS := wasi.NewFS(fstest.MapFS{pathName: &fstest.MapFile{Mode: os.ModeDir}})
+	testFS := expsys.NewFS(fstest.MapFS{pathName: &fstest.MapFile{Mode: os.ModeDir}})
 	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(testFS))
 	defer r.Close(testCtx)
 
@@ -2420,7 +2420,7 @@ func Test_pathOpen_Errors(t *testing.T) {
 	validFD := uint32(3) // arbitrary valid fd after 0, 1, and 2, that are stdin/out/err
 	dirName := "wazero"
 	fileName := "notdir" // name length as wazero
-	testFS := wasi.NewFS(fstest.MapFS{
+	testFS := expsys.NewFS(fstest.MapFS{
 		dirName:  &fstest.MapFile{Mode: os.ModeDir},
 		fileName: &fstest.MapFile{},
 	})
@@ -2583,7 +2583,7 @@ func requireOpenFile(t *testing.T, pathName string, data []byte) (api.Module, ui
 	if data == nil {
 		mapFile.Mode = os.ModeDir
 	}
-	testFS := wasi.NewFS(fstest.MapFS{pathName[1:]: mapFile}) // strip the leading slash
+	testFS := expsys.NewFS(fstest.MapFS{pathName[1:]: mapFile}) // strip the leading slash
 	mod, r, log := requireProxyModule(t, wazero.NewModuleConfig().WithFS(testFS))
 	ctx := mod.(*wasm.CallContext)
 	fd, err := open(ctx.Sys, pathName)
