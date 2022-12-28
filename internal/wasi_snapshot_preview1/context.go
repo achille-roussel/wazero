@@ -410,7 +410,7 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 		if ctx.FileSystem == nil {
 			return ENOENT
 		}
-		err = ctx.FileSystem.MakeDir(toRel(path), perm)
+		err = ctx.FileSystem.Mkdir(toRel(path), perm)
 	} else {
 		f := ctx.files.lookup(fd)
 		if f == nil {
@@ -419,7 +419,7 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 		if !f.fsRightsBase.Has(RIGHT_PATH_CREATE_DIRECTORY) {
 			return EPERM
 		}
-		err = f.base.MakeDir(path, perm)
+		err = f.base.Mkdir(path, perm)
 	}
 	return makeErrno(err)
 }
@@ -525,7 +525,7 @@ func (fsys contextFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return &contextFileInfo{name: fspath.Base(path), stat: stat}, nil
 }
 
-func (fsys contextFS) MakeDir(path string, perm fs.FileMode) error {
+func (fsys contextFS) Mkdir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
@@ -598,7 +598,7 @@ func (f *contextFile) ReadAt(b []byte, off int64) (int, error) {
 	return int(size), makeError(errno)
 }
 
-func (f *contextFile) MakeDir(path string, perm fs.FileMode) error {
+func (f *contextFile) Mkdir(path string, perm fs.FileMode) error {
 	if f.fd == None {
 		return fs.ErrClosed
 	}

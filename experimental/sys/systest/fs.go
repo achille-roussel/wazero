@@ -84,9 +84,9 @@ func testFSErrNotExist(t *testing.T, fsys sys.FS) {
 		},
 
 		fsTestCase{
-			scenario: "calling MakeDir for a path which does not exist returns fs.ErrNotExist",
+			scenario: "calling Mkdir for a path which does not exist returns fs.ErrNotExist",
 			function: func(fsys sys.FS) error {
-				err := fsys.MakeDir("nope/nope/nope", 0755)
+				err := fsys.Mkdir("nope/nope/nope", 0755)
 				return err
 			},
 		},
@@ -136,9 +136,9 @@ func testFileErrNotExist(t *testing.T, file sys.File) {
 		},
 
 		fileTestCase{
-			scenario: "calling MakeDir for a file which does not exist returns fs.ErrNotExist",
+			scenario: "calling Mkdir for a file which does not exist returns fs.ErrNotExist",
 			function: func(file sys.File) error {
-				err := file.MakeDir("nope/nope/nope", 0755)
+				err := file.Mkdir("nope/nope/nope", 0755)
 				return err
 			},
 		},
@@ -240,9 +240,9 @@ func testFileErrClosed(t *testing.T, file sys.File) {
 		},
 
 		fileTestCase{
-			scenario: "calling MakeDir on a closed file returns fs.ErrClosed",
+			scenario: "calling Mkdir on a closed file returns fs.ErrClosed",
 			function: func(file sys.File) error {
-				err := file.MakeDir("foo", 0755)
+				err := file.Mkdir("foo", 0755)
 				return err
 			},
 		},
@@ -315,9 +315,9 @@ func assertPathData(t *testing.T, fsys sys.FS, path, want string) {
 	assertFileData(t, f, want)
 }
 
-func assertMakeDir(t *testing.T, fsys sys.FS, path string, perm fs.FileMode) {
+func assertMkdir(t *testing.T, fsys sys.FS, path string, perm fs.FileMode) {
 	t.Helper()
-	assertErrorIs(t, fsys.MakeDir(path, perm), nil)
+	assertErrorIs(t, fsys.Mkdir(path, perm), nil)
 	s, err := fsys.Stat(path)
 	if err != nil {
 		t.Error(err)

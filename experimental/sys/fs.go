@@ -42,8 +42,8 @@ type File interface {
 	// StatFile returns information about the file at the given path, relative
 	// to the receiver.
 	StatFile(path string, flags int) (fs.FileInfo, error)
-	// MakeDir creates a file at the given path, relative to the receiver.
-	MakeDir(path string, perm fs.FileMode) error
+	// Mkdir creates a file at the given path, relative to the receiver.
+	Mkdir(path string, perm fs.FileMode) error
 	// Chtimes sets the access and modification time of the receiver.
 	Chtimes(atim, mtim time.Time) error
 	// ChtimesFile sets the access and modification time of the file at the given
@@ -80,8 +80,8 @@ type FS interface {
 	// StatFile is a method similar to Stat but it allows passing flags to
 	// configure the behavior of the path lookup.
 	StatFile(path string, flags int) (fs.FileInfo, error)
-	// MakeDir creates a directory at the given path.
-	MakeDir(path string, perm fs.FileMode) error
+	// Mkdir creates a directory at the given path.
+	Mkdir(path string, perm fs.FileMode) error
 	// ChtimesFile sets the access and modification time at the given path.
 	Chtimes(path string, flags int, atim, mtim time.Time) error
 }
@@ -127,7 +127,7 @@ func (fsys *fsFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return fs.Stat(fsys.base, path)
 }
 
-func (fsys *fsFS) MakeDir(path string, perm fs.FileMode) error {
+func (fsys *fsFS) Mkdir(path string, perm fs.FileMode) error {
 	if _, err := fsys.StatFile(fspath.Dir(path), 0); err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func (f *fsFile) WriteAt([]byte, int64) (int, error) {
 	return 0, ErrReadOnly
 }
 
-func (f *fsFile) MakeDir(path string, perm fs.FileMode) error {
+func (f *fsFile) Mkdir(path string, perm fs.FileMode) error {
 	if err := f.testFileExists("mkdir", fspath.Dir(path), 0); err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func (fsys *dirFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return fsys.statFile(fsys.pathTo(path), flags)
 }
 
-func (fsys *dirFS) MakeDir(path string, perm fs.FileMode) error {
+func (fsys *dirFS) Mkdir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
@@ -449,7 +449,7 @@ func (f *dirFile) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return f.fsys.statFile(f.pathTo(path), flags)
 }
 
-func (f *dirFile) MakeDir(path string, perm fs.FileMode) error {
+func (f *dirFile) Mkdir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
@@ -539,11 +539,11 @@ func (fsys *subFS) StatFile(path string, flags int) (fs.FileInfo, error) {
 	return fsys.root.StatFile(path, flags)
 }
 
-func (fsys *subFS) MakeDir(path string, perm fs.FileMode) error {
+func (fsys *subFS) Mkdir(path string, perm fs.FileMode) error {
 	if !fs.ValidPath(path) {
 		return fs.ErrInvalid
 	}
-	return fsys.root.MakeDir(path, perm)
+	return fsys.root.Mkdir(path, perm)
 }
 
 func (fsys *subFS) Chtimes(path string, flags int, atim, mtim time.Time) error {

@@ -144,7 +144,7 @@ func testReadOnlyFSCreateDirectory(t *testing.T, newFS MakeReadOnlyFS) {
 	fsys, closeFS := assertNewFS(t, readOnlyFS(newFS, nil))
 	defer assertCloseFS(t, closeFS)
 
-	err := fsys.MakeDir("tmp", 0755)
+	err := fsys.Mkdir("tmp", 0755)
 	assertErrorIs(t, err, sys.ErrReadOnly)
 }
 
