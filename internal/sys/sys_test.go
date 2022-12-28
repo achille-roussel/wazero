@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	expsys "github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/internal/platform"
 	testfs "github.com/tetratelabs/wazero/internal/testing/fs"
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/sys"
-	"github.com/tetratelabs/wazero/wasi"
 )
 
 /*
@@ -34,8 +34,8 @@ func TestDefaultSysContext(t *testing.T) {
 		nil,    // randSource
 		nil, 0, // walltime, walltimeResolution
 		nil, 0, // nanotime, nanotimeResolution
-		nil,                     // nanosleep
-		wasi.NewFS(testfs.FS{}), // fs
+		nil,                       // nanosleep
+		expsys.NewFS(testfs.FS{}), // fs
 	)
 	require.NoError(t, err)
 

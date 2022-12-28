@@ -7,10 +7,10 @@ import (
 	"io/fs"
 	"time"
 
+	expsys "github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/internal/platform"
 	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
-	"github.com/tetratelabs/wazero/wasi"
 )
 
 // Context holds module-scoped system resources currently only supported by
@@ -111,8 +111,8 @@ func (eofReader) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// DefaultContext returns Context with no values set except a possibly nil wasi.FS
-func DefaultContext(fs wasi.FS) *Context {
+// DefaultContext returns Context with no values set except a possibly nil expsys.FS
+func DefaultContext(fs expsys.FS) *Context {
 	if sysCtx, err := NewContext(0, nil, nil, nil, nil, nil, nil, nil, 0, nil, 0, nil, fs); err != nil {
 		panic(fmt.Errorf("BUG: DefaultContext should never error: %w", err))
 	} else {
@@ -138,7 +138,7 @@ func NewContext(
 	nanotime *sys.Nanotime,
 	nanotimeResolution sys.ClockResolution,
 	nanosleep *sys.Nanosleep,
-	fileSystem wasi.FS,
+	fileSystem expsys.FS,
 ) (sysCtx *Context, err error) {
 	sysCtx = &Context{
 		Context: wasi_snapshot_preview1.Context{FileSystem: fileSystem},
