@@ -8,12 +8,16 @@ import (
 	"time"
 
 	"github.com/tetratelabs/wazero/internal/platform"
+	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
+	"github.com/tetratelabs/wazero/wasi"
 )
 
 // Context holds module-scoped system resources currently only supported by
 // built-in host functions.
 type Context struct {
+	wasi_snapshot_preview1.Context
+
 	args, environ         [][]byte
 	argsSize, environSize uint32
 
@@ -25,7 +29,7 @@ type Context struct {
 	nanotimeResolution sys.ClockResolution
 	nanosleep          *sys.Nanosleep
 	randSource         io.Reader
-	fsc                *FSContext
+	//fsc                *FSContext
 }
 
 // Args is like os.Args and defaults to nil.
@@ -88,9 +92,9 @@ func (c *Context) Nanosleep(ns int64) {
 }
 
 // FS returns the possibly empty (EmptyFS) file system context.
-func (c *Context) FS() *FSContext {
-	return c.fsc
-}
+// func (c *Context) FS() *FSContext {
+// 	return c.fsc
+// }
 
 // RandSource is a source of random bytes and defaults to a deterministic source.
 // see wazero.ModuleConfig WithRandSource
@@ -107,8 +111,8 @@ func (eofReader) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// DefaultContext returns Context with no values set except a possibly nil fs.FS
-func DefaultContext(fs fs.FS) *Context {
+// DefaultContext returns Context with no values set except a possibly nil wasi.FS
+func DefaultContext(fs wasi.FS) *Context {
 	if sysCtx, err := NewContext(0, nil, nil, nil, nil, nil, nil, nil, 0, nil, 0, nil, fs); err != nil {
 		panic(fmt.Errorf("BUG: DefaultContext should never error: %w", err))
 	} else {
@@ -134,9 +138,13 @@ func NewContext(
 	nanotime *sys.Nanotime,
 	nanotimeResolution sys.ClockResolution,
 	nanosleep *sys.Nanosleep,
-	fs fs.FS,
+	fileSystem wasi.FS,
 ) (sysCtx *Context, err error) {
-	sysCtx = &Context{args: args, environ: environ}
+	sysCtx = &Context{
+		Context: wasi_snapshot_preview1.Context{FileSystem: fileSystem},
+		args:    args,
+		environ: environ,
+	}
 
 	if sysCtx.argsSize, err = nullTerminatedByteCount(max, args); err != nil {
 		return nil, fmt.Errorf("args invalid: %w", err)
@@ -180,12 +188,29 @@ func NewContext(
 		sysCtx.nanosleep = &ns
 	}
 
-	if fs != nil {
-		sysCtx.fsc, err = NewFSContext(stdin, stdout, stderr, fs)
-	} else {
-		sysCtx.fsc, err = NewFSContext(stdin, stdout, stderr, EmptyFS)
+	const (
+		stdinMode  = fs.ModeNamedPipe | 0400
+		stdoutMode = fs.ModeNamedPipe | 0200
+		stderrMode = stdoutMode
+
+		stdinRights  = wasi_snapshot_preview1.RIGHT_FD_READ
+		stdoutRights = wasi_snapshot_preview1.RIGHT_FD_WRITE
+		stderrRights = stdoutRights
+	)
+
+	if stdin == nil {
+		stdin = null{}
+	}
+	if stdout == nil {
+		stdout = null{}
+	}
+	if stderr == nil {
+		stderr = null{}
 	}
 
+	sysCtx.Register(&reader{stdin, file{"stdin", stdinMode}}, stdinRights, 0)
+	sysCtx.Register(&writer{stdout, file{"stdout", stdoutMode}}, stdoutRights, 0)
+	sysCtx.Register(&writer{stderr, file{"stderr", stderrMode}}, stdoutRights, 0)
 	return
 }
 

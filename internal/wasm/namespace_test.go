@@ -9,6 +9,7 @@ import (
 	"github.com/tetratelabs/wazero/internal/sys"
 	testfs "github.com/tetratelabs/wazero/internal/testing/fs"
 	"github.com/tetratelabs/wazero/internal/testing/require"
+	"github.com/tetratelabs/wazero/wasi"
 )
 
 func Test_newNamespace(t *testing.T) {
@@ -235,8 +236,7 @@ func TestNamespace_CloseWithExitCode(t *testing.T) {
 	t.Run("error closing", func(t *testing.T) {
 		// Right now, the only way to err closing the sys context is if a File.Close erred.
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
-		sysCtx := sys.DefaultContext(testFS)
-		fsCtx := sysCtx.FS()
+		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
 
 		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)

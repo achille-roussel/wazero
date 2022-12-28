@@ -1,7 +1,7 @@
 package wasi_snapshot_preview1
 
 import (
-	internalwasi "github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/internal/wasi_snapshot_preview1"
 )
 
 // Errno are the error codes returned by WASI functions.
@@ -14,12 +14,10 @@ import (
 //
 // See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#-errno-enumu16 and
 // https://linux.die.net/man/3/errno
-type Errno = uint32 // neither uint16 nor an alias for parity with wasm.ValueType
+type Errno = wasi_snapshot_preview1.Errno
 
 // ErrnoName returns the POSIX error code name, except ErrnoSuccess, which is not an error. e.g. Errno2big -> "E2BIG"
-func ErrnoName(errno Errno) string {
-	return internalwasi.ErrnoName(errno)
-}
+func ErrnoName(errno Errno) string { return errno.Name() }
 
 // Note: Below prefers POSIX symbol names over WASI ones, even if the docs are from WASI.
 // See https://linux.die.net/man/3/errno
