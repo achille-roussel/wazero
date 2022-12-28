@@ -14,6 +14,8 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
+	"github.com/tetratelabs/wazero/experimental/logging"
+	"github.com/tetratelabs/wazero/experimental/writefs"
 	gojs "github.com/tetratelabs/wazero/imports/go"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/internal/version"
@@ -25,7 +27,7 @@ func main() {
 }
 
 // doMain is separated out for the purpose of unit testing.
-func doMain(stdOut io.Writer, stdErr io.Writer, exit func(code int)) {
+func doMain(stdOut io.Writer, stdErr logging.Writer, exit func(code int)) {
 	flag.CommandLine.SetOutput(stdErr)
 
 	var help bool
@@ -91,6 +93,8 @@ func doCompile(args []string, stdErr io.Writer, exit func(code int)) {
 
 	ctx := maybeUseCacheDir(context.Background(), cacheDir, stdErr, exit)
 
+	ctx = maybeUseCacheDir(ctx, cacheDir, stdErr, exit)
+
 	rt := wazero.NewRuntime(ctx)
 	defer rt.Close(ctx)
 
@@ -102,7 +106,7 @@ func doCompile(args []string, stdErr io.Writer, exit func(code int)) {
 	}
 }
 
-func doRun(args []string, stdOut io.Writer, stdErr io.Writer, exit func(code int)) {
+func doRun(args []string, stdOut io.Writer, stdErr logging.Writer, exit func(code int)) {
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
 	flags.SetOutput(stdErr)
 
@@ -117,6 +121,8 @@ func doRun(args []string, stdOut io.Writer, stdErr io.Writer, exit func(code int
 	flags.Var(&mounts, "mount",
 		"filesystem path to expose to the binary in the form of <host path>[:<wasm path>]. If wasm path is not "+
 			"provided, the host path will be used. Can be specified multiple times.")
+
+	hostLogging := hostLoggingFlag(flags)
 
 	cacheDir := cacheDirFlag(flags)
 
@@ -153,38 +159,30 @@ func doRun(args []string, stdOut io.Writer, stdErr io.Writer, exit func(code int
 		env = append(env, fields[0], fields[1])
 	}
 
-	var mountFS fs.FS
-	if len(mounts) > 0 {
-		cfs := &compositeFS{
-			paths: map[string]fs.FS{},
+	validatedMounts := validateMounts(mounts, stdErr, exit)
+
+	var rootFS fs.FS
+	switch len(validatedMounts) {
+	case 0: // nofs
+	case 1:
+		mount := validatedMounts[0]
+		host := mount[0]
+		guest := mount[1]
+		if guest == "" { // guest is root
+			rootFS = writefs.New(host)
+		} else { // TODO: subfs
+			rootFS = &compositeFS{
+				paths: map[string]fs.FS{guest: os.DirFS(host)},
+			}
 		}
-		for _, mount := range mounts {
-			if len(mount) == 0 {
-				fmt.Fprintln(stdErr, "invalid mount: empty string")
-				exit(1)
-			}
-
-			// TODO(anuraaga): Support wasm paths with colon in them.
-			var host, guest string
-			if clnIdx := strings.LastIndexByte(mount, ':'); clnIdx != -1 {
-				host, guest = mount[:clnIdx], mount[clnIdx+1:]
-			} else {
-				host = mount
-				guest = host
-			}
-
-			if guest[0] == '.' {
-				fmt.Fprintf(stdErr, "invalid mount: guest path must not start with .: %s\n", guest)
-				exit(1)
-			}
-
-			// wazero always calls fs.Open with a relative path.
-			if guest[0] == '/' {
-				guest = guest[1:]
-			}
+	default:
+		cfs := &compositeFS{paths: map[string]fs.FS{}}
+		for _, mount := range validatedMounts {
+			host := mount[0]
+			guest := mount[1]
 			cfs.paths[guest] = os.DirFS(host)
 		}
-		mountFS = cfs
+		rootFS = cfs
 	}
 
 	wasm, err := os.ReadFile(wasmPath)
@@ -195,7 +193,9 @@ func doRun(args []string, stdOut io.Writer, stdErr io.Writer, exit func(code int
 
 	wasmExe := filepath.Base(wasmPath)
 
-	ctx := maybeUseCacheDir(context.Background(), cacheDir, stdErr, exit)
+	ctx := maybeHostLogging(context.Background(), hostLogging, stdErr, exit)
+
+	ctx = maybeUseCacheDir(ctx, cacheDir, stdErr, exit)
 
 	rt := wazero.NewRuntime(ctx)
 	defer rt.Close(ctx)
@@ -214,8 +214,8 @@ func doRun(args []string, stdOut io.Writer, stdErr io.Writer, exit func(code int
 	for i := 0; i < len(env); i += 2 {
 		conf = conf.WithEnv(env[i], env[i+1])
 	}
-	if mountFS != nil {
-		conf = conf.WithFS(mountFS)
+	if rootFS != nil {
+		conf = conf.WithFS(rootFS)
 	}
 
 	code, err := rt.CompileModule(ctx, wasm)
@@ -246,6 +246,42 @@ func doRun(args []string, stdOut io.Writer, stdErr io.Writer, exit func(code int
 	exit(0)
 }
 
+func validateMounts(mounts sliceFlag, stdErr logging.Writer, exit func(code int)) (validatedMounts [][2]string) {
+	for _, mount := range mounts {
+		if len(mount) == 0 {
+			fmt.Fprintln(stdErr, "invalid mount: empty string")
+			exit(1)
+		}
+
+		// TODO(anuraaga): Support wasm paths with colon in them.
+		var host, guest string
+		if clnIdx := strings.LastIndexByte(mount, ':'); clnIdx != -1 {
+			host, guest = mount[:clnIdx], mount[clnIdx+1:]
+		} else {
+			host = mount
+			guest = host
+		}
+
+		if guest[0] == '.' {
+			fmt.Fprintf(stdErr, "invalid mount: guest path must not start with .: %s\n", guest)
+			exit(1)
+		}
+
+		// wazero always calls fs.Open with a relative path.
+		if guest[0] == '/' {
+			guest = guest[1:]
+		}
+
+		if abs, err := filepath.Abs(host); err != nil {
+			fmt.Fprintf(stdErr, "invalid mount: host path %q invalid: %v\n", host, err)
+			exit(1)
+		} else {
+			validatedMounts = append(validatedMounts, [2]string{abs, guest})
+		}
+	}
+	return
+}
+
 func detectImports(imports []api.FunctionDefinition) (needsWASI, needsGo bool) {
 	for _, f := range imports {
 		moduleName, _, _ := f.Import()
@@ -259,6 +295,24 @@ func detectImports(imports []api.FunctionDefinition) (needsWASI, needsGo bool) {
 		}
 	}
 	return
+}
+
+func hostLoggingFlag(flags *flag.FlagSet) *string {
+	return flags.String("hostlogging", "", "Scope of host functions to log to stderr. "+
+		"Current values: filesystem")
+}
+
+func maybeHostLogging(ctx context.Context, hostLogging *string, stdErr logging.Writer, exit func(code int)) context.Context {
+	h := *hostLogging
+	switch h {
+	case "":
+	case "filesystem":
+		ctx = context.WithValue(ctx, experimental.FunctionListenerFactoryKey{}, logging.NewFilesystemLoggingListenerFactory(stdErr))
+	default:
+		fmt.Fprintf(stdErr, "invalid hostLogging value: %v\n", h)
+		exit(1)
+	}
+	return ctx
 }
 
 func cacheDirFlag(flags *flag.FlagSet) *string {

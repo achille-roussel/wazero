@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/tetratelabs/wazero/internal/sys"
@@ -174,7 +175,7 @@ func TestCallContext_Close(t *testing.T) {
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
 		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
 
-		_, err := pathOpen(sysCtx, "/foo")
+		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)
@@ -241,7 +242,7 @@ func TestCallContext_CallDynamic(t *testing.T) {
 	t.Run("calls Context.Close()", func(t *testing.T) {
 		sysCtx := sys.DefaultContext(wasi.NewFS(testfs.FS{"foo": &testfs.File{}}))
 
-		_, err := pathOpen(sysCtx, "/foo")
+		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)
@@ -268,7 +269,7 @@ func TestCallContext_CallDynamic(t *testing.T) {
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
 		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
 
-		_, err := pathOpen(sysCtx, "/foo")
+		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)
 
 		m, err := s.Instantiate(context.Background(), ns, &Module{}, t.Name(), sysCtx)

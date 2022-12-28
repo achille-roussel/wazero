@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"os"
 	"syscall"
 
 	"github.com/tetratelabs/wazero/api"
@@ -161,28 +162,18 @@ func fdFdstatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	return ErrnoSuccess
 }
 
-type wasiFdflags = byte // actually 16-bit, but there aren't that many.
-const (
-	wasiFdflagsNone wasiFdflags = 1<<iota - 1
-	wasiFdflagsAppend
-	wasiFdflagsDsync
-	wasiFdflagsNonblock
-	wasiFdflagsRsync
-	wasiFdflagsSync
-)
-
 var blockFdstat = []byte{
-	byte(wasiFiletypeBlockDevice), 0, // filetype
+	wasi_snapshot_preview1.FILETYPE_BLOCK_DEVICE, 0, // filetype
 	0, 0, 0, 0, 0, 0, // fdflags
 	0, 0, 0, 0, 0, 0, 0, 0, // fs_rights_base
 	0, 0, 0, 0, 0, 0, 0, 0, // fs_rights_inheriting
 }
 
-func writeFdstat(buf []byte, filetype wasiFiletype, fdflags wasiFdflags) {
+func writeFdstat(buf []byte, filetype uint8, fdflags uint16) {
 	// memory is re-used, so ensure the result is defaulted.
 	copy(buf, blockFdstat)
-	buf[0] = uint8(filetype)
-	buf[2] = fdflags
+	buf[0] = filetype
+	buf[2] = byte(fdflags)
 }
 
 // fdFdstatSetFlags is the WASI function named fdFdstatSetFlagsName which
@@ -247,20 +238,7 @@ var fdFdstatSetRights = stubFunction(
 // Note: This is similar to `fstat` in POSIX.
 // See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#-fd_filestat_getfd-fd---errno-filestat
 // and https://linux.die.net/man/3/fstat
-var fdFilestatGet = newHostFunc(fdFilestatGetName, fdFilestatGetFn, []api.ValueType{i32, i32}, "fd", "result.buf")
-
-type wasiFiletype uint8
-
-const (
-	wasiFiletypeUnknown wasiFiletype = iota
-	wasiFiletypeBlockDevice
-	wasiFiletypeCharacterDevice
-	wasiFiletypeDirectory
-	wasiFiletypeRegularFile
-	wasiFiletypeSocketDgram
-	wasiFiletypeSocketStream
-	wasiFiletypeSymbolicLink
-)
+var fdFilestatGet = newHostFunc(fdFilestatGetName, fdFilestatGetFn, []api.ValueType{i32, i32}, "fd", "result.filestat")
 
 // fdFilestatGetFn cannot currently use proxyResultParams because filestat is
 // larger than api.ValueTypeI64 (i64 == 8 bytes, but filestat is 64).
@@ -285,18 +263,18 @@ func fdFilestatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	return ErrnoSuccess
 }
 
-func getWasiFiletype(fileMode fs.FileMode) wasiFiletype {
-	wasiFileType := wasiFiletypeUnknown
+func getWasiFiletype(fileMode fs.FileMode) uint8 {
+	wasiFileType := wasi_snapshot_preview1.FILETYPE_UNKNOWN
 	if fileMode&fs.ModeDevice != 0 {
-		wasiFileType = wasiFiletypeBlockDevice
+		wasiFileType = wasi_snapshot_preview1.FILETYPE_BLOCK_DEVICE
 	} else if fileMode&fs.ModeCharDevice != 0 {
-		wasiFileType = wasiFiletypeCharacterDevice
+		wasiFileType = wasi_snapshot_preview1.FILETYPE_CHARACTER_DEVICE
 	} else if fileMode&fs.ModeDir != 0 {
-		wasiFileType = wasiFiletypeDirectory
+		wasiFileType = wasi_snapshot_preview1.FILETYPE_DIRECTORY
 	} else if fileMode&fs.ModeType == 0 {
-		wasiFileType = wasiFiletypeRegularFile
+		wasiFileType = wasi_snapshot_preview1.FILETYPE_REGULAR_FILE
 	} else if fileMode&fs.ModeSymlink != 0 {
-		wasiFileType = wasiFiletypeSymbolicLink
+		wasiFileType = wasi_snapshot_preview1.FILETYPE_SYMBOLIC_LINK
 	}
 	return wasiFileType
 }
@@ -304,7 +282,7 @@ func getWasiFiletype(fileMode fs.FileMode) wasiFiletype {
 var blockFilestat = []byte{
 	0, 0, 0, 0, 0, 0, 0, 0, // device
 	0, 0, 0, 0, 0, 0, 0, 0, // inode
-	byte(wasiFiletypeBlockDevice), 0, 0, 0, 0, 0, 0, 0, // filetype
+	wasi_snapshot_preview1.FILETYPE_BLOCK_DEVICE, 0, 0, 0, 0, 0, 0, 0, // filetype
 	1, 0, 0, 0, 0, 0, 0, 0, // nlink
 	0, 0, 0, 0, 0, 0, 0, 0, // filesize
 	0, 0, 0, 0, 0, 0, 0, 0, // atim
@@ -319,7 +297,7 @@ func writeFilestat(buf []byte, stat fs.FileInfo) {
 
 	// memory is re-used, so ensure the result is defaulted.
 	copy(buf, blockFilestat[:32])
-	buf[16] = uint8(filetype)
+	buf[16] = filetype
 	le.PutUint64(buf[32:], filesize)     // filesize
 	le.PutUint64(buf[40:], uint64(mtim)) // atim
 	le.PutUint64(buf[48:], uint64(mtim)) // mtim
@@ -767,9 +745,9 @@ func writeDirent(buf []byte, dNext uint64, dNamlen uint32, dType bool) {
 	le.PutUint64(buf[8:], 0)        // no d_ino
 	le.PutUint32(buf[16:], dNamlen) // d_namlen
 
-	filetype := wasiFiletypeRegularFile
+	filetype := wasi_snapshot_preview1.FILETYPE_REGULAR_FILE
 	if dType {
-		filetype = wasiFiletypeDirectory
+		filetype = wasi_snapshot_preview1.FILETYPE_DIRECTORY
 	}
 	le.PutUint32(buf[20:], uint32(filetype)) //  d_type
 }
@@ -1002,11 +980,9 @@ var pathCreateDirectory = stubFunction(
 var pathFilestatGet = newHostFunc(
 	pathFilestatGetName, pathFilestatGetFn,
 	[]api.ValueType{i32, i32, i32, i32, i32},
-	"fd", "flags", "path", "path_len", "result.buf",
+	"fd", "flags", "path", "path_len", "result.filestat",
 )
 
-// pathFilestatGetFn cannot currently use proxyResultParams because filestat is
-// larger than api.ValueTypeI64 (i64 == 8 bytes, but filestat is 64).
 func pathFilestatGetFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	ctx := mod.(*wasm.CallContext)
 
@@ -1115,21 +1091,6 @@ var pathOpen = newHostFunc(
 	"fd", "dirflags", "path", "path_len", "oflags", "fs_rights_base", "fs_rights_inheriting", "fdflags", "result.opened_fd",
 )
 
-// wasiOflags are open flags used by pathOpen
-// See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#-oflags-flagsu16
-type wasiOflags = byte // actually 16-bit, but there aren't that many.
-const (
-	wasiOflagsNone wasiFdflags = 1<<iota - 1 // nolint
-	// wasiOflagsCreat creates a file if it does not exist.
-	wasiOflagsCreat // nolint
-	// wasiOflagsDirectory fails if not a directory.
-	wasiOflagsDirectory
-	// wasiOflagsExcl fails if file already exists.
-	wasiOflagsExcl // nolint
-	// wasiOflagsTrunc truncates the file to size 0.
-	wasiOflagsTrunc // nolint
-)
-
 func pathOpenFn(_ context.Context, mod api.Module, params []uint64) Errno {
 	ctx := mod.(*wasm.CallContext)
 
@@ -1167,6 +1128,8 @@ func pathOpenFn(_ context.Context, mod api.Module, params []uint64) Errno {
 		return ErrnoFault
 	}
 
+	fileOpenFlags, isDir := openFlags(oflags, fdflags)
+
 	// TODO: path is not precise here, as it should be a path relative to the
 	// FD, which isn't always rootFD (3). This means the path for Open may need
 	// to be built up. For example, if dirfd represents "/tmp/foo" and
@@ -1188,11 +1151,34 @@ func pathOpenFn(_ context.Context, mod api.Module, params []uint64) Errno {
 			if errno = failIfNotDirectory(fsc, newFD); errno != ErrnoSuccess {
 				return errno
 			}
-		}
 	*/
 
 	binary.LittleEndian.PutUint32(resultBuf, uint32(newFD))
 	return ErrnoSuccess
+}
+
+func openFlags(oflags, fdflags uint16) (openFlags int, isDir bool) {
+	isDir = oflags&wasi_snapshot_preview1.O_DIRECTORY != 0
+	openFlags = os.O_RDONLY
+	if oflags&wasi_snapshot_preview1.O_CREAT != 0 {
+		if !isDir { // assume read write
+			openFlags = os.O_RDWR
+		}
+		openFlags |= os.O_CREATE
+	}
+	if isDir {
+		return
+	}
+	if oflags&wasi_snapshot_preview1.O_EXCL != 0 {
+		openFlags |= os.O_EXCL
+	}
+	if oflags&wasi_snapshot_preview1.O_TRUNC != 0 {
+		openFlags |= os.O_TRUNC
+	}
+	if fdflags&wasi_snapshot_preview1.FD_APPEND != 0 {
+		openFlags |= os.O_APPEND
+	}
+	return
 }
 
 func failIfNotDirectory(fsc *internalsys.FSContext, fd uint32) Errno {
@@ -1254,19 +1240,6 @@ var pathUnlinkFile = stubFunction(
 	"fd", "path", "path_len",
 )
 
-// openFile attempts to open the file at the given path. Errors coerce to WASI
-// Errno.
-func openFile(fsc *internalsys.FSContext, name string) (fd uint32, errno Errno) {
-	newFD, err := fsc.OpenFile(name)
-	if err == nil {
-		fd = newFD
-		errno = ErrnoSuccess
-		return
-	}
-	errno = toErrno(err)
-	return
-}
-
 // statFile attempts to stat the file at the given path. Errors coerce to WASI
 // Errno.
 func statFile(fsc *internalsys.FSContext, name string) (stat fs.FileInfo, errno Errno) {
@@ -1286,6 +1259,8 @@ func statFile(fsc *internalsys.FSContext, name string) (stat fs.FileInfo, errno 
 func toErrno(err error) Errno {
 	// handle all the cases of FS.Open or internal to FSContext.OpenFile
 	switch {
+	case errors.Is(err, syscall.ENOSYS):
+		return ErrnoNosys
 	case errors.Is(err, fs.ErrInvalid):
 		return ErrnoInval
 	case errors.Is(err, fs.ErrNotExist):

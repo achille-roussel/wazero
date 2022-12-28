@@ -23,7 +23,6 @@ import (
 
 func compileAndRun(ctx context.Context, arg string, config wazero.ModuleConfig) (stdout, stderr string, err error) {
 	var stdoutBuf, stderrBuf bytes.Buffer
-
 	ns := rt.NewNamespace(ctx)
 	builder := rt.NewHostModuleBuilder("go")
 	gojs.NewFunctionExporter().ExportFunctions(builder)
@@ -52,9 +51,9 @@ var (
 	testCtx context.Context
 	testFS  = fstest.MapFS{
 		"empty.txt":    {},
-		"test.txt":     {Data: []byte("animals\n")},
-		"sub":          {Mode: fs.ModeDir},
-		"sub/test.txt": {Data: []byte("greet sub dir\n")},
+		"test.txt":     {Data: []byte("animals\n"), Mode: 0o644},
+		"sub":          {Mode: fs.ModeDir | 0o755},
+		"sub/test.txt": {Data: []byte("greet sub dir\n"), Mode: 0o444},
 	}
 	rt wazero.Runtime
 )

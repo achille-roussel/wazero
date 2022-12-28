@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/tetratelabs/wazero/internal/sys"
@@ -237,7 +238,7 @@ func TestNamespace_CloseWithExitCode(t *testing.T) {
 		testFS := testfs.FS{"foo": &testfs.File{CloseErr: errors.New("error closing")}}
 		sysCtx := sys.DefaultContext(wasi.NewFS(testFS))
 
-		_, err := pathOpen(sysCtx, "/foo")
+		_, err := fsCtx.OpenFile("/foo", os.O_RDONLY, 0)
 		require.NoError(t, err)
 
 		ns, m1, m2 := newTestNamespace()
