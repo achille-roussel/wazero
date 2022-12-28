@@ -193,8 +193,8 @@ func NewContext(
 		stdoutMode = fs.ModeNamedPipe | 0200
 		stderrMode = stdoutMode
 
-		stdinRights  = wasi_snapshot_preview1.FD_READ
-		stdoutRights = wasi_snapshot_preview1.FD_WRITE
+		stdinRights  = wasi_snapshot_preview1.RIGHT_FD_READ
+		stdoutRights = wasi_snapshot_preview1.RIGHT_FD_WRITE
 		stderrRights = stdoutRights
 	)
 

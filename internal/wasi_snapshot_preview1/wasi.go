@@ -3,7 +3,15 @@
 package wasi_snapshot_preview1
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"syscall"
+	"time"
+
+	"github.com/tetratelabs/wazero/wasi"
 )
 
 const ModuleName = "wasi_snapshot_preview1"
@@ -181,11 +189,68 @@ var errnoToString = [...]string{
 	"ENOTCAPABLE",
 }
 
-// oflags are open flags used by path_open
+func makeErrno(err error) Errno {
+	if errno, ok := err.(Errno); ok {
+		return errno
+	}
+	switch {
+	case errors.Is(err, nil):
+		return ESUCCESS
+	case errors.Is(err, io.EOF):
+		return ESUCCESS
+	case errors.Is(err, fs.ErrInvalid):
+		return EINVAL
+	case errors.Is(err, fs.ErrPermission):
+		return EPERM
+	case errors.Is(err, fs.ErrExist):
+		return EEXIST
+	case errors.Is(err, fs.ErrNotExist):
+		return ENOENT
+	case errors.Is(err, fs.ErrClosed):
+		return EBADF
+	case errors.Is(err, wasi.ErrNotImplemented):
+		return ENOSYS
+	case errors.Is(err, wasi.ErrReadOnly):
+		return EROFS
+	}
+	var errno Errno
+	if errors.As(err, &errno) {
+		return errno
+	}
+	return EIO
+}
+
+func makeError(errno Errno) error {
+	switch errno {
+	case ESUCCESS:
+		return nil
+	case EINVAL:
+		return fs.ErrInvalid
+	case EPERM:
+		return fs.ErrPermission
+	case EEXIST:
+		return fs.ErrExist
+	case ENOENT:
+		return fs.ErrNotExist
+	case EBADF:
+		return fs.ErrClosed
+	case ENOSYS:
+		return wasi.ErrNotImplemented
+	case EROFS:
+		return wasi.ErrReadOnly
+	default:
+		return errno
+	}
+}
+
+// Oflags are open flags used by path_open.
+//
 // See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#-oflags-flagsu16
+type Oflags uint16
+
 const (
 	// O_CREAT creates a file if it does not exist.
-	O_CREAT uint16 = 1 << iota //nolint
+	O_CREAT Oflags = 1 << iota //nolint
 	// O_DIRECTORY fails if not a directory.
 	O_DIRECTORY
 	// O_EXCL fails if file already exists.
@@ -194,28 +259,201 @@ const (
 	O_TRUNC //nolint
 )
 
-// file descriptor flags
-// See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#fdflags
+func makeOpenFileFlags(dirflags Lookupflags, oflags Oflags, fsRightsBase, fsRightsInheriting Rights, fdflags Fdflags) (flags int, perm fs.FileMode) {
+	flags = makeDefaultFlags(dirflags)
+	if (oflags & O_CREAT) != 0 {
+		flags |= wasi.O_CREATE
+	}
+	if (oflags & O_EXCL) != 0 {
+		flags |= wasi.O_EXCL
+	}
+	if (oflags & O_TRUNC) != 0 {
+		flags |= wasi.O_TRUNC
+	}
+	if (fdflags & FD_APPEND) != 0 {
+		flags |= wasi.O_APPEND
+	}
+	if (fdflags & FD_DSYNC) != 0 {
+		flags |= wasi.O_DSYNC
+	}
+	if (fdflags & FD_RSYNC) != 0 {
+		flags |= wasi.O_RSYNC
+	}
+	if (fdflags & FD_SYNC) != 0 {
+		flags |= wasi.O_SYNC
+	}
+	switch {
+	case fsRightsBase.Has(RIGHT_FD_READ | RIGHT_FD_WRITE):
+		flags |= wasi.O_RDWR
+	case fsRightsBase.Has(RIGHT_FD_WRITE):
+		flags |= wasi.O_WRONLY
+	default:
+		flags |= wasi.O_RDONLY
+	}
+	perm = 0644
+	return
+}
+
+func makePathOpenFlags(flags int, perm fs.FileMode) (dirflags Lookupflags, oflags Oflags, fsRightsBase, fsRightsInheriting Rights, fdflags Fdflags) {
+	switch {
+	case (flags & wasi.O_RDWR) != 0:
+		fsRightsBase = RW
+	case (flags & wasi.O_WRONLY) != 0:
+		fsRightsBase = W
+	default:
+		fsRightsBase = R
+	}
+
+	if perm != 0 {
+		if (perm & 0400) == 0 {
+			fsRightsBase &= ^R
+		}
+		if (perm & 0200) == 0 {
+			fsRightsBase &= ^W
+		}
+	}
+
+	if (flags & wasi.O_APPEND) != 0 {
+		fdflags |= FD_APPEND
+	}
+	if (flags & wasi.O_CREATE) != 0 {
+		oflags |= O_CREAT
+	}
+	if (flags & wasi.O_EXCL) != 0 {
+		oflags |= O_EXCL
+	}
+	if (flags & wasi.O_SYNC) != 0 {
+		fdflags |= FD_SYNC
+	}
+	if (flags & wasi.O_TRUNC) != 0 {
+		oflags |= O_TRUNC
+	}
+
+	fsRightsInheriting = ^Rights(0)
+	dirflags = makeLookupflags(flags)
+	return
+}
+
+type Fd uint32
+
 const (
-	FD_APPEND uint16 = 1 << iota //nolint
+	None Fd = ^Fd(0)
+)
+
+// Fdflags are file descriptor flags.
+//
+// See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#fdflags
+type Fdflags uint16
+
+const (
+	FD_APPEND Fdflags = 1 << iota //nolint
 	FD_DSYNC
 	FD_NONBLOCK
 	FD_RSYNC
 	FD_SYNC
 )
 
+type Fdstat struct {
+	FsFiletype         Filetype
+	FsFlags            Fdflags
+	FsRightsBase       Rights
+	FsRightsInheriting Rights
+}
+
+func (s *Fdstat) Marshal() (b [24]byte) {
+	binary.LittleEndian.PutUint16(b[0:], uint16(s.FsFiletype))
+	binary.LittleEndian.PutUint16(b[2:], uint16(s.FsFlags))
+	binary.LittleEndian.PutUint64(b[8:], uint64(s.FsRightsBase))
+	binary.LittleEndian.PutUint64(b[16:], uint64(s.FsRightsInheriting))
+	return b
+}
+
+func (s *Fdstat) Unmarshal(b [24]byte) {
+	s.FsFiletype = Filetype(binary.LittleEndian.Uint16(b[0:]))
+	s.FsFlags = Fdflags(binary.LittleEndian.Uint16(b[2:]))
+	s.FsRightsBase = Rights(binary.LittleEndian.Uint64(b[8:]))
+	s.FsRightsInheriting = Rights(binary.LittleEndian.Uint64(b[16:]))
+}
+
+// Lookupflags define the behavior of path lookups.
+//
 // See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#lookupflags
+type Lookupflags uint32
+
 const (
 	// LOOKUP_SYMLINK_FOLLOW expands a path if it resolves into a symbolic
 	// link.
-	LOOKUP_SYMLINK_FOLLOW uint16 = 1 << iota //nolint
+	LOOKUP_SYMLINK_FOLLOW Lookupflags = 1 << iota //nolint
 )
 
+func makeLookupflags(flags int) (dirflags Lookupflags) {
+	if (flags & wasi.O_NOFOLLOW) == 0 {
+		dirflags |= LOOKUP_SYMLINK_FOLLOW
+	}
+	return
+}
+
+func makeDefaultFlags(dirflags Lookupflags) (flags int) {
+	if (dirflags & LOOKUP_SYMLINK_FOLLOW) == 0 {
+		dirflags |= wasi.O_NOFOLLOW
+	}
+	return
+}
+
+type Fstflags uint16
+
+const (
+	FST_ATIM Fstflags = 1 << iota //nolint
+	FST_ATIM_NOW
+	FST_MTIM
+	FST_MTIM_NOW
+)
+
+func makeFileTimes(atim, mtim Timestamp, flags Fstflags) (a, m time.Time) {
+	var now time.Time
+
+	if (flags & (FST_ATIM_NOW | FST_MTIM_NOW)) != 0 {
+		now = time.Now()
+	}
+
+	if (flags & FST_ATIM) != 0 {
+		a = atim.Time()
+	}
+	if (flags & FST_ATIM_NOW) != 0 {
+		a = now
+	}
+	if (flags & FST_MTIM) != 0 {
+		m = mtim.Time()
+	}
+	if (flags & FST_MTIM_NOW) != 0 {
+		m = now
+	}
+	return a, m
+}
+
+func makeTimestampsAndFstflags(atim, mtim time.Time) (a, m Timestamp, f Fstflags) {
+	if !atim.IsZero() {
+		f |= FST_ATIM
+	}
+	if !mtim.IsZero() {
+		f |= FST_MTIM
+	}
+	a = makeTimestamp(atim)
+	m = makeTimestamp(mtim)
+	return a, m, f
+}
+
+// Rights define the list of permissions given to file descriptors.
+//
 // See https://github.com/WebAssembly/WASI/blob/snapshot-01/phases/snapshot/docs.md#-rights-flagsu64
+type Rights uint64
+
+func (r Rights) Has(rights Rights) bool { return (r & rights) == rights }
+
 const (
 	// RIGHT_FD_DATASYNC is the right to invoke fd_datasync. If RIGHT_PATH_OPEN
 	// is set, includes the right to invoke path_open with FD_DSYNC.
-	RIGHT_FD_DATASYNC uint32 = 1 << iota //nolint
+	RIGHT_FD_DATASYNC Rights = 1 << iota //nolint
 
 	// RIGHT_FD_READ is he right to invoke fd_read and sock_recv. If
 	// RIGHT_FD_SYNC is set, includes the right to invoke fd_pread.
@@ -323,7 +561,61 @@ const (
 )
 
 const (
-	FILETYPE_UNKNOWN uint8 = iota
+	baseRights = RIGHT_FD_SEEK |
+		RIGHT_FD_TELL |
+		RIGHT_FD_FILESTAT_GET |
+		RIGHT_PATH_OPEN |
+		RIGHT_PATH_CREATE_DIRECTORY |
+		RIGHT_PATH_FILESTAT_GET |
+		RIGHT_PATH_FILESTAT_SET_SIZE |
+		RIGHT_PATH_FILESTAT_SET_TIMES
+	R  = baseRights | RIGHT_FD_READ | RIGHT_FD_READDIR
+	W  = baseRights | RIGHT_FD_WRITE | RIGHT_FD_FILESTAT_SET_SIZE | RIGHT_FD_FILESTAT_SET_TIMES
+	RW = R | W
+)
+
+type Device uint64
+
+type Inode uint64
+
+type Size uint32
+
+type Linkcount uint64
+
+type Filedelta int64
+
+type Filesize uint64
+
+// Filemode is not part of the WASI spec but it is useful to bridge with unix
+// file systems.
+//
+// The only use of this type is within Filestat, where it is packed within the
+// alignment of Filetype.
+type Filemode uint16
+
+func makeFileMode(typ Filetype) fs.FileMode {
+	switch typ {
+	case FILETYPE_BLOCK_DEVICE:
+		return fs.ModeDevice
+	case FILETYPE_CHARACTER_DEVICE:
+		return fs.ModeCharDevice
+	case FILETYPE_DIRECTORY:
+		return fs.ModeDir
+	case FILETYPE_REGULAR_FILE:
+		return 0
+	case FILETYPE_SOCKET_DGRAM, FILETYPE_SOCKET_STREAM:
+		return fs.ModeSocket
+	case FILETYPE_SYMBOLIC_LINK:
+		return fs.ModeSymlink
+	default: // Unknown
+		return fs.ModeIrregular
+	}
+}
+
+type Filetype uint8
+
+const (
+	FILETYPE_UNKNOWN Filetype = iota
 	FILETYPE_BLOCK_DEVICE
 	FILETYPE_CHARACTER_DEVICE
 	FILETYPE_DIRECTORY
@@ -333,12 +625,12 @@ const (
 	FILETYPE_SYMBOLIC_LINK
 )
 
-// FiletypeName returns string name of the file type.
-func FiletypeName(filetype uint8) string {
-	if int(filetype) < len(filetypeToString) {
-		return filetypeToString[filetype]
+// Name returns string name of the file type.
+func (t Filetype) Name() string {
+	if int(t) < len(filetypeToString) {
+		return filetypeToString[t]
 	}
-	return fmt.Sprintf("filetype(%d)", filetype)
+	return fmt.Sprintf("filetype(%d)", t)
 }
 
 var filetypeToString = [...]string{
@@ -351,3 +643,156 @@ var filetypeToString = [...]string{
 	"SOCKET_STREAM",
 	"SYMBOLIC_LINK",
 }
+
+func makeFiletype(mode fs.FileMode) Filetype {
+	switch mode & fs.ModeType {
+	case fs.ModeDir:
+		return FILETYPE_DIRECTORY
+	case fs.ModeSymlink:
+		return FILETYPE_SYMBOLIC_LINK
+	case fs.ModeDevice:
+		return FILETYPE_BLOCK_DEVICE
+	case fs.ModeSocket:
+		return FILETYPE_SOCKET_STREAM
+	case fs.ModeCharDevice:
+		return FILETYPE_CHARACTER_DEVICE
+	case fs.ModeNamedPipe, fs.ModeIrregular:
+		return FILETYPE_UNKNOWN
+	default:
+		return FILETYPE_REGULAR_FILE
+	}
+}
+
+type Filestat struct {
+	Dev   Device
+	Ino   Inode
+	Type  Filetype
+	Mode  Filemode
+	Nlink Linkcount
+	Size  Filesize
+	Atim  Timestamp
+	Mtim  Timestamp
+	Ctim  Timestamp
+}
+
+func (s *Filestat) FileMode() fs.FileMode {
+	return makeFileMode(s.Type) | fs.FileMode(s.Mode)
+}
+
+func (s *Filestat) Marshal() (b [64]byte) {
+	binary.LittleEndian.PutUint64(b[0:], uint64(s.Dev))
+	binary.LittleEndian.PutUint64(b[8:], uint64(s.Ino))
+	binary.LittleEndian.PutUint16(b[16:], uint16(s.Type))
+	binary.LittleEndian.PutUint16(b[18:], uint16(s.Mode))
+	binary.LittleEndian.PutUint64(b[24:], uint64(s.Nlink))
+	binary.LittleEndian.PutUint64(b[32:], uint64(s.Size))
+	binary.LittleEndian.PutUint64(b[40:], uint64(s.Atim))
+	binary.LittleEndian.PutUint64(b[48:], uint64(s.Mtim))
+	binary.LittleEndian.PutUint64(b[56:], uint64(s.Ctim))
+	return b
+}
+
+func (s *Filestat) Unmarshal(b [64]byte) {
+	s.Dev = Device(binary.LittleEndian.Uint64(b[0:]))
+	s.Ino = Inode(binary.LittleEndian.Uint64(b[8:]))
+	s.Type = Filetype(binary.LittleEndian.Uint16(b[16:]))
+	s.Mode = Filemode(binary.LittleEndian.Uint16(b[18:]))
+	s.Nlink = Linkcount(binary.LittleEndian.Uint64(b[24:]))
+	s.Size = Filesize(binary.LittleEndian.Uint64(b[32:]))
+	s.Atim = Timestamp(binary.LittleEndian.Uint64(b[40:]))
+	s.Mtim = Timestamp(binary.LittleEndian.Uint64(b[48:]))
+	s.Ctim = Timestamp(binary.LittleEndian.Uint64(b[56:]))
+}
+
+func makeFilestat(info fs.FileInfo) Filestat {
+	mode := info.Mode()
+	atim := time.Time{}
+	mtim := time.Time{}
+	ctim := time.Time{}
+	dev := uint64(0)
+	ino := uint64(0)
+	nlink := uint64(0)
+
+	switch s := info.Sys().(type) {
+	case *Filestat:
+		dev = uint64(s.Dev)
+		ino = uint64(s.Ino)
+		nlink = uint64(s.Nlink)
+		atim = s.Atim.Time()
+		mtim = s.Mtim.Time()
+		ctim = s.Ctim.Time()
+	case *syscall.Stat_t:
+		dev = s.Dev
+		ino = s.Ino
+		nlink = s.Nlink
+		atim = time.Unix(s.Atim.Unix())
+		mtim = time.Unix(s.Mtim.Unix())
+		ctim = time.Unix(s.Ctim.Unix())
+	default:
+		mtim = info.ModTime()
+	}
+
+	return Filestat{
+		Dev:   Device(dev),
+		Ino:   Inode(ino),
+		Type:  makeFiletype(mode),
+		Mode:  Filemode(mode & fs.ModePerm),
+		Nlink: Linkcount(nlink),
+		Size:  Filesize(info.Size()),
+		Atim:  makeTimestamp(atim),
+		Mtim:  makeTimestamp(mtim),
+		Ctim:  makeTimestamp(ctim),
+	}
+}
+
+type Dircookie uint64
+
+type Dirnamlen uint32
+
+type Dirent struct {
+	Next    Dircookie
+	Ino     Inode
+	Namelen Dirnamlen
+	Type    Filetype
+	Mode    Filemode
+}
+
+func (d *Dirent) Size() Size { return 24 + Size(d.Namelen) }
+
+func (d *Dirent) Marshal() (b [24]byte) {
+	binary.LittleEndian.PutUint64(b[0:], uint64(d.Next))
+	binary.LittleEndian.PutUint64(b[8:], uint64(d.Ino))
+	binary.LittleEndian.PutUint32(b[16:], uint32(d.Namelen))
+	binary.LittleEndian.PutUint16(b[20:], uint16(d.Type))
+	binary.LittleEndian.PutUint16(b[22:], uint16(d.Mode))
+	return b
+}
+
+func (d *Dirent) Unmarshal(b [24]byte) {
+	d.Next = Dircookie(binary.LittleEndian.Uint64(b[0:]))
+	d.Ino = Inode(binary.LittleEndian.Uint64(b[8:]))
+	d.Namelen = Dirnamlen(binary.LittleEndian.Uint32(b[16:]))
+	d.Type = Filetype(binary.LittleEndian.Uint16(b[20:]))
+	d.Mode = Filemode(binary.LittleEndian.Uint16(b[22:]))
+}
+
+type Timestamp uint64
+
+func (t Timestamp) Time() time.Time {
+	return time.Unix(0, int64(t))
+}
+
+func makeTimestamp(t time.Time) Timestamp {
+	if t.IsZero() {
+		return 0
+	}
+	return Timestamp(t.UnixNano())
+}
+
+type Whence uint8
+
+const (
+	SEEK_SET Whence = iota //nolint
+	SEEK_CUR
+	SEEK_END
+)

@@ -12,6 +12,12 @@ import (
 	"github.com/tetratelabs/wazero/wasi"
 )
 
+const (
+	// MaxPathLen is a constant representing the maximum supported length of
+	// file system paths.
+	MaxPathLen = 1024
+)
+
 // Context represents the execution context of a WASI program.
 type Context struct {
 	// The file system mounted in this context. If nil, the context acts
@@ -92,28 +98,16 @@ func (ctx *Context) FdSeek(fd Fd, offset Filedelta, whence Whence) (Filesize, Er
 	}
 
 	var rights Rights
-	if offset == 0 && whence == Cur {
-		rights = FD_TELL
+	if offset == 0 && whence == SEEK_CUR {
+		rights = RIGHT_FD_TELL
 	} else {
-		rights = FD_SEEK
+		rights = RIGHT_FD_SEEK
 	}
 	if !f.fsRightsBase.Has(rights) {
 		return 0, EPERM
 	}
 
-	i := int64(offset)
-	w := int(0)
-	switch whence {
-	case Set:
-		w = io.SeekStart
-	case Cur:
-		w = io.SeekCurrent
-	case End:
-		w = io.SeekEnd
-	default:
-		return 0, EINVAL
-	}
-	seek, err := f.base.Seek(i, w)
+	seek, err := f.base.Seek(int64(offset), int(whence))
 	return Filesize(seek), makeErrno(err)
 }
 
@@ -125,7 +119,7 @@ func (ctx *Context) FdTell(fd Fd) (Filesize, Errno) {
 	if f == nil {
 		return 0, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_TELL) {
+	if !f.fsRightsBase.Has(RIGHT_FD_TELL) {
 		return 0, EPERM
 	}
 	tell, err := f.base.Seek(0, io.SeekCurrent)
@@ -162,7 +156,7 @@ func (ctx *Context) FdFilestatGet(fd Fd) (Filestat, Errno) {
 	if f == nil {
 		return Filestat{}, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_FILESTAT_GET) {
+	if !f.fsRightsBase.Has(RIGHT_FD_FILESTAT_GET) {
 		return Filestat{}, EPERM
 	}
 	s, err := f.base.Stat()
@@ -180,7 +174,7 @@ func (ctx *Context) FdFilestatSetSize(fd Fd, size Filesize) Errno {
 	if f == nil {
 		return EBADF
 	}
-	if !f.fsRightsBase.Has(FD_FILESTAT_SET_SIZE) {
+	if !f.fsRightsBase.Has(RIGHT_FD_FILESTAT_SET_SIZE) {
 		return EPERM
 	}
 	return makeErrno(f.base.Truncate(int64(size)))
@@ -194,7 +188,7 @@ func (ctx *Context) FdFilestatSetTimes(fd Fd, atim, mtim Timestamp, flags Fstfla
 	if f == nil {
 		return EBADF
 	}
-	if !f.fsRightsBase.Has(FD_FILESTAT_SET_TIMES) {
+	if !f.fsRightsBase.Has(RIGHT_FD_FILESTAT_SET_TIMES) {
 		return EPERM
 	}
 	return makeErrno(f.base.Chtimes(makeFileTimes(atim, mtim, flags)))
@@ -208,7 +202,7 @@ func (ctx *Context) FdRead(fd Fd, iovs [][]byte) (Size, Errno) {
 	if f == nil {
 		return 0, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_READ) {
+	if !f.fsRightsBase.Has(RIGHT_FD_READ) {
 		return 0, EPERM
 	}
 	size := Size(0)
@@ -230,7 +224,7 @@ func (ctx *Context) FdPread(fd Fd, iovs [][]byte, offset Filesize) (Size, Errno)
 	if f == nil {
 		return 0, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_READ | FD_SEEK) {
+	if !f.fsRightsBase.Has(RIGHT_FD_READ | RIGHT_FD_SEEK) {
 		return 0, EPERM
 	}
 	size := Size(0)
@@ -253,7 +247,7 @@ func (ctx *Context) FdReaddir(fd Fd, buf []byte, dircookie Dircookie) (Size, Err
 	if f == nil {
 		return 0, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_READDIR) {
+	if !f.fsRightsBase.Has(RIGHT_FD_READDIR) {
 		return 0, EPERM
 	}
 	if len(buf) < 24 {
@@ -330,7 +324,7 @@ func (ctx *Context) FdWrite(fd Fd, iovs [][]byte) (Size, Errno) {
 	if f == nil {
 		return 0, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_WRITE) {
+	if !f.fsRightsBase.Has(RIGHT_FD_WRITE) {
 		return 0, EPERM
 	}
 	size := Size(0)
@@ -352,7 +346,7 @@ func (ctx *Context) FdPwrite(fd Fd, iovs [][]byte, offset Filesize) (Size, Errno
 	if f == nil {
 		return 0, EBADF
 	}
-	if !f.fsRightsBase.Has(FD_WRITE | FD_SEEK) {
+	if !f.fsRightsBase.Has(RIGHT_FD_WRITE | RIGHT_FD_SEEK) {
 		return 0, EPERM
 	}
 	size := Size(0)
@@ -374,7 +368,7 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 	var base wasi.File
 	var err error
 
-	if truncate := (oflags & O_TRUNC) != 0; truncate && !fsRightsBase.Has(PATH_FILESTAT_SET_SIZE) {
+	if truncate := (oflags & O_TRUNC) != 0; truncate && !fsRightsBase.Has(RIGHT_PATH_FILESTAT_SET_SIZE) {
 		return None, EPERM
 	}
 
@@ -391,7 +385,7 @@ func (ctx *Context) PathOpen(fd Fd, dirflags Lookupflags, path string, oflags Of
 		if f == nil {
 			return None, EBADF
 		}
-		if !f.fsRightsBase.Has(PATH_OPEN) {
+		if !f.fsRightsBase.Has(RIGHT_PATH_OPEN) {
 			return None, EPERM
 		}
 		fsRightsBase &= f.fsRightsInheriting
@@ -422,7 +416,7 @@ func (ctx *Context) PathCreateDirectory(fd Fd, path string) Errno {
 		if f == nil {
 			return EBADF
 		}
-		if !f.fsRightsBase.Has(PATH_CREATE_DIRECTORY) {
+		if !f.fsRightsBase.Has(RIGHT_PATH_CREATE_DIRECTORY) {
 			return EPERM
 		}
 		err = f.base.MakeDir(path, perm)
@@ -447,7 +441,7 @@ func (ctx *Context) PathFilestatGet(fd Fd, flags Lookupflags, path string) (File
 		if f == nil {
 			return Filestat{}, EBADF
 		}
-		if !f.fsRightsBase.Has(PATH_FILESTAT_GET) {
+		if !f.fsRightsBase.Has(RIGHT_PATH_FILESTAT_GET) {
 			return Filestat{}, EPERM
 		}
 		info, err = f.base.StatFile(path, makeDefaultFlags(flags))
@@ -476,7 +470,7 @@ func (ctx *Context) PathFilestatSetTimes(fd Fd, flags Lookupflags, path string, 
 		if f == nil {
 			return EBADF
 		}
-		if !f.fsRightsBase.Has(PATH_FILESTAT_SET_TIMES) {
+		if !f.fsRightsBase.Has(RIGHT_PATH_FILESTAT_SET_TIMES) {
 			return EPERM
 		}
 		err = f.base.ChtimesFile(path, makeDefaultFlags(flags), a, m)
