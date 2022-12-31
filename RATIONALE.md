@@ -606,6 +606,24 @@ to the descriptor selection process, however this should never be used as a
 security measure to prevent applications from guessing the next file number so
 there are no strong incentives to complicate the logic.
 
+### Support for "advise" and "allocate" in file system abstractions
+
+At this time, the file system interface does not expose methods to back the
+_advise_ and _allocate_ functions of WASI:
+
+- **advise** is a performance optimization making assumptions about the page
+  cache capabilities of the file system. Few are the applications that will
+  make successful use of these capabilities.
+
+- **allocate** was removed from the latest WASI draft, and is also an
+  optimization tightly coupled to the file system behavior. WASM applications
+  attempting to make successful use of this function would have to know a lot
+  about the underlying host configuration.
+
+No-op implementations of these functions in Wazero does not break programs
+since they are mostly optimizations, and support for these features is rare
+in operating systems, so for now they are not present in the abstraction.
+
 ### fd_pread: io.Seeker fallback when io.ReaderAt is not supported
 
 `ReadAt` is the Go equivalent to `pread`: it does not affect, and is not
