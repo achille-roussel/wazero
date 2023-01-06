@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"syscall"
+	"time"
 )
 
 func NewReadFS(fs FS) FS {
@@ -54,7 +55,7 @@ func (r *readFS) Unlink(path string) error {
 	return syscall.ENOSYS
 }
 
-// Utimes implements FS.Utimes
-func (r *readFS) Utimes(path string, atimeNsec, mtimeNsec int64) error {
+// Chtimes implements FS.Chtimes
+func (r *readFS) Chtimes(path string, atim, mtim time.Time) error {
 	return syscall.ENOSYS
 }

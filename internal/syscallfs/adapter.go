@@ -6,6 +6,7 @@ import (
 	"os"
 	pathutil "path"
 	"syscall"
+	"time"
 )
 
 // Adapt returns a read-only FS unless the input is already one.
@@ -78,7 +79,7 @@ func (ro *adapter) Unlink(path string) error {
 	return syscall.ENOSYS
 }
 
-// Utimes implements FS.Utimes
-func (ro *adapter) Utimes(path string, atimeNsec, mtimeNsec int64) error {
+// Chtimes implements FS.Chtimes
+func (ro *adapter) Chtimes(path string, atim, mtim time.Time) error {
 	return syscall.ENOSYS
 }

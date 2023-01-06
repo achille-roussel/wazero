@@ -6,6 +6,7 @@ import (
 	pathutil "path"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/tetratelabs/wazero/internal/testing/require"
 )
@@ -65,7 +66,7 @@ func TestReadFS_Unlink(t *testing.T) {
 	require.Equal(t, syscall.ENOSYS, err)
 }
 
-func TestReadFS_Utimes(t *testing.T) {
+func TestReadFS_Chtimes(t *testing.T) {
 	dir := t.TempDir()
 
 	testFS := NewReadFS(dirFS(dir))
@@ -74,7 +75,8 @@ func TestReadFS_Utimes(t *testing.T) {
 	realPath := pathutil.Join(dir, path)
 	require.NoError(t, os.WriteFile(realPath, []byte{}, 0o600))
 
-	err := testFS.Utimes(path, 1, 1)
+	now := time.Now()
+	err := testFS.Chtimes(path, now, now)
 	require.Equal(t, syscall.ENOSYS, err)
 }
 
