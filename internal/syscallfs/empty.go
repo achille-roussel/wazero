@@ -23,7 +23,7 @@ func (empty) Path() string {
 }
 
 // OpenFile implements FS.OpenFile
-func (empty) OpenFile(path string, flag int, perm fs.FileMode) (fs.File, error) {
+func (empty) OpenFile(path string, flag int, perm fs.FileMode) (File, error) {
 	return nil, &fs.PathError{Op: "open", Path: path, Err: syscall.ENOENT}
 }
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -103,15 +102,11 @@ var OpenFileTests = TestFS{
 					return err
 				}
 			}
-			f, err := fsys.OpenFile(directory, os.O_RDONLY, 0)
+			d, err := fsys.OpenFile(directory, os.O_RDONLY, 0)
 			if err != nil {
 				return err
 			}
-			defer f.Close()
-			d, ok := f.(fs.ReadDirFile)
-			if !ok {
-				return fmt.Errorf("the open file is not a directory")
-			}
+			defer d.Close()
 			entries, err := d.ReadDir(-1)
 			if err != nil {
 				return err
@@ -480,7 +475,7 @@ func writeFile(fsys syscallfs.FS, path string, data []byte) error {
 	}
 	defer f.Close()
 	if len(data) > 0 {
-		_, err := f.(io.Writer).Write(data)
+		_, err := f.Write(data)
 		if err != nil {
 			return err
 		}
