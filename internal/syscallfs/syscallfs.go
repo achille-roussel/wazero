@@ -6,6 +6,26 @@ import (
 	"os"
 )
 
+// File is an interface representing files and directories opened from an FS
+// instance.
+//
+// File is an extension of the fs.File interface implementing all methods needed
+// by Wazero file systems. Method not supported by implementations of File will
+// return syscall.ENOSYS.
+type File interface {
+	io.Closer
+	io.Reader
+	io.ReaderAt
+	io.Seeker
+	io.Writer
+	io.WriterAt
+	fs.ReadDirFile
+	Stat() (fs.FileInfo, error)
+	// TODO: add methods needed to implement WASI
+	// - Chtimes
+	// - etc...
+}
+
 // FS is a writeable fs.FS bridge backed by syscall functions needed for ABI
 // including WASI and runtime.GOOS=js.
 //
@@ -39,7 +59,7 @@ type FS interface {
 
 	// OpenFile is similar to os.OpenFile, except the path is relative to this
 	// file system.
-	OpenFile(path string, flag int, perm fs.FileMode) (fs.File, error)
+	OpenFile(path string, flag int, perm fs.FileMode) (File, error)
 	// ^^ TODO: Consider syscall.Open, though this implies defining and
 	// coercing flags and perms similar to what is done in os.OpenFile.
 
@@ -105,61 +125,6 @@ type FS interface {
 	//   - syscall.UtimesNano cannot change the ctime. Also, neither WASI nor
 	//     runtime.GOOS=js support changing it. Hence, ctime it is absent here.
 	Utimes(path string, atimeNsec, mtimeNsec int64) error
-}
-
-// maskForReads masks the file with read-only interfaces used by wazero.
-//
-// Note: This technique was adapted from similar code in zipkin-go.
-func maskForReads(f fs.File) fs.File {
-	// The below are the types wazero casts into.
-	// Note: os.File implements this even for normal files.
-	d, i0 := f.(fs.ReadDirFile)
-	ra, i1 := f.(io.ReaderAt)
-	s, i2 := f.(io.Seeker)
-
-	// Wrap any combination of the types above.
-	switch {
-	case !i0 && !i1 && !i2: // 0, 0, 0
-		return struct{ fs.File }{f}
-	case !i0 && !i1 && i2: // 0, 0, 1
-		return struct {
-			fs.File
-			io.Seeker
-		}{f, s}
-	case !i0 && i1 && !i2: // 0, 1, 0
-		return struct {
-			fs.File
-			io.ReaderAt
-		}{f, ra}
-	case !i0 && i1 && i2: // 0, 1, 1
-		return struct {
-			fs.File
-			io.ReaderAt
-			io.Seeker
-		}{f, ra, s}
-	case i0 && !i1 && !i2: // 1, 0, 0
-		return struct {
-			fs.ReadDirFile
-		}{d}
-	case i0 && !i1 && i2: // 1, 0, 1
-		return struct {
-			fs.ReadDirFile
-			io.Seeker
-		}{d, s}
-	case i0 && i1 && !i2: // 1, 1, 0
-		return struct {
-			fs.ReadDirFile
-			io.ReaderAt
-		}{d, ra}
-	case i0 && i1 && i2: // 1, 1, 1
-		return struct {
-			fs.ReadDirFile
-			io.ReaderAt
-			io.Seeker
-		}{d, ra, s}
-	default:
-		panic("BUG: unhandled pattern")
-	}
 }
 
 // StatPath is a convenience that calls FS.OpenFile until there is a stat

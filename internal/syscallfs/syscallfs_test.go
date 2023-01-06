@@ -67,10 +67,6 @@ func testFS_Open_Read(t *testing.T, tmpDir string, testFS FS) {
 		require.Equal(t, 1, len(e))
 		require.False(t, e[0].IsDir())
 		require.Equal(t, file1, e[0].Name())
-
-		// Ensure it doesn't implement io.Writer
-		_, ok = f.(io.Writer)
-		require.False(t, ok)
 	})
 
 	t.Run("file exists", func(t *testing.T) {
@@ -97,9 +93,5 @@ func testFS_Open_Read(t *testing.T, tmpDir string, testFS FS) {
 		b, err := io.ReadAll(f)
 		require.NoError(t, err)
 		require.Equal(t, fileContents[1:], b)
-
-		// Ensure it doesn't implement io.Writer
-		_, ok = f.(io.Writer)
-		require.False(t, ok)
 	})
 }

@@ -32,16 +32,8 @@ func (dir dirFS) Path() string {
 }
 
 // OpenFile implements FS.OpenFile
-func (dir dirFS) OpenFile(name string, flag int, perm fs.FileMode) (fs.File, error) {
-	f, err := os.OpenFile(path.Join(string(dir), name), flag, perm)
-	if err != nil {
-		return nil, err
-	}
-
-	if flag == 0 || flag == os.O_RDONLY {
-		return maskForReads(f), nil
-	}
-	return f, nil
+func (dir dirFS) OpenFile(name string, flag int, perm fs.FileMode) (File, error) {
+	return os.OpenFile(path.Join(string(dir), name), flag, perm)
 }
 
 // Mkdir implements FS.Mkdir

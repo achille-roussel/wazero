@@ -27,7 +27,7 @@ func (r *readFS) Path() string {
 }
 
 // OpenFile implements FS.OpenFile
-func (r *readFS) OpenFile(path string, flag int, perm fs.FileMode) (fs.File, error) {
+func (r *readFS) OpenFile(path string, flag int, perm fs.FileMode) (File, error) {
 	if flag == 0 || flag == os.O_RDONLY {
 		return r.fs.OpenFile(path, flag, perm)
 	}

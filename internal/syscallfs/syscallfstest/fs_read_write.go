@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -480,7 +479,7 @@ func writeFile(fsys syscallfs.FS, path string, data []byte) error {
 	}
 	defer f.Close()
 	if len(data) > 0 {
-		_, err := f.(io.Writer).Write(data)
+		_, err := f.Write(data)
 		if err != nil {
 			return err
 		}
