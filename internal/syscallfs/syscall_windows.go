@@ -51,30 +51,53 @@ func adjustUnlinkError(err error) error {
 }
 
 // rename uses os.Rename as `windows.Rename` is internal in Go's source tree.
-func rename(old, new string) (err error) {
-	if err = os.Rename(old, new); err == nil {
-		return
+func rename(source, target string) error {
+	sourceStat, err := os.Lstat(source)
+	if err != nil {
+		return err
 	}
-	err = errors.Unwrap(err) // unwrap the link error
-	if err == ERROR_ACCESS_DENIED {
-		var newIsDir bool
-		if stat, statErr := os.Stat(new); statErr == nil && stat.IsDir() {
-			newIsDir = true
-		}
+	sourceIsDir := sourceStat.IsDir()
+	targetIsDir := false
 
-		var oldIsDir bool
-		if stat, statErr := os.Stat(old); statErr == nil && stat.IsDir() {
-			oldIsDir = true
-		}
+	targetStat, err := os.Lstat(target)
+	if err == nil {
+		// The target exists, windows typically behaves differently than POSIX
+		// systems in this case, so we emulate the POSIX behavior to ensure
+		// portability of programs executed by Wazero.
+		//
+		// Note that we lost atomicity in this case, concurrent operations on
+		// the file system will race against one another, resulting in different
+		// behavior than the one we are attempting to implement here. This might
+		// be mitigated using synchronization strategies, in Wazero or using IPC
+		// (not sure if windows gives us the necessary primitives tho). In any
+		// case, Wazero is not currently a parallel runtime, and it is unclear
+		// whether there is a use case for having multiple WASM applications
+		// share a file system in read-write mode, so the races may never be an
+		// actual concern in practice.
+		targetIsDir = targetStat.IsDir()
 
-		if oldIsDir && newIsDir {
-			// Windows doesn't let you overwrite a directory
-			return syscall.EINVAL
-		} else if newIsDir {
+		switch {
+		case sourceIsDir && !targetIsDir:
+			err = syscall.ENOTDIR
+		case !sourceIsDir && targetIsDir:
 			err = syscall.EISDIR
-		} else { // use a mappable code
-			err = syscall.EPERM
+		default:
+			err = os.RemoveAll(target)
+		}
+		if err != nil {
+			return err
 		}
 	}
-	return
+
+	if err = os.Rename(source, target); err != nil {
+		if errors.Is(err, ERROR_ACCESS_DENIED) {
+			if targetIsDir {
+				err = syscall.EISDIR
+			} else { // use a mappable code
+				err = syscall.EPERM
+			}
+		}
+	}
+
+	return err
 }
