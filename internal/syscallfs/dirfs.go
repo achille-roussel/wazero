@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"syscall"
+	"time"
 )
 
 func NewDirFS(dir string) (FS, error) {
@@ -70,10 +71,7 @@ func (dir dirFS) Unlink(name string) error {
 	return adjustUnlinkError(err)
 }
 
-// Utimes implements FS.Utimes
-func (dir dirFS) Utimes(name string, atimeNsec, mtimeNsec int64) error {
-	return syscall.UtimesNano(path.Join(string(dir), name), []syscall.Timespec{
-		syscall.NsecToTimespec(atimeNsec),
-		syscall.NsecToTimespec(mtimeNsec),
-	})
+// Chtimes implements FS.Chtimes
+func (dir dirFS) Chtimes(name string, atim, mtim time.Time) error {
+	return os.Chtimes(path.Join(string(dir), name), atim, mtim)
 }

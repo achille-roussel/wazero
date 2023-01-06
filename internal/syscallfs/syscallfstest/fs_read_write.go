@@ -38,7 +38,7 @@ func TestReadWriteFS(t *testing.T, makeFS MakeFS) {
 	t.Run("Rmdir", RmdirTests.RunFunc(makeFS))
 	t.Run("Rename", RenameTests.RunFunc(makeFS))
 	t.Run("Unlink", UnlinkTests.RunFunc(makeFS))
-	t.Run("Utimes", UtimesTests.RunFunc(makeFS))
+	t.Run("Chtimes", ChtimesTests.RunFunc(makeFS))
 
 	// TODO: syscallfs.FS used to match the required behavior of fs.FS but it
 	// isn't the case anymore. If we want syscallfs.FS.Open to match fs.FS we
@@ -389,21 +389,23 @@ var UnlinkTests = TestFS{
 		}),
 }
 
-var UtimesTests = TestFS{
-	"changing time of a file which does not exist fails with ENOENT": expect(syscall.ENOENT,
+var ChtimesTests = TestFS{
+	"changing times of a file which does not exist fails with ENOENT": expect(syscall.ENOENT,
 		func(fsys syscallfs.FS) error {
-			atim := time.Unix(123, 4*1e3).UnixNano()
-			mtim := time.Unix(567, 8*1e3).UnixNano()
-			return fsys.Utimes("nope", atim, mtim)
+			const microsecond = int64(time.Microsecond)
+			atim := time.Unix(123, 4*microsecond)
+			mtim := time.Unix(567, 8*microsecond)
+			return fsys.Chtimes("nope", atim, mtim)
 		}),
 
-	"times of existing files can be set to zero": expect(nil,
+	"times of existing files can be set to the unix epoch": expect(nil,
 		func(fsys syscallfs.FS) error {
 			const path = "test"
 			if err := writeFile(fsys, path, nil); err != nil {
 				return err
 			}
-			return testUtimes(fsys, path, 0, 0)
+			epoch := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+			return testChtimes(fsys, path, epoch, epoch)
 		}),
 
 	"times of existing files can be changed": expect(nil,
@@ -414,18 +416,20 @@ var UtimesTests = TestFS{
 			}
 			// Use microsecond granularity because Windows doesn't support
 			// nanosecond precision.
-			atim := time.Unix(123, 4*1e3).UnixNano()
-			mtim := time.Unix(567, 8*1e3).UnixNano()
-			return testUtimes(fsys, path, atim, mtim)
+			const microsecond = int64(time.Microsecond)
+			atim := time.Unix(123, 4*microsecond)
+			mtim := time.Unix(567, 8*microsecond)
+			return testChtimes(fsys, path, atim, mtim)
 		}),
 
-	"times of existing directories can be set to zero": expect(nil,
+	"times of existing directories can be set to the unix epoch": expect(nil,
 		func(fsys syscallfs.FS) error {
 			const path = "test"
 			if err := fsys.Mkdir(path, 0o755); err != nil {
 				return err
 			}
-			return testUtimes(fsys, path, 0, 0)
+			epoch := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+			return testChtimes(fsys, path, epoch, epoch)
 		}),
 
 	"times of existing directories can be changed": expect(nil,
@@ -434,29 +438,32 @@ var UtimesTests = TestFS{
 			if err := fsys.Mkdir(path, 0o755); err != nil {
 				return err
 			}
-			atim := time.Unix(123, 4*1e3).UnixNano()
-			mtim := time.Unix(567, 8*1e3).UnixNano()
-			return testUtimes(fsys, path, atim, mtim)
+			const microsecond = int64(time.Microsecond)
+			atim := time.Unix(123, 4*microsecond)
+			mtim := time.Unix(567, 8*microsecond)
+			return testChtimes(fsys, path, atim, mtim)
 		}),
 }
 
-func testUtimes(fsys syscallfs.FS, path string, atim, mtim int64) error {
-	if err := fsys.Utimes(path, atim, mtim); err != nil {
+func testChtimes(fsys syscallfs.FS, path string, atim, mtim time.Time) error {
+	if err := fsys.Chtimes(path, atim, mtim); err != nil {
 		return err
 	}
 	s, err := fs.Stat(fsys, path)
 	if err != nil {
 		return err
 	}
-	statAtim, statMtim, _ := platform.StatTimes(s)
+	statAtimNsec, statMtimNsec, _ := platform.StatTimes(s)
+	statAtim := time.Unix(0, statAtimNsec)
+	statMtim := time.Unix(0, statMtimNsec)
 	if platform.CompilerSupported() {
 		// Only some platforms support access time, otherwise we check for
 		// modification time only.
-		if statAtim != atim {
+		if !atim.Equal(statAtim) {
 			return fmt.Errorf("access time mismatch: want=%v got=%v", atim, statAtim)
 		}
 	}
-	if statMtim != mtim {
+	if !mtim.Equal(statMtim) {
 		return fmt.Errorf("modification time mismatch: want=%v got=%v", mtim, statMtim)
 	}
 	return nil

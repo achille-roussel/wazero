@@ -4,6 +4,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"time"
 )
 
 // FS is a writeable fs.FS bridge backed by syscall functions needed for ABI
@@ -90,7 +91,7 @@ type FS interface {
 	//   - syscall.EISDIR: `path` exists, but is a directory.
 	Unlink(path string) error
 
-	// Utimes is similar to syscall.UtimesNano, except the path is relative to
+	// Chtimes is similar to os.Chitmes, except the path is relative to
 	// this file system.
 	//
 	// # Errors
@@ -102,9 +103,9 @@ type FS interface {
 	// # Notes
 	//
 	//   - To set wall clock time, retrieve it first from sys.Walltime.
-	//   - syscall.UtimesNano cannot change the ctime. Also, neither WASI nor
+	//   - os.Chtimes cannot change the ctime. Also, neither WASI nor
 	//     runtime.GOOS=js support changing it. Hence, ctime it is absent here.
-	Utimes(path string, atimeNsec, mtimeNsec int64) error
+	Chtimes(path string, atim, ctim time.Time) error
 }
 
 // maskForReads masks the file with read-only interfaces used by wazero.

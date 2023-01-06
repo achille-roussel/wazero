@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"syscall"
+	"time"
 )
 
 // EmptyFS is an FS that returns syscall.ENOENT for all read functions, and
@@ -47,7 +48,7 @@ func (empty) Unlink(path string) error {
 	return syscall.ENOSYS
 }
 
-// Utimes implements FS.Utimes
-func (empty) Utimes(path string, atimeNsec, mtimeNsec int64) error {
+// Chtimes implements FS.Chtimes
+func (empty) Chtimes(path string, atim, mtim time.Time) error {
 	return syscall.ENOSYS
 }
