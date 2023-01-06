@@ -102,15 +102,11 @@ var OpenFileTests = TestFS{
 					return err
 				}
 			}
-			f, err := fsys.OpenFile(directory, os.O_RDONLY, 0)
+			d, err := fsys.OpenFile(directory, os.O_RDONLY, 0)
 			if err != nil {
 				return err
 			}
-			defer f.Close()
-			d, ok := f.(fs.ReadDirFile)
-			if !ok {
-				return fmt.Errorf("the open file is not a directory")
-			}
+			defer d.Close()
 			entries, err := d.ReadDir(-1)
 			if err != nil {
 				return err
