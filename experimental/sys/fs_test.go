@@ -27,7 +27,7 @@ func TestNewFS(t *testing.T) {
 func TestNewFS_Root(t *testing.T) {
 	systest.TestReadOnlyFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {
 		testFS := sys.NewFS(baseFS)
-		f, err := testFS.OpenFile(".", sys.O_RDONLY|sys.O_DIRECTORY, 0)
+		f, err := testFS.OpenFile(".", sys.O_DIRECTORY, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +48,7 @@ func TestDirFS_Root(t *testing.T) {
 		if err := testFS.Mkdir("tmp", 0755); err != nil {
 			t.Fatal(err)
 		}
-		f, err := testFS.OpenFile("tmp", sys.O_RDONLY|sys.O_DIRECTORY, 0)
+		f, err := testFS.OpenFile("tmp", sys.O_DIRECTORY, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -64,6 +64,12 @@ func TestDirFS_ReadOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 		return sys.NewFS(testFS)
+	})
+}
+
+func TestRootFS(t *testing.T) {
+	systest.TestReadWriteFS(t, func(t *testing.T) sys.FS {
+		return sys.RootFS(sys.DirFS(t.TempDir()))
 	})
 }
 

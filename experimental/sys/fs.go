@@ -1177,8 +1177,140 @@ func RootFS(root FS) FS { return &rootFS{root: root} }
 
 type rootFS struct{ root FS }
 
+func (fsys *rootFS) do(op, name string, do func(FS, string) error) error {
+	fmt.Println(op, "=>", name)
+	dir, base := path.Split(name)
+	if name == "." {
+		dir = name
+	}
+	d, err := fsys.OpenFile(dir, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer d.Close()
+	return do(d.FS(), base)
+}
+
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return nil, nil
+	f, err := fsys.openFile(name, flags, perm)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	return f, nil
+}
+
+func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
+	if !fs.ValidPath(name) {
+		return nil, ErrInvalid
+	}
+
+	fmt.Println("open root")
+	root, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
+	if err != nil {
+		return nil, err
+	}
+	if name == "." {
+		return root, nil
+	}
+	defer root.Close()
+
+	dir, dirFS, atRoot := root, root.FS(), true
+	defer func() { dir.Close() }()
+
+	walk := name
+	seek := 0
+	loop := 0
+resolvePath:
+	for {
+		if loop++; loop == 128 {
+			return nil, ErrLoop
+		}
+
+		if !atRoot {
+			dir.Close()
+			dir, dirFS, atRoot = root, root.FS(), true
+		}
+
+		for {
+			n := strings.IndexByte(walk[seek:], '/')
+			if n < 0 {
+				break
+			}
+			dirName := walk[seek : seek+n]
+			fmt.Println(".", dirName)
+
+			link, err := dirFS.Readlink(dirName)
+			if err == nil {
+				if link == "" {
+					return nil, ErrNotExist
+				}
+				if strings.HasPrefix(link, "/") {
+					link = path.Clean(link)[1:]
+				} else {
+					link = path.Join(walk[:seek], link)
+				}
+				if !fs.ValidPath(link) {
+					return nil, ErrNotExist
+				}
+				walk = link
+				seek = 0
+				continue resolvePath
+			}
+			seek += n + 1
+
+			f, err := dirFS.OpenFile(dirName, O_DIRECTORY|O_NOFOLLOW, 0)
+			if err != nil {
+				return nil, err
+			}
+			if !atRoot {
+				dir.Close()
+			}
+			dir, dirFS, atRoot = f, f.FS(), false
+		}
+
+		fileName := walk[seek:]
+
+		if (flags & O_NOFOLLOW) == 0 {
+			link, err := dirFS.Readlink(fileName)
+			if err == nil {
+				if link == "" {
+					return nil, ErrNotExist
+				}
+				if strings.HasPrefix(link, "/") {
+					link = path.Clean(link)[1:]
+				} else {
+					link = path.Join(walk[:seek], link)
+				}
+				if !fs.ValidPath(link) {
+					return nil, ErrNotExist
+				}
+				walk = link
+				seek = 0
+				continue resolvePath
+			}
+		}
+
+		f, err := dirFS.OpenFile(fileName, flags|O_NOFOLLOW, perm)
+		if err != nil {
+			return nil, err
+		}
+
+		// Did we actually open a symbolic link? If that's the case we
+		// observed a race and we should try again.
+		if (flags & O_NOFOLLOW) == 0 {
+			s, err := f.Stat()
+			if err != nil {
+				f.Close()
+				return nil, err
+			}
+			if s.Mode().Type() == fs.ModeSymlink {
+				f.Close()
+				continue resolvePath
+			}
+		}
+
+		return f, nil
+	}
 }
 
 func (fsys *rootFS) Open(name string) (fs.File, error) {
@@ -1186,15 +1318,15 @@ func (fsys *rootFS) Open(name string) (fs.File, error) {
 }
 
 func (fsys *rootFS) Mkdir(name string, perm fs.FileMode) error {
-	return nil
+	return fsys.do("mkdir", name, func(dir FS, name string) error { return dir.Mkdir(name, perm) })
 }
 
 func (fsys *rootFS) Rmdir(name string) error {
-	return nil
+	return fsys.do("rmdir", name, func(dir FS, name string) error { return dir.Rmdir(name) })
 }
 
 func (fsys *rootFS) Unlink(name string) error {
-	return nil
+	return fsys.do("unlink", name, func(dir FS, name string) error { return dir.Unlink(name) })
 }
 
 func (fsys *rootFS) Link(oldName, newName string) error {
@@ -1205,8 +1337,12 @@ func (fsys *rootFS) Symlink(oldName, newName string) error {
 	return nil
 }
 
-func (fsys *rootFS) Readlink(name string) (string, error) {
-	return "", nil
+func (fsys *rootFS) Readlink(name string) (link string, err error) {
+	err = fsys.do("readlink", name, func(dir FS, name string) (err error) {
+		link, err = dir.Readlink(name)
+		return err
+	})
+	return link, err
 }
 
 func (fsys *rootFS) Rename(oldName, newName string) error {
@@ -1214,19 +1350,29 @@ func (fsys *rootFS) Rename(oldName, newName string) error {
 }
 
 func (fsys *rootFS) Chmod(name string, mode fs.FileMode) error {
-	return nil
+	return fsys.do("chmod", name, func(dir FS, name string) error {
+		return dir.Chmod(name, mode)
+	})
 }
 
 func (fsys *rootFS) Chtimes(name string, atime, mtime time.Time) error {
-	return nil
+	return fsys.do("chtimes", name, func(dir FS, name string) error {
+		return dir.Chtimes(name, atime, mtime)
+	})
 }
 
 func (fsys *rootFS) Truncate(name string, size int64) error {
-	return nil
+	return fsys.do("truncate", name, func(dir FS, name string) error {
+		return dir.Truncate(name, size)
+	})
 }
 
-func (fsys *rootFS) Stat(name string) (fs.FileInfo, error) {
-	return nil, nil
+func (fsys *rootFS) Stat(name string) (info fs.FileInfo, err error) {
+	err = fsys.do("stat", name, func(dir FS, name string) (err error) {
+		info, err = dir.Stat(name)
+		return err
+	})
+	return info, err
 }
 
 // CopyFS copies the file system src into dst.
