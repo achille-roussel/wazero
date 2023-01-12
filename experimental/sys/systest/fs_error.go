@@ -60,7 +60,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "linking a file errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Link("old", "new")
+			return fsys.Link("old", "new", fsys)
 		},
 	})
 
@@ -85,7 +85,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "renaming a file errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Rename("old", "new")
+			return fsys.Rename("old", "new", fsys)
 		},
 	})
 

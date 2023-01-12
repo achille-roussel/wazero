@@ -20,13 +20,6 @@ const (
 	O_DIRECTORY = syscall.O_DIRECTORY
 )
 
-func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
-	// On unix platforms, the O_DIRECTORY flag is supported and can be handled
-	// by the kernel, we don't need to emulate it by verifying that the opened
-	// file is a directory.
-	return os.OpenFile(path, flags, perm)
-}
-
 func rmdir(path string) error {
 	return syscall.Rmdir(path)
 }

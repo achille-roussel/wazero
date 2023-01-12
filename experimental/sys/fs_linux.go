@@ -1,9 +1,9 @@
 package sys
 
 import (
+	"errors"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 	"unsafe"
@@ -13,9 +13,31 @@ const (
 	O_DSYNC = syscall.O_DSYNC
 	O_RSYNC = syscall.O_RSYNC
 
+	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h
+	O_PATH = 010000000
+
 	__AT_REMOVEDIR      = 0x200
 	__AT_SYMLINK_FOLLOW = 0x400
 )
+
+func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(path, flags, perm)
+	if err != nil {
+		// Linux gives ELOOP if attempting to open a symbolic link without
+		// passing the O_PATH flag.
+		if errors.Is(err, syscall.ELOOP) {
+			if (flags & (O_DIRECTORY | O_NOFOLLOW | O_PATH)) == O_NOFOLLOW {
+				f, err = os.OpenFile(path, flags|O_PATH, perm)
+			}
+		}
+	}
+	return f, err
+}
+
+func readlink(file *os.File) (string, error) {
+	fd := int(file.Fd())
+	return readlinkat(fd, "")
+}
 
 func datasync(file *os.File) error {
 	fd := int(file.Fd())
@@ -98,10 +120,11 @@ func symlinkat(target string, fd int, path string) error {
 	return nil
 }
 
-func readlinkat(fd int, path string, buf []byte) (int, error) {
+func readlinkat(fd int, path string) (string, error) {
+	buf := [1025]byte{}
 	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	n, _, e := syscall.Syscall6(
 		uintptr(syscall.SYS_READLINKAT),
@@ -113,9 +136,22 @@ func readlinkat(fd int, path string, buf []byte) (int, error) {
 		uintptr(0),
 	)
 	if e != 0 {
-		return int(n), e
+		// When readlinkat is called with no path, we mean to read the link
+		// target of the symbolic link that fd is opened on, in which case the
+		// error codes are somewhat different than when there is a non-empty
+		// path and the fd is opened on a directory.
+		if path == "" {
+			switch e {
+			case syscall.ENOENT:
+				e = syscall.EINVAL
+			}
+		}
+		return "", e
 	}
-	return int(n), nil
+	if int(n) == len(buf) {
+		return "", syscall.ENAMETOOLONG
+	}
+	return string(buf[:n]), nil
 }
 
 func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
@@ -146,95 +182,6 @@ func fstatat(fd int, path string, stat *syscall.Stat_t) error {
 		return e
 	}
 	return nil
-}
-
-func (d dirFileFS) fd() int { return int(d.base.Fd()) }
-
-func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	fsPath, err := join(d.name, name)
-	if err != nil {
-		return nil, err
-	}
-	osPath := filepath.Join(d.fsys.root, filepath.FromSlash(fsPath))
-	f, err := syscall.Openat(d.fd(), name, flags, uint32(perm))
-	if err != nil {
-		return nil, err
-	}
-	file := &dirFile{
-		fsys: d.fsys,
-		base: os.NewFile(uintptr(f), osPath),
-		name: fsPath,
-		mode: makeDirFileMode(flags),
-	}
-	return file, nil
-}
-
-func (d dirFileFS) mkdir(name string, perm fs.FileMode) error {
-	return syscall.Mkdirat(d.fd(), name, uint32(perm))
-}
-
-func (d dirFileFS) rmdir(name string) error {
-	return unlinkat(d.fd(), name, __AT_REMOVEDIR)
-}
-
-func (d dirFileFS) unlink(name string) error {
-	return unlinkat(d.fd(), name, 0)
-}
-
-func (d dirFileFS) link(oldName, newName string) error {
-	fd := d.fd()
-	return linkat(fd, oldName, fd, newName, __AT_SYMLINK_FOLLOW)
-}
-
-func (d dirFileFS) symlink(oldName, newName string) error {
-	return symlinkat(oldName, d.fd(), newName)
-}
-
-func (d dirFileFS) readlink(name string) (string, error) {
-	buffer := [1025]byte{}
-	n, err := readlinkat(d.fd(), name, buffer[:])
-	if err != nil {
-		return "", err
-	}
-	if n == len(buffer) {
-		return "", syscall.ENAMETOOLONG
-	}
-	return string(buffer[:n]), nil
-}
-
-func (d dirFileFS) rename(oldName, newName string) error {
-	fd := d.fd()
-	return renameat(fd, oldName, fd, newName)
-}
-
-func (d dirFileFS) chmod(name string, mode fs.FileMode) error {
-	return syscall.Fchmodat(d.fd(), name, uint32(mode), 0)
-}
-
-func (d dirFileFS) chtimes(name string, atime, mtime time.Time) error {
-	return syscall.Futimesat(d.fd(), name, []syscall.Timeval{
-		syscall.NsecToTimeval(atime.UnixNano()),
-		syscall.NsecToTimeval(mtime.UnixNano()),
-	})
-}
-
-func (d dirFileFS) truncate(name string, size int64) error {
-	f, err := syscall.Openat(d.fd(), name, syscall.O_WRONLY, 0)
-	if err != nil {
-		return err
-	}
-	defer syscall.Close(f)
-	return syscall.Ftruncate(f, size)
-}
-
-func (d dirFileFS) stat(name string) (fs.FileInfo, error) {
-	info := &fileInfo{
-		name: filepath.Base(name),
-	}
-	if err := fstatat(d.fd(), name, &info.stat); err != nil {
-		return nil, err
-	}
-	return info, nil
 }
 
 func (info *fileInfo) ModTime() time.Time {

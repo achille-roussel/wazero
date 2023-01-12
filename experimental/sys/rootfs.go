@@ -1,0 +1,469 @@
+package sys
+
+import (
+	"io/fs"
+	"path"
+	"strings"
+	"time"
+)
+
+// RootFS wraps a file system to ensure that path resolutions are not allowed
+// to escape the root of the file system (e.g. following symbolic links).
+func RootFS(root FS) FS { return &rootFS{root: root} }
+
+type rootFS struct{ root FS }
+
+func clean(name string) string { return path.Clean(name) }
+
+func split(name string) (dir, base string, ok bool) {
+	if name != "." && fs.ValidPath(name) {
+		dir, base = path.Split(name)
+		if dir == "" {
+			dir = "."
+		} else {
+			dir = strings.TrimSuffix(dir, "/")
+		}
+		ok = true
+	}
+	return dir, base, ok
+}
+
+func (fsys *rootFS) lookup(op, name string, flags int, do func(File) error) error {
+	if !fs.ValidPath(name) {
+		return makePathError(op, name, ErrNotExist)
+	}
+	f, err := fsys.openFile(name, flags, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f)
+}
+
+func (fsys *rootFS) lookup1(op, name string, do func(FS, string) error) error {
+	dir, base, ok := split(name)
+	if !ok {
+		return makePathError(op, name, ErrNotExist)
+	}
+	f, err := fsys.openFile(dir, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f.FS(), base)
+}
+
+func (fsys *rootFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
+	dir1, base1, ok := split(name1)
+	if !ok {
+		return makePathError(op, name1, ErrNotExist)
+	}
+	dir2, base2, ok := split(name2)
+	if !ok {
+		return makePathError(op, name2, ErrInvalid)
+	}
+	d1, err := fsys.openFile(dir1, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name1, err)
+	}
+	defer d1.Close()
+	d2, err := fsys.openFile(dir2, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name2, err)
+	}
+	defer d2.Close()
+	return do(d1.FS(), base1, d2.FS(), base2)
+}
+
+func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	f, err := fsys.openFile(name, flags, perm)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	return &rootFile{root: fsys, name: name, File: f}, nil
+}
+
+func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
+	if !fs.ValidPath(name) {
+		return nil, ErrNotExist
+	}
+	root, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
+	if err != nil {
+		return nil, err
+	}
+	if name == "." {
+		return root, nil
+	}
+	defer root.Close()
+	return fsys.openFileAt(root, name, flags, perm)
+}
+
+type nopClose struct{ File }
+
+func (nopClose) Close() error { return nil }
+
+func (fsys *rootFS) openFileAt(dir File, name string, flags int, perm fs.FileMode) (File, error) {
+	dir = nopClose{dir} // don't close the first directory received as argument
+	dirFS := dir.FS()
+	defer func() { dir.Close() }()
+
+	setCurrentDirectory := func(cwd File) {
+		dir.Close()
+		dir, dirFS = cwd, cwd.FS()
+	}
+
+	path := name
+	seek := 0
+	loop := 0
+resolvePath:
+	if loop++; loop == 40 {
+		return nil, ErrLoop
+	}
+	if path == "" {
+		return nil, ErrNotExist
+	}
+	// If the symbolic link represents an absolute path, we have to start back
+	// from the root of the file system to resolve it.
+	if strings.HasPrefix(path, "/") {
+		path = path[1:]
+		root, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
+		if err != nil {
+			return nil, err
+		}
+		setCurrentDirectory(root)
+	}
+
+	// First resolve all the leading ".."; it is not possible for these entries
+	// to point to symbolic links since they represent parent directories.
+	for seek < len(path) {
+		if path[seek:] == ".." {
+			seek += 2
+		} else if strings.HasPrefix(path[seek:], "../") {
+			seek += 3
+		} else {
+			break
+		}
+	}
+
+	if seek > 0 {
+		parent, err := dirFS.OpenFile(path[:seek], O_DIRECTORY, 0)
+		if err != nil {
+			return nil, err
+		}
+		setCurrentDirectory(parent)
+		path = path[seek:]
+		seek = 0
+		// If there was nothing other than references to parent directories, we have
+		// found the directory to open.
+		if path == "" || path == "." {
+			return dir, nil
+		}
+	}
+
+	for {
+		n := strings.IndexByte(path[seek:], '/')
+		if n < 0 {
+			break
+		}
+		dirName := path[seek : seek+n]
+		seek += n + 1
+
+		f, err := dirFS.OpenFile(dirName, rootfsOpenFileFlags, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		s, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+
+		switch s.Mode().Type() {
+		case fs.ModeDir:
+			setCurrentDirectory(f)
+		case fs.ModeSymlink:
+			link, err := f.Readlink()
+			f.Close()
+			if err != nil {
+				return nil, err
+			}
+			path = clean(link + "/" + path[seek:])
+			seek = 0
+			goto resolvePath
+		default:
+			f.Close()
+			return nil, ErrNotDirectory
+		}
+	}
+
+	fileName := path[seek:]
+resolveName:
+	if (flags & O_NOFOLLOW) == 0 {
+		link, err := dirFS.Readlink(fileName)
+		if err == nil {
+			path = clean(link)
+			seek = 0
+			goto resolvePath
+		}
+	}
+
+	f, err := dirFS.OpenFile(fileName, flags|O_NOFOLLOW, perm)
+	if err != nil {
+		return nil, err
+	}
+
+	// Did we actually open a symbolic link? If that's the case we
+	// observed a race and we should try again.
+	if (flags & O_NOFOLLOW) == 0 {
+		s, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		if s.Mode().Type() == fs.ModeSymlink {
+			f.Close()
+			goto resolveName
+		}
+	}
+
+	return f, nil
+}
+
+func (fsys *rootFS) Open(name string) (fs.File, error) {
+	return fsys.OpenFile(name, O_RDONLY, 0)
+}
+
+func (fsys *rootFS) Mkdir(name string, perm fs.FileMode) error {
+	return fsys.lookup1("mkdir", name, func(dir FS, name string) error {
+		return dir.Mkdir(name, perm)
+	})
+}
+
+func (fsys *rootFS) Rmdir(name string) error {
+	return fsys.lookup1("rmdir", name, FS.Rmdir)
+}
+
+func (fsys *rootFS) Unlink(name string) error {
+	return fsys.lookup1("unlink", name, FS.Unlink)
+}
+
+func (fsys *rootFS) Link(oldName, newName string, newFS FS) error {
+	return fsys.lookup2("link", oldName, newName,
+		func(oldDir FS, oldName string, newDir FS, newName string) error {
+			return oldDir.Link(oldName, newName, newDir)
+		},
+	)
+}
+
+func (fsys *rootFS) Rename(oldName, newName string, newFS FS) error {
+	return fsys.lookup2("rename", oldName, newName,
+		func(oldDir FS, oldName string, newDir FS, newName string) error {
+			return oldDir.Rename(oldName, newName, newDir)
+		},
+	)
+}
+
+func (fsys *rootFS) Symlink(oldName, newName string) error {
+	return fsys.lookup1("symlink", newName, func(dir FS, name string) error {
+		return dir.Symlink(oldName, name)
+	})
+}
+
+func (fsys *rootFS) Readlink(name string) (link string, err error) {
+	err = fsys.lookup("readlink", name, rootfsReadlinkFlags, func(file File) (err error) {
+		link, err = file.Readlink()
+		return
+	})
+	return link, err
+}
+
+func (fsys *rootFS) Chmod(name string, mode fs.FileMode) error {
+	return fsys.lookup("chmod", name, O_RDONLY, func(file File) error {
+		return file.Chmod(mode)
+	})
+}
+
+func (fsys *rootFS) Chtimes(name string, atime, mtime time.Time) error {
+	return fsys.lookup("chtimes", name, O_RDONLY, func(file File) error {
+		return file.Chtimes(atime, mtime)
+	})
+}
+
+func (fsys *rootFS) Truncate(name string, size int64) error {
+	return fsys.lookup("truncate", name, O_WRONLY, func(file File) error {
+		return file.Truncate(size)
+	})
+}
+
+func (fsys *rootFS) Stat(name string) (info fs.FileInfo, err error) {
+	err = fsys.lookup("stat", name, O_RDONLY, func(file File) (err error) {
+		info, err = file.Stat()
+		return
+	})
+	return info, err
+}
+
+type rootFile struct {
+	root *rootFS
+	name string
+	File
+}
+
+func (f *rootFile) FS() FS { return rootFileFS{f} }
+
+type rootFileFS struct{ *rootFile }
+
+func (d rootFileFS) valid(name string) bool {
+	_, _, ok := resolve(d.name, name)
+	return ok
+}
+
+func (d rootFileFS) join(name string) (string, error) {
+	path, ok := join(d.name, name)
+	if !ok {
+		return "", ErrNotExist
+	}
+	return path, nil
+}
+
+func (d rootFileFS) resolve(name string) (string, string, bool) {
+	return resolve(d.name, name)
+}
+
+func (d rootFileFS) lookup(op, name string, flags int, do func(File) error) error {
+	if !d.valid(name) {
+		return makePathError(op, name, ErrNotExist)
+	}
+	f, err := d.openFile(name, flags, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f)
+}
+
+func (d rootFileFS) lookup1(op, name string, do func(FS, string) error) error {
+	dir, base, ok := d.resolve(name)
+	if !ok {
+		return makePathError(op, name, ErrNotExist)
+	}
+	f, err := d.openFile(dir, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f.FS(), base)
+}
+
+func (d rootFileFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
+	dir1, base1, ok := d.resolve(name1)
+	if !ok {
+		return makePathError(op, name1, ErrNotExist)
+	}
+	dir2, base2, ok := d.resolve(name2)
+	if !ok {
+		return makePathError(op, name2, ErrInvalid)
+	}
+	d1, err := d.openFile(dir1, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name1, err)
+	}
+	defer d1.Close()
+	d2, err := d.openFile(dir2, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name2, err)
+	}
+	defer d2.Close()
+	return do(d1.FS(), base1, d2.FS(), base2)
+}
+
+func (d rootFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	path, err := d.join(name)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	f, err := d.openFile(name, flags, perm)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	return &rootFile{root: d.root, name: path, File: f}, nil
+}
+
+func (d rootFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return d.root.openFileAt(d.File, name, flags, perm)
+}
+
+func (d rootFileFS) Open(name string) (fs.File, error) {
+	return d.OpenFile(name, O_RDONLY, 0)
+}
+
+func (d rootFileFS) Mkdir(name string, perm fs.FileMode) error {
+	return d.lookup1("mkdir", name, func(dir FS, name string) error {
+		return dir.Mkdir(name, perm)
+	})
+}
+
+func (d rootFileFS) Rmdir(name string) error {
+	return d.lookup1("rmdir", name, FS.Rmdir)
+}
+
+func (d rootFileFS) Unlink(name string) error {
+	return d.lookup1("unlink", name, FS.Unlink)
+}
+
+func (d rootFileFS) Link(oldName, newName string, newFS FS) error {
+	return d.lookup2("link", oldName, newName,
+		func(oldDir FS, oldName string, newDir FS, newName string) error {
+			return oldDir.Link(oldName, newName, newDir)
+		},
+	)
+}
+
+func (d rootFileFS) Rename(oldName, newName string, newFS FS) error {
+	return d.lookup2("rename", oldName, newName,
+		func(oldDir FS, oldName string, newDir FS, newName string) error {
+			return oldDir.Rename(oldName, newName, newDir)
+		},
+	)
+}
+
+func (d rootFileFS) Symlink(oldName, newName string) error {
+	return d.lookup1("symlink", newName, func(dir FS, name string) error {
+		return dir.Symlink(oldName, name)
+	})
+}
+
+func (d rootFileFS) Readlink(name string) (link string, err error) {
+	err = d.lookup("readlink", name, rootfsReadlinkFlags, func(file File) (err error) {
+		link, err = file.Readlink()
+		return
+	})
+	return link, err
+}
+
+func (d rootFileFS) Chmod(name string, mode fs.FileMode) error {
+	return d.lookup("chmod", name, O_RDONLY, func(file File) error {
+		return file.Chmod(mode)
+	})
+}
+
+func (d rootFileFS) Chtimes(name string, atime, mtime time.Time) error {
+	return d.lookup("chtimes", name, O_RDONLY, func(file File) error {
+		return file.Chtimes(atime, mtime)
+	})
+}
+
+func (d rootFileFS) Truncate(name string, size int64) error {
+	return d.lookup("truncate", name, O_WRONLY, func(file File) error {
+		return file.Truncate(size)
+	})
+}
+
+func (d rootFileFS) Stat(name string) (info fs.FileInfo, err error) {
+	err = d.lookup("stat", name, O_RDONLY, func(file File) (err error) {
+		info, err = file.Stat()
+		return
+	})
+	return info, err
+}

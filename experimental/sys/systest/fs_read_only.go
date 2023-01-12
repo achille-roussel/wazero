@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -109,6 +110,7 @@ var testReadOnlyMkdir = append(testDefaultMkdir,
 var testReadOnlyRmdir = append(testDefaultRmdir,
 	fsTestCase{
 		name: "removing a directory fails with ErrReadOnly",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		err:  sys.ErrReadOnly,
 		test: func(fsys sys.FS) error { return fsys.Rmdir("test") },
 	},
@@ -117,6 +119,7 @@ var testReadOnlyRmdir = append(testDefaultRmdir,
 var testReadOnlyUnlink = append(testDefaultUnlink,
 	fsTestCase{
 		name: "unlinking a file fails with ErrReadOnly",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
 		test: func(fsys sys.FS) error { return fsys.Unlink("test") },
 	},
@@ -125,14 +128,16 @@ var testReadOnlyUnlink = append(testDefaultUnlink,
 var testReadOnlyLink = append(testDefaultLink,
 	fsTestCase{
 		name: "linking a file fails with ErrReadOnly",
+		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Link("old", "new") },
+		test: func(fsys sys.FS) error { return fsys.Link("old", "new", fsys) },
 	},
 )
 
 var testReadOnlySymlink = append(testDefaultSymlink,
 	fsTestCase{
 		name: "creating a symbolic link fails with ErrReadOnly",
+		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
 		test: func(fsys sys.FS) error { return fsys.Symlink("old", "new") },
 	},
@@ -143,14 +148,16 @@ var testReadOnlyReadlink = append(testDefaultReadlink)
 var testReadOnlyRename = append(testDefaultRename,
 	fsTestCase{
 		name: "renaming a file fails with ErrReadOnly",
+		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "new") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "new", fsys) },
 	},
 )
 
 var testReadOnlyChmod = append(testDefaultChmod,
 	fsTestCase{
 		name: "changing a file permissions fails with ErrReadOnly",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
 		test: func(fsys sys.FS) error { return fsys.Chmod("test", 0644) },
 	},
@@ -159,6 +166,7 @@ var testReadOnlyChmod = append(testDefaultChmod,
 var testReadOnlyChtimes = append(testDefaultChtimes,
 	fsTestCase{
 		name: "changing a file times fails with ErrReadOnly",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
 		test: func(fsys sys.FS) error { return fsys.Chtimes("test", epoch, epoch) },
 	},
@@ -167,6 +175,7 @@ var testReadOnlyChtimes = append(testDefaultChtimes,
 var testReadOnlyTruncate = append(testDefaultTruncate,
 	fsTestCase{
 		name: "truncating a file fails with ErrReadOnly",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
 		test: func(fsys sys.FS) error { return fsys.Truncate("test", 0) },
 	},
@@ -184,9 +193,9 @@ var testReadOnlyFileWrite = append(testDefaultFileWrite)
 
 var testReadOnlyFileChmod = append(testDefaultFileChmod,
 	fsTestCase{
-		name: "changing a file permissions fails with ErrNotSupported",
+		name: "changing a file permissions fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrReadOnly,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			return f.Chmod(0600)
 		}),
@@ -195,9 +204,9 @@ var testReadOnlyFileChmod = append(testDefaultFileChmod,
 
 var testReadOnlyFileChtimes = append(testDefaultFileChtimes,
 	fsTestCase{
-		name: "changing a file times fails with ErrNotSupported",
+		name: "changing a file times fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrReadOnly,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			atime := epoch
 			mtime := epoch
@@ -208,9 +217,9 @@ var testReadOnlyFileChtimes = append(testDefaultFileChtimes,
 
 var testReadOnlyFileTruncate = append(testDefaultFileTruncate,
 	fsTestCase{
-		name: "truncating a file fails with ErrNotSupported",
+		name: "truncating a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrReadOnly,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			return f.Truncate(0)
 		}),
@@ -219,9 +228,9 @@ var testReadOnlyFileTruncate = append(testDefaultFileTruncate,
 
 var testReadOnlyFileSync = append(testDefaultFileSync,
 	fsTestCase{
-		name: "syncing a file fails with ErrNotSupported",
+		name: "syncing a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrReadOnly,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			return f.Sync()
 		}),
@@ -230,9 +239,9 @@ var testReadOnlyFileSync = append(testDefaultFileSync,
 
 var testReadOnlyFileDatasync = append(testDefaultFileDatasync,
 	fsTestCase{
-		name: "datasyncing a file fails with ErrNotSupported",
+		name: "datasyncing a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrReadOnly,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			return f.Datasync()
 		}),

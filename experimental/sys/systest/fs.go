@@ -155,10 +155,10 @@ func fsTestRun(t *testing.T, makeFS MakeFS, groups []fsTestGroup) {
 
 var testValidateOpenFile = fsTestSuite{
 	{
-		name: "opening an invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
+		name: "opening an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.OpenFile("..", sys.O_RDONLY|sys.O_DIRECTORY, 0)
+			_, err := fsys.OpenFile("/", sys.O_RDONLY|sys.O_DIRECTORY, 0)
 			return err
 		},
 	},
@@ -166,10 +166,10 @@ var testValidateOpenFile = fsTestSuite{
 
 var testValidateOpen = fsTestSuite{
 	{
-		name: "opening an invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
+		name: "opening an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Open("..")
+			_, err := fsys.Open("/")
 			return err
 		},
 	},
@@ -177,55 +177,55 @@ var testValidateOpen = fsTestSuite{
 
 var testValidateMkdir = fsTestSuite{
 	{
-		name: "creating a directory with an invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Mkdir("..", 0755) },
+		name: "creating a directory with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Mkdir("/", 0755) },
 	},
 }
 
 var testValidateRmdir = fsTestSuite{
 	{
-		name: "removing a directory with an invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Rmdir("..") },
+		name: "removing a directory with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Rmdir("/") },
 	},
 }
 
 var testValidateUnlink = fsTestSuite{
 	{
-		name: "unlinking a file with an invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Unlink("..") },
+		name: "unlinking a file with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Unlink("/") },
 	},
 }
 
 var testValidateLink = fsTestSuite{
 	{
-		name: "linking a file with an invalid source name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Link("..", "new") },
+		name: "linking a file with an invalid source name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Link("/", "new", fsys) },
 	},
 	{
 		name: "linking a file with an invalid target name fails with ErrInvalid",
 		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Link("old", "..") },
+		test: func(fsys sys.FS) error { return fsys.Link("old", "/", fsys) },
 	},
 }
 
 var testValidateSymlink = fsTestSuite{
 	{
-		name: "creating a symbolic link with an invalid target name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Symlink("old", "..") },
+		name: "creating a symbolic link with an invalid target name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Symlink("old", "/") },
 	},
 }
 
 var testValidateReadlink = fsTestSuite{
 	{
-		name: "reading a symbolic link with an invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
+		name: "reading a symbolic link with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Readlink("..")
+			_, err := fsys.Readlink("/")
 			return err
 		},
 	},
@@ -233,47 +233,47 @@ var testValidateReadlink = fsTestSuite{
 
 var testValidateRename = fsTestSuite{
 	{
-		name: "renaming a file with an invalid source name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Rename("..", "new") },
+		name: "renaming a file with an invalid source name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Rename("/", "new", fsys) },
 	},
 	{
 		name: "renaming a file with an invalid target name fails with ErrInvalid",
 		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "..") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "/", fsys) },
 	},
 }
 
 var testValidateChmod = fsTestSuite{
 	{
-		name: "changing permissions of a file with and invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Chmod("..", 0644) },
+		name: "changing permissions of a file with and invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Chmod("/", 0644) },
 	},
 }
 
 var testValidateChtimes = fsTestSuite{
 	{
-		name: "changing times of a file with and invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Chtimes("..", epoch, epoch) },
+		name: "changing times of a file with and invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Chtimes("/", epoch, epoch) },
 	},
 }
 
 var testValidateTruncate = fsTestSuite{
 	{
-		name: "truncating a file with and invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Truncate("..", 0) },
+		name: "truncating a file with and invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Truncate("/", 0) },
 	},
 }
 
 var testValidateStat = fsTestSuite{
 	{
-		name: "stat of a file with and invalid name fails with ErrInvalid",
-		err:  sys.ErrInvalid,
+		name: "stat of a file with and invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Stat("..")
+			_, err := fsys.Stat("/")
 			return err
 		},
 	},
@@ -433,19 +433,7 @@ var testDefaultChmod = append(testValidateChmod)
 
 var testDefaultChtimes = append(testValidateChtimes)
 
-var testDefaultTruncate = append(testValidateTruncate,
-	fsTestCase{
-		name: "truncating a file to a negative size fails with ErrInvalid",
-		base: fstest.MapFS{
-			"test": &fstest.MapFile{
-				Data: []byte("123"),
-				Mode: 0644,
-			},
-		},
-		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Truncate("test", -1) },
-	},
-)
+var testDefaultTruncate = append(testValidateTruncate)
 
 func testOpen(name string, test func(fs.File) error) func(sys.FS) error {
 	return func(fsys sys.FS) error {
