@@ -56,7 +56,7 @@ func unlink(path string) (err error) {
 	return err
 }
 
-func openat(fd int, path string, flags int, perm uint32) error {
+func openat(fd int, path string, flags int, perm uint32) (int, error) {
 	return syscall.Openat(fd, path, flags, perm)
 }
 

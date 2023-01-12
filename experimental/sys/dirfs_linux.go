@@ -19,7 +19,7 @@ func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, err
 		// see openFile in fs_linux.go
 		if err == syscall.ELOOP {
 			if (flags & (O_DIRECTORY | O_NOFOLLOW | O_PATH)) == O_NOFOLLOW {
-				f, err = syscall.Openat(d.fd(), name, flags|O_PATH, uint32(perm))
+				f, err = openat(d.fd(), name, flags|O_PATH, uint32(perm))
 			}
 		}
 	}
