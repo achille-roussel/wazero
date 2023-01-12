@@ -23,51 +23,85 @@ func TestRootFS_ReadWrite(t *testing.T) {
 
 func TestRootFS_Sandbox(t *testing.T) {
 	rootFS := sys.RootFS(sys.DirFS("testdata"))
+	t.Run("FS", func(t *testing.T) {
+		testSandbox(t, rootFS)
+	})
+	t.Run("File", func(t *testing.T) {
+		f, err := rootFS.OpenFile(".", sys.O_DIRECTORY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		testSandbox(t, f.FS())
+	})
+}
 
+func testSandbox(t *testing.T, fsys sys.FS) {
 	t.Run("follow symlinks", func(t *testing.T) {
-		testFollowSymlink(t, rootFS, "symlink-to-relative-answer", "42\n")
-		testFollowSymlink(t, rootFS, "symlink-to-absolute-answer", "42\n")
-		testFollowSymlink(t, rootFS, "sub/symlink-to-answer", "42\n")
-		testFollowSymlink(t, rootFS, "symlink-to-symlink-to-answer", "42\n")
+		testFollowSymlink(t, fsys, "symlink-to-relative-answer", "42\n")
+		testFollowSymlink(t, fsys, "symlink-to-absolute-answer", "42\n")
+		testFollowSymlink(t, fsys, "sub/symlink-to-answer", "42\n")
+		testFollowSymlink(t, fsys, "symlink-to-symlink-to-answer", "42\n")
 	})
 
 	t.Run("broken symlinks", func(t *testing.T) {
-		testBrokenSymlink(t, rootFS, "sub/symlink-to-nowhere-1", sys.ErrNotExist)
-		testBrokenSymlink(t, rootFS, "sub/symlink-to-nowhere-2", sys.ErrNotExist)
-		testBrokenSymlink(t, rootFS, "symlink-in-loop", sys.ErrLoop)
-		testBrokenSymlink(t, rootFS, "symlink-to-unknown-location", sys.ErrNotExist)
+		testBrokenSymlink(t, fsys, "sub/symlink-to-nowhere-1", sys.ErrNotExist)
+		testBrokenSymlink(t, fsys, "sub/symlink-to-nowhere-2", sys.ErrNotExist)
+		testBrokenSymlink(t, fsys, "symlink-to-unknown-location", sys.ErrNotExist)
+		testBrokenSymlink(t, fsys, "symlink-in-loop", sys.ErrLoop)
+	})
+
+	t.Run("forbidden paths", func(t *testing.T) {
+		testForbiddenPath(t, fsys, "..")
+		testForbiddenPath(t, fsys, "../")
+		testForbiddenPath(t, fsys, "./..")
+		testForbiddenPath(t, fsys, "../.")
+		testForbiddenPath(t, fsys, "../..")
+		testForbiddenPath(t, fsys, "../../")
 	})
 }
 
-func testFollowSymlink(t *testing.T, fsys sys.FS, name, data string) {
-	t.Run(name, func(t *testing.T) {
-		testFileIsSymlink(t, fsys, name)
+func testFollowSymlink(t *testing.T, fsys sys.FS, path, data string) {
+	t.Run(path, func(t *testing.T) {
+		testFileIsSymlink(t, fsys, path)
 
-		b, err := fs.ReadFile(fsys, name)
+		b, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			t.Error(err)
 		} else if string(b) != data {
-			t.Errorf("%s: content mismatch: want=%q got=%q", name, data, b)
+			t.Errorf("%s: content mismatch: want=%q got=%q", path, data, b)
 		}
 	})
 }
 
-func testBrokenSymlink(t *testing.T, fsys sys.FS, name string, want error) {
-	t.Run(name, func(t *testing.T) {
-		testFileIsSymlink(t, fsys, name)
+func testBrokenSymlink(t *testing.T, fsys sys.FS, path string, want error) {
+	t.Run(path, func(t *testing.T) {
+		testFileIsSymlink(t, fsys, path)
 
-		f, err := fsys.Open(name)
+		f, err := fsys.Open(path)
 		if err == nil {
 			f.Close()
-			t.Errorf("%s: BROKE OUT OF ROOTFS!!!", name)
+			t.Errorf("%s: BROKE OUT OF ROOTFS!!!", path)
 		} else if !errors.Is(err, want) {
-			t.Errorf("%s: error mismatch: want=%s got=%s", name, want, err)
+			t.Errorf("%s: error mismatch: want=%s got=%s", path, want, err)
 		}
 	})
 }
 
-func testFileIsSymlink(t *testing.T, fsys sys.FS, name string) {
-	link, err := fsys.OpenFile(name, sys.O_RDONLY|sys.O_NOFOLLOW, 0)
+func testForbiddenPath(t *testing.T, fsys sys.FS, path string) {
+	t.Run(path, func(t *testing.T) {
+		f, err := fsys.Open(path)
+		if err == nil {
+			f.Close()
+			t.Errorf("%s: BROKE OUT OF ROOTFS!!!", path)
+		} else if !errors.Is(err, sys.ErrNotExist) {
+			t.Errorf("%s: error mismatch: want=%s got=%s", path, sys.ErrNotExist, err)
+		}
+	})
+}
+
+func testFileIsSymlink(t *testing.T, fsys sys.FS, path string) {
+	link, err := fsys.OpenFile(path, sys.O_RDONLY|sys.O_NOFOLLOW, 0)
 	if err != nil {
 		t.Error(err)
 		return
@@ -78,6 +112,6 @@ func testFileIsSymlink(t *testing.T, fsys sys.FS, name string) {
 	if err != nil {
 		t.Error(err)
 	} else if mode := stat.Mode(); mode.Type() != fs.ModeSymlink {
-		t.Errorf("%s: not a symbolic link: %s", name, mode)
+		t.Errorf("%s: not a symbolic link: %s", path, mode)
 	}
 }
