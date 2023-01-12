@@ -19,4 +19,6 @@ const (
 	// Package os does not have O_DSYNC/O_RSYNC, so fallback to O_SYNC.
 	O_DSYNC = os.O_SYNC
 	O_RSYNC = os.O_SYNC
+
+	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW
 )

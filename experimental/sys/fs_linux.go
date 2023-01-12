@@ -18,6 +18,8 @@ const (
 
 	__AT_REMOVEDIR      = 0x200
 	__AT_SYMLINK_FOLLOW = 0x400
+
+	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_PATH
 )
 
 func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
@@ -35,8 +37,7 @@ func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
 }
 
 func readlink(file *os.File) (string, error) {
-	fd := int(file.Fd())
-	return readlinkat(fd, "")
+	return readlinkat(int(file.Fd()), "")
 }
 
 func datasync(file *os.File) error {
@@ -53,6 +54,14 @@ func unlink(path string) (err error) {
 		}
 	}
 	return err
+}
+
+func openat(fd int, path string, flags int, perm uint32) error {
+	return syscall.Openat(fd, path, flags, perm)
+}
+
+func mkdirat(fd int, path string, perm uint32) error {
+	return syscall.Mkdirat(fd, path, perm)
 }
 
 func unlinkat(fd int, path string, flags int) error {
@@ -167,16 +176,23 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 	return err
 }
 
-func fstatat(fd int, path string, stat *syscall.Stat_t) error {
+func fchmodat(fd int, path string, mode uint32, flags int) error {
+	return syscall.Fchmodat(fd, path, mode, flags)
+}
+
+func fstatat(fd int, path string, stat *syscall.Stat_t, flags int) error {
 	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return err
 	}
-	_, _, e := syscall.Syscall(
+	_, _, e := syscall.Syscall6(
 		uintptr(syscall.SYS_NEWFSTATAT),
 		uintptr(fd),
 		uintptr(unsafe.Pointer(p)),
 		uintptr(unsafe.Pointer(stat)),
+		uintptr(flags),
+		uintptr(0),
+		uintptr(0),
 	)
 	if e != 0 {
 		return e

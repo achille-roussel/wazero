@@ -132,7 +132,7 @@ func (fsys *fsFS) openFile(name string, flags int, perm fs.FileMode) (*fsFile, e
 	if !fs.ValidPath(name) {
 		return nil, ErrNotExist
 	}
-	if (flags & ^(O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_PATH)) != 0 {
+	if (flags & ^openFileReadOnlyFlags) != 0 {
 		return nil, ErrReadOnly
 	}
 
