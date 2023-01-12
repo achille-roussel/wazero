@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"path"
-	"strings"
 	"time"
 )
 
@@ -82,31 +81,10 @@ type File interface {
 	// directory).
 	//
 	// All name resolutions are done relative to the file location.
-	// For this reason, the returned FS instance accepts relative names that
-	// would otherwise be denied because they wouldn't pass fs.ValidPath.
 	//
 	// The returned FS remains valid until the file is closed, after which all
 	// method calls on the FS return ErrClosed.
 	FS() FS
-}
-
-func resolve(root, name string) (string, string, bool) {
-	for root != "." && (name == ".." || strings.HasPrefix(name, "../")) {
-		root = path.Dir(root)
-		name = strings.TrimPrefix(name[2:], "/")
-	}
-	if name == "" {
-		name = "."
-	}
-	return root, name, fs.ValidPath(name)
-}
-
-func join(root, name string) (string, bool) {
-	root, name, ok := resolve(root, name)
-	if ok && root != "." {
-		name = root + "/" + name
-	}
-	return name, ok
 }
 
 // NewFS constructs a FS from a fs.FS.
@@ -129,7 +107,7 @@ func (fsys *fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, erro
 }
 
 func (fsys *fsFS) openFile(name string, flags int, perm fs.FileMode) (*fsFile, error) {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		return nil, ErrNotExist
 	}
 	if (flags & ^openFileReadOnlyFlags) != 0 {
@@ -161,7 +139,7 @@ func (fsys *fsFS) Open(name string) (fs.File, error) {
 }
 
 func (fsys *fsFS) Stat(name string) (fs.FileInfo, error) {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		return nil, makePathError("stat", name, ErrNotExist)
 	}
 	return fs.Stat(fsys.base, name)
@@ -200,7 +178,7 @@ func (fsys *fsFS) Rename(oldName, newName string, newFS FS) error {
 }
 
 func (fsys *fsFS) Readlink(name string) (link string, err error) {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = ErrNotImplemented
@@ -397,11 +375,10 @@ func (f fsFileFS) join(op, name string) (string, error) {
 	if f.fsys == nil {
 		return "", makePathError(op, name, ErrClosed)
 	}
-	name, ok := join(f.name, name)
-	if !ok {
+	if !ValidPath(name) {
 		return "", makePathError(op, name, ErrNotExist)
 	}
-	return name, nil
+	return path.Join(f.name, name), nil
 }
 
 func (f fsFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
@@ -587,7 +564,7 @@ func (fsys *errFS) Stat(name string) (fs.FileInfo, error) {
 }
 
 func (fsys *errFS) validPath(op, name string) (err error) {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = fsys.err
@@ -599,19 +576,14 @@ func (fsys *errFS) validLink(op, oldName, newName string, newFS FS) error {
 	var name string
 	var err error
 	switch {
-	case !fs.ValidPath(oldName):
+	case !ValidPath(oldName):
 		name, err = oldName, ErrNotExist
-	case fsys.is(newFS) && !fs.ValidPath(newName):
+	case !ValidPath(newName):
 		name, err = newName, ErrInvalid
 	default:
 		name, err = oldName, fsys.err
 	}
 	return makePathError(op, name, err)
-}
-
-func (fsys *errFS) is(newFS FS) bool {
-	other, _ := newFS.(*errFS)
-	return fsys == other
 }
 
 // CopyFS copies the file system src into dst.

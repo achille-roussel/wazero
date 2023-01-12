@@ -1,8 +1,8 @@
 package sys
 
 import (
+	"errors"
 	"io/fs"
-	"path"
 	"strings"
 	"time"
 )
@@ -12,21 +12,6 @@ import (
 func RootFS(root FS) FS { return &rootFS{root: root} }
 
 type rootFS struct{ root FS }
-
-func clean(name string) string { return path.Clean(name) }
-
-func split(name string) (dir, base string, ok bool) {
-	if name != "." && fs.ValidPath(name) {
-		dir, base = path.Split(name)
-		if dir == "" {
-			dir = "."
-		} else {
-			dir = strings.TrimSuffix(dir, "/")
-		}
-		ok = true
-	}
-	return dir, base, ok
-}
 
 func (fsys *rootFS) lookup(op, name string, flags int, do func(File) error) error {
 	if !fs.ValidPath(name) {
@@ -41,10 +26,10 @@ func (fsys *rootFS) lookup(op, name string, flags int, do func(File) error) erro
 }
 
 func (fsys *rootFS) lookup1(op, name string, do func(FS, string) error) error {
-	dir, base, ok := split(name)
-	if !ok {
+	if !fs.ValidPath(name) {
 		return makePathError(op, name, ErrNotExist)
 	}
+	dir, base := SplitPath(name)
 	f, err := fsys.openFile(dir, O_DIRECTORY, 0)
 	if err != nil {
 		return makePathError(op, name, err)
@@ -54,14 +39,14 @@ func (fsys *rootFS) lookup1(op, name string, do func(FS, string) error) error {
 }
 
 func (fsys *rootFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
-	dir1, base1, ok := split(name1)
-	if !ok {
+	if !fs.ValidPath(name1) {
 		return makePathError(op, name1, ErrNotExist)
 	}
-	dir2, base2, ok := split(name2)
-	if !ok {
+	if !fs.ValidPath(name2) {
 		return makePathError(op, name2, ErrInvalid)
 	}
+	dir1, base1 := SplitPath(name1)
+	dir2, base2 := SplitPath(name2)
 	d1, err := fsys.openFile(dir1, O_DIRECTORY, 0)
 	if err != nil {
 		return makePathError(op, name1, err)
@@ -76,17 +61,21 @@ func (fsys *rootFS) lookup2(op, name1, name2 string, do func(FS, string, FS, str
 }
 
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	if !fs.ValidPath(name) {
+		return nil, ErrNotExist
+	}
 	f, err := fsys.openFile(name, flags, perm)
 	if err != nil {
 		return nil, makePathError("open", name, err)
 	}
-	return &rootFile{root: fsys, name: name, File: f}, nil
+	return fsys.newFile(f, name), nil
+}
+
+func (fsys *rootFS) newFile(file File, name string) *rootFile {
+	return &rootFile{root: fsys, name: name, File: file}
 }
 
 func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	if !fs.ValidPath(name) {
-		return nil, ErrNotExist
-	}
 	root, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
 	if err != nil {
 		return nil, err
@@ -95,120 +84,119 @@ func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (File, er
 		return root, nil
 	}
 	defer root.Close()
-	return fsys.openFileAt(root, name, flags, perm)
+	return fsys.openFileAt(root, ".", name, flags, perm)
 }
 
 type nopClose struct{ File }
 
 func (nopClose) Close() error { return nil }
 
-func (fsys *rootFS) openFileAt(dir File, name string, flags int, perm fs.FileMode) (File, error) {
+var errResolveSymlink = errors.New("resolve symlink")
+
+func (fsys *rootFS) openFileAt(dir File, base, path string, flags int, perm fs.FileMode) (File, error) {
 	dir = nopClose{dir} // don't close the first directory received as argument
 	dirFS := dir.FS()
 	defer func() { dir.Close() }()
 
-	setCurrentDirectory := func(cwd File) {
+	setCurrentDirectory := func(d File) {
 		dir.Close()
-		dir, dirFS = cwd, cwd.FS()
+		dir, dirFS = d, d.FS()
 	}
 
-	path := name
-	seek := 0
-	loop := 0
+	setSymbolicLink := func(link string) error {
+		if link = CleanPath(link); strings.HasPrefix(link, "/") {
+			// The symbolic link contained an absolute path starting with a "/".
+			// We go back to the root and start resolving paths back from there.
+			r, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
+			if err != nil {
+				return err
+			}
+			setCurrentDirectory(r)
+			base = "."
+			path = link[1:]
+		} else if path != "" {
+			// There are trailing path components to lookup after resolving the
+			// symbolic link, which means the link represented a directory; we
+			// walk up the the parent because relative paths will be resolved
+			// from there, and append the remaining path components to the link
+			// target in order to form the full path to lookup.
+			base, _ = SplitPath(base)
+			path = CleanPath(link + "/" + path)
+		} else {
+			// The path was empty, which indicates that we had fully resolved
+			// the symbolic link and are now pointing at the right location.
+			path = link
+		}
+		return nil
+	}
+
+	var link string
+	var loop int
+	var err error
 resolvePath:
 	if loop++; loop == 40 {
 		return nil, ErrLoop
 	}
-	if path == "" {
-		return nil, ErrNotExist
-	}
-	// If the symbolic link represents an absolute path, we have to start back
-	// from the root of the file system to resolve it.
-	if strings.HasPrefix(path, "/") {
-		path = path[1:]
-		root, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
+
+	base, path, err = WalkPath(base, path, func(dirname string) error {
+		f, err := dirFS.OpenFile(dirname, rootfsOpenFileFlags, 0)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		setCurrentDirectory(root)
-	}
-
-	// First resolve all the leading ".."; it is not possible for these entries
-	// to point to symbolic links since they represent parent directories.
-	for seek < len(path) {
-		if path[seek:] == ".." {
-			seek += 2
-		} else if strings.HasPrefix(path[seek:], "../") {
-			seek += 3
-		} else {
-			break
-		}
-	}
-
-	if seek > 0 {
-		parent, err := dirFS.OpenFile(path[:seek], O_DIRECTORY, 0)
-		if err != nil {
-			return nil, err
-		}
-		setCurrentDirectory(parent)
-		path = path[seek:]
-		seek = 0
-		// If there was nothing other than references to parent directories, we have
-		// found the directory to open.
-		if path == "" || path == "." {
-			return dir, nil
-		}
-	}
-
-	for {
-		n := strings.IndexByte(path[seek:], '/')
-		if n < 0 {
-			break
-		}
-		dirName := path[seek : seek+n]
-		seek += n + 1
-
-		f, err := dirFS.OpenFile(dirName, rootfsOpenFileFlags, 0)
-		if err != nil {
-			return nil, err
-		}
+		defer func() {
+			if f != nil {
+				f.Close()
+			}
+		}()
 
 		s, err := f.Stat()
 		if err != nil {
-			f.Close()
-			return nil, err
+			return err
 		}
 
 		switch s.Mode().Type() {
 		case fs.ModeDir:
 			setCurrentDirectory(f)
+			f = nil
+			return nil
+
 		case fs.ModeSymlink:
-			link, err := f.Readlink()
-			f.Close()
+			s, err := f.Readlink()
 			if err != nil {
-				return nil, err
+				return err
 			}
-			path = clean(link + "/" + path[seek:])
-			seek = 0
-			goto resolvePath
+			link = s
+			return errResolveSymlink
+
 		default:
-			f.Close()
-			return nil, ErrNotDirectory
+			return ErrNotDirectory
 		}
+	})
+
+	switch err {
+	case nil:
+	case errResolveSymlink:
+		if err := setSymbolicLink(link); err != nil {
+			return nil, err
+		}
+		goto resolvePath
+	default:
+		return nil, err
 	}
 
-	fileName := path[seek:]
 resolveName:
 	if (flags & O_NOFOLLOW) == 0 {
-		link, err := dirFS.Readlink(fileName)
+		s, err := dirFS.Readlink(path)
 		if err == nil {
-			path = clean(link)
-			seek = 0
+			path = ""
+			if err := setSymbolicLink(s); err != nil {
+				return nil, err
+			}
 			goto resolvePath
 		}
 	}
 
-	f, err := dirFS.OpenFile(fileName, flags|O_NOFOLLOW, perm)
+	f, err := dirFS.OpenFile(path, flags|O_NOFOLLOW, perm)
 	if err != nil {
 		return nil, err
 	}
@@ -314,25 +302,8 @@ func (f *rootFile) FS() FS { return rootFileFS{f} }
 
 type rootFileFS struct{ *rootFile }
 
-func (d rootFileFS) valid(name string) bool {
-	_, _, ok := resolve(d.name, name)
-	return ok
-}
-
-func (d rootFileFS) join(name string) (string, error) {
-	path, ok := join(d.name, name)
-	if !ok {
-		return "", ErrNotExist
-	}
-	return path, nil
-}
-
-func (d rootFileFS) resolve(name string) (string, string, bool) {
-	return resolve(d.name, name)
-}
-
 func (d rootFileFS) lookup(op, name string, flags int, do func(File) error) error {
-	if !d.valid(name) {
+	if !ValidPath(name) {
 		return makePathError(op, name, ErrNotExist)
 	}
 	f, err := d.openFile(name, flags, 0)
@@ -344,10 +315,10 @@ func (d rootFileFS) lookup(op, name string, flags int, do func(File) error) erro
 }
 
 func (d rootFileFS) lookup1(op, name string, do func(FS, string) error) error {
-	dir, base, ok := d.resolve(name)
-	if !ok {
+	if !ValidPath(name) {
 		return makePathError(op, name, ErrNotExist)
 	}
+	dir, base := SplitPath(name)
 	f, err := d.openFile(dir, O_DIRECTORY, 0)
 	if err != nil {
 		return makePathError(op, name, err)
@@ -357,14 +328,14 @@ func (d rootFileFS) lookup1(op, name string, do func(FS, string) error) error {
 }
 
 func (d rootFileFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
-	dir1, base1, ok := d.resolve(name1)
-	if !ok {
+	if !ValidPath(name1) {
 		return makePathError(op, name1, ErrNotExist)
 	}
-	dir2, base2, ok := d.resolve(name2)
-	if !ok {
+	if !ValidPath(name2) {
 		return makePathError(op, name2, ErrInvalid)
 	}
+	dir1, base1 := SplitPath(name1)
+	dir2, base2 := SplitPath(name2)
 	d1, err := d.openFile(dir1, O_DIRECTORY, 0)
 	if err != nil {
 		return makePathError(op, name1, err)
@@ -379,19 +350,18 @@ func (d rootFileFS) lookup2(op, name1, name2 string, do func(FS, string, FS, str
 }
 
 func (d rootFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	path, err := d.join(name)
-	if err != nil {
-		return nil, makePathError("open", name, err)
+	if !ValidPath(name) {
+		return nil, makePathError("open", name, ErrNotExist)
 	}
 	f, err := d.openFile(name, flags, perm)
 	if err != nil {
 		return nil, makePathError("open", name, err)
 	}
-	return &rootFile{root: d.root, name: path, File: f}, nil
+	return d.root.newFile(f, JoinPath(d.name, name)), nil
 }
 
 func (d rootFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return d.root.openFileAt(d.File, name, flags, perm)
+	return d.root.openFileAt(d.File, d.name, name, flags, perm)
 }
 
 func (d rootFileFS) Open(name string) (fs.File, error) {

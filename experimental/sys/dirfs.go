@@ -109,7 +109,7 @@ func (fsys *dirFS) Link(oldName, newName string, newFS FS) (err error) {
 }
 
 func (fsys *dirFS) linkFS(oldName, newName string, fsys2 *dirFS) (string, error) {
-	if !fs.ValidPath(newName) {
+	if !ValidPath(newName) {
 		return newName, ErrInvalid
 	}
 	newRoot, err := fsys2.openRoot()
@@ -121,7 +121,7 @@ func (fsys *dirFS) linkFS(oldName, newName string, fsys2 *dirFS) (string, error)
 }
 
 func (fsys *dirFS) linkFile(oldName, newName string, fsys2 dirFileFS) (string, error) {
-	if !fs.ValidPath(oldName) {
+	if !ValidPath(oldName) {
 		return oldName, ErrNotExist
 	}
 	oldRoot, err := fsys.openRoot()
@@ -149,7 +149,7 @@ func (fsys *dirFS) Rename(oldName, newName string, newFS FS) (err error) {
 }
 
 func (fsys *dirFS) renameFS(oldName, newName string, fsys2 *dirFS) (string, error) {
-	if !fs.ValidPath(newName) {
+	if !ValidPath(newName) {
 		return newName, ErrInvalid
 	}
 	newRoot, err := fsys2.openRoot()
@@ -161,7 +161,7 @@ func (fsys *dirFS) renameFS(oldName, newName string, fsys2 *dirFS) (string, erro
 }
 
 func (fsys *dirFS) renameFile(oldName, newName string, fsys2 dirFileFS) (string, error) {
-	if !fs.ValidPath(oldName) {
+	if !ValidPath(oldName) {
 		return oldName, ErrNotExist
 	}
 	oldRoot, err := fsys.openRoot()
@@ -241,7 +241,7 @@ func (fsys *dirFS) Stat(name string) (fs.FileInfo, error) {
 }
 
 func (fsys *dirFS) join(name string) (string, error) {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		return "", ErrNotExist
 	}
 	name = filepath.FromSlash(name)
@@ -459,7 +459,7 @@ type dirFileFS struct{ *dirFile }
 func (d dirFileFS) OpenFile(name string, flags int, perm fs.FileMode) (f File, err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		f, err = d.openFile(name, flags, perm)
@@ -477,7 +477,7 @@ func (d dirFileFS) Open(name string) (fs.File, error) {
 func (d dirFileFS) Mkdir(name string, perm fs.FileMode) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = d.mkdir(name, perm)
@@ -491,7 +491,7 @@ func (d dirFileFS) Mkdir(name string, perm fs.FileMode) (err error) {
 func (d dirFileFS) Rmdir(name string) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = d.rmdir(name)
@@ -505,7 +505,7 @@ func (d dirFileFS) Rmdir(name string) (err error) {
 func (d dirFileFS) Unlink(name string) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = d.unlink(name)
@@ -523,9 +523,9 @@ func (d dirFileFS) Link(oldName, newName string, newFS FS) (err error) {
 		err = ErrInvalid
 	} else if d2.base == nil {
 		err = ErrInvalid
-	} else if !d.valid(oldName) {
+	} else if !ValidPath(oldName) {
 		err = ErrNotExist
-	} else if !d2.valid(newName) {
+	} else if !ValidPath(newName) {
 		err = ErrInvalid
 	} else {
 		err = d.link(oldName, newName, d2)
@@ -543,9 +543,9 @@ func (d dirFileFS) Rename(oldName, newName string, newFS FS) (err error) {
 		err = ErrInvalid
 	} else if d2.base == nil {
 		err = ErrInvalid
-	} else if !d.valid(oldName) {
+	} else if !ValidPath(oldName) {
 		err = ErrNotExist
-	} else if !d2.valid(newName) {
+	} else if !ValidPath(newName) {
 		err = ErrInvalid
 	} else {
 		err = d.rename(oldName, newName, d2)
@@ -559,7 +559,7 @@ func (d dirFileFS) Rename(oldName, newName string, newFS FS) (err error) {
 func (d dirFileFS) Symlink(oldName, newName string) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(newName) {
+	} else if !ValidPath(newName) {
 		err = ErrNotExist
 	} else {
 		err = d.symlink(oldName, newName)
@@ -573,7 +573,7 @@ func (d dirFileFS) Symlink(oldName, newName string) (err error) {
 func (d dirFileFS) Readlink(name string) (link string, err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		link, err = d.readlink(name)
@@ -587,7 +587,7 @@ func (d dirFileFS) Readlink(name string) (link string, err error) {
 func (d dirFileFS) Chmod(name string, mode fs.FileMode) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = d.chmod(name, mode)
@@ -601,7 +601,7 @@ func (d dirFileFS) Chmod(name string, mode fs.FileMode) (err error) {
 func (d dirFileFS) Chtimes(name string, atime, mtime time.Time) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = d.chtimes(name, atime, mtime)
@@ -615,7 +615,7 @@ func (d dirFileFS) Chtimes(name string, atime, mtime time.Time) (err error) {
 func (d dirFileFS) Truncate(name string, size int64) (err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = d.truncate(name, size)
@@ -629,7 +629,7 @@ func (d dirFileFS) Truncate(name string, size int64) (err error) {
 func (d dirFileFS) Stat(name string) (info fs.FileInfo, err error) {
 	if d.base == nil {
 		err = ErrClosed
-	} else if !d.valid(name) {
+	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		info, err = d.stat(name)
@@ -638,11 +638,6 @@ func (d dirFileFS) Stat(name string) (info fs.FileInfo, err error) {
 		err = makePathError("stat", name, err)
 	}
 	return info, err
-}
-
-func (d dirFileFS) valid(name string) bool {
-	_, _, ok := resolve(d.name, name)
-	return ok
 }
 
 var (
