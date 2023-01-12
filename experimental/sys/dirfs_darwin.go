@@ -16,11 +16,10 @@ func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, err
 	osPath := filepath.Join(d.fsys.root, filepath.FromSlash(fsPath))
 	f, err := openat(d.fd(), name, flags, uint32(perm))
 	if err != nil {
-		// see openFile in fs_linux.go
-		if err == syscall.ELOOP {
-			if (flags & (O_DIRECTORY | O_NOFOLLOW | O_PATH)) == O_NOFOLLOW {
-				f, err = syscall.Openat(d.fd(), name, flags|O_PATH, uint32(perm))
-			}
+		if err == syscall.ELOOP && ((flags & O_NOFOLLOW) != 0) {
+			flags &= ^O_NOFOLLOW
+			flags |= syscall.O_SYMLINK
+			f, err = openat(d.fd(), name, flags, uint32(perm))
 		}
 	}
 	if err != nil {
@@ -30,7 +29,12 @@ func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, err
 }
 
 func (d dirFileFS) chtimes(name string, atime, mtime time.Time) error {
-	return syscall.Futimesat(d.fd(), name, []syscall.Timeval{
+	f, err := openat(d.fd(), name, O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer syscall.Close(f)
+	return syscall.Futimes(f, []syscall.Timeval{
 		syscall.NsecToTimeval(atime.UnixNano()),
 		syscall.NsecToTimeval(mtime.UnixNano()),
 	})
