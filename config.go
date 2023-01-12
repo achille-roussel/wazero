@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"time"
 
 	"github.com/tetratelabs/wazero/api"
+	experimentalsys "github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/internal/engine/compiler"
 	"github.com/tetratelabs/wazero/internal/engine/interpreter"
 	"github.com/tetratelabs/wazero/internal/filecache"
@@ -395,7 +395,7 @@ type ModuleConfig interface {
 	//
 	// Relative path resolution, such as "./config.yml" to "/config.yml" or
 	// otherwise, is compiler-specific. See /RATIONALE.md for notes.
-	WithFS(fs.FS) ModuleConfig
+	WithFS(experimentalsys.FS) ModuleConfig
 
 	// WithName configures the module name. Defaults to what was decoded from the name section.
 	WithName(string) ModuleConfig
@@ -547,7 +547,7 @@ type moduleConfig struct {
 	// environKeys allow overwriting of existing values.
 	environKeys map[string]int
 	// fs is the file system to open files with
-	fs fs.FS
+	fs experimentalsys.FS
 }
 
 // NewModuleConfig returns a ModuleConfig that can be used for configuring module instantiation.
@@ -600,7 +600,7 @@ func (c *moduleConfig) WithEnv(key, value string) ModuleConfig {
 }
 
 // WithFS implements ModuleConfig.WithFS
-func (c *moduleConfig) WithFS(fs fs.FS) ModuleConfig {
+func (c *moduleConfig) WithFS(fs experimentalsys.FS) ModuleConfig {
 	ret := c.clone()
 	ret.fs = fs
 	return ret
