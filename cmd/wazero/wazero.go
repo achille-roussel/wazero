@@ -14,6 +14,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/experimental/logging"
+	experimentalsys "github.com/tetratelabs/wazero/experimental/sys"
 	gojs "github.com/tetratelabs/wazero/imports/go"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/internal/syscallfs"
@@ -161,7 +162,39 @@ func doRun(args []string, stdOut io.Writer, stdErr logging.Writer, exit func(cod
 		env = append(env, fields[0], fields[1])
 	}
 
-	rootFS := validateMounts(mounts, stdErr, exit)
+	validatedMounts := validateMounts(mounts, stdErr, exit)
+
+	var rootFS experimentalsys.FS
+	// switch len(validatedMounts) {
+	// case 0: // nofs
+	// case 1:
+	// 	mount := validatedMounts[0]
+	// 	host := mount[0]
+	// 	guest := mount[1]
+	// 	if guest == "" { // guest is root
+	// 		var err error
+	// 		rootFS, err = writefs.NewDirFS(host)
+	// 		if err != nil {
+	// 			fmt.Fprintf(stdErr, "invalid root mount %s: %v\n", host, err)
+	// 			exit(1)
+	// 		}
+	// 	} else { // TODO: subfs
+	// 		rootFS = &compositeFS{
+	// 			paths: map[string]fs.FS{guest: os.DirFS(host)},
+	// 		}
+	// 	}
+	// default:
+	// 	cfs := &compositeFS{paths: map[string]fs.FS{}}
+	// 	for _, mount := range validatedMounts {
+	// 		host := mount[0]
+	// 		guest := mount[1]
+	// 		cfs.paths[guest] = os.DirFS(host)
+	// 	}
+	// 	rootFS = cfs
+	// }
+	if len(validatedMounts) != 0 {
+		rootFS = experimentalsys.RootFS(experimentalsys.DirFS(validatedMounts[0][0]))
+	}
 
 	wasm, err := os.ReadFile(wasmPath)
 	if err != nil {
