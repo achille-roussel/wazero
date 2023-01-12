@@ -184,35 +184,37 @@ resolvePath:
 		return nil, err
 	}
 
-resolveName:
-	if (flags & O_NOFOLLOW) == 0 {
-		s, err := dirFS.Readlink(path)
-		if err == nil {
-			path = ""
-			if err := setSymbolicLink(s); err != nil {
-				return nil, err
-			}
-			goto resolvePath
-		}
+	// If O_DIRECTORY is passed, it already enforces O_NOFOLLOW since we are
+	// explicitly saying that we want to open a directory and not a symbolic
+	// link. In every other case, we add O_NOFOLLOW so we can perform the
+	// symbolic link resolution (if any).
+	openFlags := flags
+	if (openFlags & O_DIRECTORY) == 0 {
+		openFlags |= O_NOFOLLOW
 	}
 
-	f, err := dirFS.OpenFile(path, flags|O_NOFOLLOW, perm)
+	f, err := dirFS.OpenFile(path, openFlags, perm)
 	if err != nil {
 		return nil, err
 	}
 
-	// Did we actually open a symbolic link? If that's the case we
-	// observed a race and we should try again.
-	if (flags & O_NOFOLLOW) == 0 {
-		s, err := f.Stat()
+	s, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+
+	if ((flags & O_NOFOLLOW) == 0) && s.Mode().Type() == fs.ModeSymlink {
+		s, err := f.Readlink()
+		f.Close()
 		if err != nil {
-			f.Close()
 			return nil, err
 		}
-		if s.Mode().Type() == fs.ModeSymlink {
-			f.Close()
-			goto resolveName
+		path = ""
+		if err := setSymbolicLink(s); err != nil {
+			return nil, err
 		}
+		goto resolvePath
 	}
 
 	return f, nil
