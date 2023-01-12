@@ -134,7 +134,7 @@ func fstatat(fd int, path string, stat *syscall.Stat_t, flags int) error {
 		return err
 	}
 	_, _, e := syscall.Syscall6(
-		uintptr(__SYS_FCHMODAT),
+		uintptr(__SYS_FSTATAT64),
 		uintptr(fd),
 		uintptr(unsafe.Pointer(p)),
 		uintptr(unsafe.Pointer(stat)),
