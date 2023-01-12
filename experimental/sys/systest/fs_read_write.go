@@ -308,7 +308,7 @@ var testReadWriteLink = append(testDefaultLink,
 		test: testLoop(func(fsys sys.FS, path string) error {
 			oldName := path + "/old"
 			newName := path + "/new"
-			return fsys.Link(oldName, newName)
+			return fsys.Link(oldName, newName, fsys)
 		}),
 	},
 
@@ -317,7 +317,7 @@ var testReadWriteLink = append(testDefaultLink,
 		base: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Link("nope", "target") },
+		test: func(fsys sys.FS) error { return fsys.Link("nope", "target", fsys) },
 	},
 
 	fsTestCase{
@@ -325,7 +325,7 @@ var testReadWriteLink = append(testDefaultLink,
 		base: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Link("source", "dir/nope") },
+		test: func(fsys sys.FS) error { return fsys.Link("source", "dir/nope", fsys) },
 	},
 
 	fsTestCase{
@@ -333,7 +333,7 @@ var testReadWriteLink = append(testDefaultLink,
 		base: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrExist,
-		test: func(fsys sys.FS) error { return fsys.Link("source", "source") },
+		test: func(fsys sys.FS) error { return fsys.Link("source", "source", fsys) },
 	},
 
 	fsTestCase{
@@ -347,7 +347,7 @@ var testReadWriteLink = append(testDefaultLink,
 			"target": &fstest.MapFile{Mode: 0644, Data: []byte("2")},
 		},
 		err:  sys.ErrExist,
-		test: func(fsys sys.FS) error { return fsys.Link("source", "target") },
+		test: func(fsys sys.FS) error { return fsys.Link("source", "target", fsys) },
 	},
 
 	fsTestCase{
@@ -361,7 +361,7 @@ var testReadWriteLink = append(testDefaultLink,
 			"target": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
 		},
 		err:  sys.ErrExist,
-		test: func(fsys sys.FS) error { return fsys.Link("source", "target") },
+		test: func(fsys sys.FS) error { return fsys.Link("source", "target", fsys) },
 	},
 
 	fsTestCase{
@@ -373,7 +373,7 @@ var testReadWriteLink = append(testDefaultLink,
 			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
 			"target": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
 		},
-		test: func(fsys sys.FS) error { return fsys.Link("source", "target") },
+		test: func(fsys sys.FS) error { return fsys.Link("source", "target", fsys) },
 	},
 
 	fsTestCase{
@@ -386,7 +386,7 @@ var testReadWriteLink = append(testDefaultLink,
 			"target": &fstest.MapFile{Mode: 0644, Data: []byte("2")},
 		},
 		test: func(fsys sys.FS) error {
-			if err := fsys.Link("source", "target"); err != nil {
+			if err := fsys.Link("source", "target", fsys); err != nil {
 				return err
 			}
 			return writeFile(fsys, "source", []byte("2"))
@@ -563,7 +563,7 @@ var testReadWriteRename = append(testDefaultRename,
 		test: testLoop(func(fsys sys.FS, path string) error {
 			oldName := path + "/old"
 			newName := "new"
-			return fsys.Rename(oldName, newName)
+			return fsys.Rename(oldName, newName, fsys)
 		}),
 	},
 
@@ -574,7 +574,7 @@ var testReadWriteRename = append(testDefaultRename,
 		test: testLoop(func(fsys sys.FS, path string) error {
 			oldName := "old"
 			newName := path + "/new"
-			return fsys.Rename(oldName, newName)
+			return fsys.Rename(oldName, newName, fsys)
 		}),
 	},
 
@@ -583,7 +583,7 @@ var testReadWriteRename = append(testDefaultRename,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "dir/nope") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "dir/nope", fsys) },
 	},
 
 	fsTestCase{
@@ -591,21 +591,21 @@ var testReadWriteRename = append(testDefaultRename,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "new") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "new", fsys) },
 	},
 
 	fsTestCase{
 		name: "moving a file to a a new location modifies the file system",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		want: fstest.MapFS{"new": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "new") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "new", fsys) },
 	},
 
 	fsTestCase{
 		name: "moving a file to its own location does not modify the file system",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
-		test: func(fsys sys.FS) error { return fsys.Rename("test", "test") },
+		test: func(fsys sys.FS) error { return fsys.Rename("test", "test", fsys) },
 	},
 
 	fsTestCase{
@@ -617,7 +617,7 @@ var testReadWriteRename = append(testDefaultRename,
 		want: fstest.MapFS{
 			"new": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
 		},
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "new") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "new", fsys) },
 	},
 
 	fsTestCase{
@@ -631,7 +631,7 @@ var testReadWriteRename = append(testDefaultRename,
 			"new": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
 		},
 		err:  sys.ErrExist,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "new") },
+		test: func(fsys sys.FS) error { return fsys.Rename("old", "new", fsys) },
 	},
 )
 
@@ -697,18 +697,21 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 	},
 
 	fsTestCase{
+		name: "truncating a file to a negative size fails with ErrInvalid",
+		base: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0644, Data: []byte("123")},
+		},
+		err:  sys.ErrInvalid,
+		test: func(fsys sys.FS) error { return fsys.Truncate("test", -1) },
+	},
+
+	fsTestCase{
 		name: "truncating a file to less than its size erases its content",
 		base: fstest.MapFS{
-			"test": &fstest.MapFile{
-				Data: []byte("123"),
-				Mode: 0644,
-			},
+			"test": &fstest.MapFile{Mode: 0644, Data: []byte("123")},
 		},
 		want: fstest.MapFS{
-			"test": &fstest.MapFile{
-				Data: []byte("1"),
-				Mode: 0644,
-			},
+			"test": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
 		},
 		test: func(fsys sys.FS) error { return fsys.Truncate("test", 1) },
 	},
@@ -716,16 +719,10 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 	fsTestCase{
 		name: "truncating a file to more than its size adds trailing zeros",
 		base: fstest.MapFS{
-			"test": &fstest.MapFile{
-				Data: []byte("123"),
-				Mode: 0644,
-			},
+			"test": &fstest.MapFile{Mode: 0644, Data: []byte("123")},
 		},
 		want: fstest.MapFS{
-			"test": &fstest.MapFile{
-				Data: []byte("123\x00\x00\x00"),
-				Mode: 0644,
-			},
+			"test": &fstest.MapFile{Mode: 0644, Data: []byte("123\x00\x00\x00")},
 		},
 		test: func(fsys sys.FS) error { return fsys.Truncate("test", 6) },
 	},

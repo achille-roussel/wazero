@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"io/fs"
 	"os"
 	"syscall"
 	"time"
@@ -11,6 +12,16 @@ const (
 	O_DSYNC = syscall.O_SYNC
 	O_RSYNC = syscall.O_SYNC
 )
+
+func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
+	if (flags & (O_DIRECTORY | O_NOFOLLOW)) == O_NOFOLLOW {
+		// Darwin requires that open be given explicit permission to open
+		// symbolic links. We inject the flag here when O_NOFOLLOW is given
+		// and the appliation is not trying to open a directory.
+		flags |= syscall.O_SYMLINK
+	}
+	return os.OpenFile(path, flags, perm)
+}
 
 func datasync(file *os.File) error {
 	fd := file.Fd()
