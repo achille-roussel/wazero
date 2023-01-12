@@ -21,6 +21,12 @@ func TestRootFS_ReadWrite(t *testing.T) {
 	})
 }
 
+func TestRootFS_WrapRootFS(t *testing.T) {
+	systest.TestReadWriteFS(t, func(t *testing.T) sys.FS {
+		return sys.RootFS(sys.RootFS(sys.DirFS(t.TempDir())))
+	})
+}
+
 func TestRootFS_Sandbox(t *testing.T) {
 	rootFS := sys.RootFS(sys.DirFS("testdata"))
 	t.Run("FS", func(t *testing.T) {
@@ -34,29 +40,38 @@ func TestRootFS_Sandbox(t *testing.T) {
 		defer f.Close()
 		testSandbox(t, f.FS())
 	})
+	t.Run("Wrap", func(t *testing.T) {
+		testSandbox(t, sys.RootFS(rootFS))
+	})
 }
 
 func testSandbox(t *testing.T, fsys sys.FS) {
+	t.Run("path lookups", func(t *testing.T) {
+		testReadFile(t, fsys, "answer", "42\n")
+		testReadFile(t, fsys, "../answer", "42\n")
+		testReadFile(t, fsys, "../../answer", "42\n")
+	})
+
 	t.Run("follow symlinks", func(t *testing.T) {
-		testFollowSymlink(t, fsys, "symlink-to-relative-answer", "42\n")
-		testFollowSymlink(t, fsys, "symlink-to-absolute-answer", "42\n")
-		testFollowSymlink(t, fsys, "symlink-to-symlink-to-answer", "42\n")
-		testFollowSymlink(t, fsys, "sub/symlink-to-answer", "42\n")
-		testFollowSymlink(t, fsys, "sub/symlink-to-root-1/answer", "42\n")
-		testFollowSymlink(t, fsys, "sub/symlink-to-root-2/answer", "42\n")
+		testReadFile(t, fsys, "symlink-to-relative-answer", "42\n")
+		testReadFile(t, fsys, "symlink-to-absolute-answer", "42\n")
+		testReadFile(t, fsys, "symlink-to-symlink-to-answer", "42\n")
+		testReadFile(t, fsys, "sub/symlink-to-answer", "42\n")
+		testReadFile(t, fsys, "sub/symlink-to-root-1/answer", "42\n")
+		testReadFile(t, fsys, "sub/symlink-to-root-2/answer", "42\n")
 	})
 
 	t.Run("do not follow symlinks", func(t *testing.T) {
-		testNoFollowSymlink(t, fsys, "symlink-to-relative-answer")
-		testNoFollowSymlink(t, fsys, "symlink-to-absolute-answer")
-		testNoFollowSymlink(t, fsys, "symlink-to-symlink-to-answer")
-		testNoFollowSymlink(t, fsys, "sub/symlink-to-root-1")
-		testNoFollowSymlink(t, fsys, "sub/symlink-to-root-2")
+		testReadLink(t, fsys, "symlink-to-relative-answer")
+		testReadLink(t, fsys, "symlink-to-absolute-answer")
+		testReadLink(t, fsys, "symlink-to-symlink-to-answer")
+		testReadLink(t, fsys, "sub/symlink-to-root-1")
+		testReadLink(t, fsys, "sub/symlink-to-root-2")
 	})
 
 	t.Run("broken symlinks", func(t *testing.T) {
-		testBrokenSymlink(t, fsys, "symlink-to-unknown-location", sys.ErrNotExist)
-		testBrokenSymlink(t, fsys, "symlink-in-loop", sys.ErrLoop)
+		testBrokenLink(t, fsys, "symlink-to-unknown-location", sys.ErrNotExist)
+		testBrokenLink(t, fsys, "symlink-in-loop", sys.ErrLoop)
 	})
 
 	t.Run("forbidden paths", func(t *testing.T) {
@@ -65,7 +80,7 @@ func testSandbox(t *testing.T, fsys sys.FS) {
 	})
 }
 
-func testFollowSymlink(t *testing.T, fsys sys.FS, path, data string) {
+func testReadFile(t *testing.T, fsys sys.FS, path, data string) {
 	t.Run(path, func(t *testing.T) {
 		b, err := fs.ReadFile(fsys, path)
 		if err != nil {
@@ -76,7 +91,7 @@ func testFollowSymlink(t *testing.T, fsys sys.FS, path, data string) {
 	})
 }
 
-func testNoFollowSymlink(t *testing.T, fsys sys.FS, path string) {
+func testReadLink(t *testing.T, fsys sys.FS, path string) {
 	t.Run(path, func(t *testing.T) {
 		link, err := fsys.OpenFile(path, sys.O_RDONLY|sys.O_NOFOLLOW, 0)
 		if err != nil {
@@ -94,7 +109,7 @@ func testNoFollowSymlink(t *testing.T, fsys sys.FS, path string) {
 	})
 }
 
-func testBrokenSymlink(t *testing.T, fsys sys.FS, path string, want error) {
+func testBrokenLink(t *testing.T, fsys sys.FS, path string, want error) {
 	t.Run(path, func(t *testing.T) {
 		f, err := fsys.Open(path)
 		if err == nil {
