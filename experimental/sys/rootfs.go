@@ -14,7 +14,7 @@ func RootFS(root FS) FS { return &rootFS{root: root} }
 type rootFS struct{ root FS }
 
 func (fsys *rootFS) lookup(op, name string, flags int, do func(File) error) error {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		return makePathError(op, name, ErrNotExist)
 	}
 	f, err := fsys.openFile(name, flags, 0)
@@ -26,7 +26,7 @@ func (fsys *rootFS) lookup(op, name string, flags int, do func(File) error) erro
 }
 
 func (fsys *rootFS) lookup1(op, name string, do func(FS, string) error) error {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		return makePathError(op, name, ErrNotExist)
 	}
 	dir, base := SplitPath(name)
@@ -39,10 +39,10 @@ func (fsys *rootFS) lookup1(op, name string, do func(FS, string) error) error {
 }
 
 func (fsys *rootFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
-	if !fs.ValidPath(name1) {
+	if !ValidPath(name1) {
 		return makePathError(op, name1, ErrNotExist)
 	}
-	if !fs.ValidPath(name2) {
+	if !ValidPath(name2) {
 		return makePathError(op, name2, ErrInvalid)
 	}
 	dir1, base1 := SplitPath(name1)
@@ -61,7 +61,7 @@ func (fsys *rootFS) lookup2(op, name1, name2 string, do func(FS, string, FS, str
 }
 
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	if !fs.ValidPath(name) {
+	if !ValidPath(name) {
 		return nil, ErrNotExist
 	}
 	f, err := fsys.openFile(name, flags, perm)
