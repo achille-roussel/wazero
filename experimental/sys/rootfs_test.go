@@ -40,31 +40,33 @@ func testSandbox(t *testing.T, fsys sys.FS) {
 	t.Run("follow symlinks", func(t *testing.T) {
 		testFollowSymlink(t, fsys, "symlink-to-relative-answer", "42\n")
 		testFollowSymlink(t, fsys, "symlink-to-absolute-answer", "42\n")
-		testFollowSymlink(t, fsys, "sub/symlink-to-answer", "42\n")
 		testFollowSymlink(t, fsys, "symlink-to-symlink-to-answer", "42\n")
+		testFollowSymlink(t, fsys, "sub/symlink-to-answer", "42\n")
+		testFollowSymlink(t, fsys, "sub/symlink-to-root-1/answer", "42\n")
+		testFollowSymlink(t, fsys, "sub/symlink-to-root-2/answer", "42\n")
+	})
+
+	t.Run("do not follow symlinks", func(t *testing.T) {
+		testNoFollowSymlink(t, fsys, "symlink-to-relative-answer")
+		testNoFollowSymlink(t, fsys, "symlink-to-absolute-answer")
+		testNoFollowSymlink(t, fsys, "symlink-to-symlink-to-answer")
+		testNoFollowSymlink(t, fsys, "sub/symlink-to-root-1")
+		testNoFollowSymlink(t, fsys, "sub/symlink-to-root-2")
 	})
 
 	t.Run("broken symlinks", func(t *testing.T) {
-		testBrokenSymlink(t, fsys, "sub/symlink-to-nowhere-1", sys.ErrNotExist)
-		testBrokenSymlink(t, fsys, "sub/symlink-to-nowhere-2", sys.ErrNotExist)
 		testBrokenSymlink(t, fsys, "symlink-to-unknown-location", sys.ErrNotExist)
 		testBrokenSymlink(t, fsys, "symlink-in-loop", sys.ErrLoop)
 	})
 
 	t.Run("forbidden paths", func(t *testing.T) {
-		testForbiddenPath(t, fsys, "..")
-		testForbiddenPath(t, fsys, "../")
-		testForbiddenPath(t, fsys, "./..")
-		testForbiddenPath(t, fsys, "../.")
-		testForbiddenPath(t, fsys, "../..")
-		testForbiddenPath(t, fsys, "../../")
+		testForbiddenPath(t, fsys, "../rootfs_test.go")
+		testForbiddenPath(t, fsys, "../../rootfs_test.go")
 	})
 }
 
 func testFollowSymlink(t *testing.T, fsys sys.FS, path, data string) {
 	t.Run(path, func(t *testing.T) {
-		testFileIsSymlink(t, fsys, path)
-
 		b, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			t.Error(err)
@@ -74,10 +76,26 @@ func testFollowSymlink(t *testing.T, fsys sys.FS, path, data string) {
 	})
 }
 
+func testNoFollowSymlink(t *testing.T, fsys sys.FS, path string) {
+	t.Run(path, func(t *testing.T) {
+		link, err := fsys.OpenFile(path, sys.O_RDONLY|sys.O_NOFOLLOW, 0)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer link.Close()
+
+		stat, err := link.Stat()
+		if err != nil {
+			t.Error(err)
+		} else if mode := stat.Mode(); mode.Type() != fs.ModeSymlink {
+			t.Errorf("%s: not a symbolic link: %s", path, mode)
+		}
+	})
+}
+
 func testBrokenSymlink(t *testing.T, fsys sys.FS, path string, want error) {
 	t.Run(path, func(t *testing.T) {
-		testFileIsSymlink(t, fsys, path)
-
 		f, err := fsys.Open(path)
 		if err == nil {
 			f.Close()
@@ -98,20 +116,4 @@ func testForbiddenPath(t *testing.T, fsys sys.FS, path string) {
 			t.Errorf("%s: error mismatch: want=%s got=%s", path, sys.ErrNotExist, err)
 		}
 	})
-}
-
-func testFileIsSymlink(t *testing.T, fsys sys.FS, path string) {
-	link, err := fsys.OpenFile(path, sys.O_RDONLY|sys.O_NOFOLLOW, 0)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	defer link.Close()
-
-	stat, err := link.Stat()
-	if err != nil {
-		t.Error(err)
-	} else if mode := stat.Mode(); mode.Type() != fs.ModeSymlink {
-		t.Errorf("%s: not a symbolic link: %s", path, mode)
-	}
 }

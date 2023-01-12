@@ -9,11 +9,8 @@ import (
 )
 
 func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	fsPath, ok := join(d.name, name)
-	if !ok {
-		return nil, ErrInvalid
-	}
-	osPath := filepath.Join(d.fsys.root, filepath.FromSlash(fsPath))
+	fsPath := filepath.Join(d.name, name)
+	osPath := filepath.Join(d.fsys.root, fsPath)
 	f, err := openat(d.fd(), name, flags, uint32(perm))
 	if err != nil {
 		if err == syscall.ELOOP && ((flags & O_NOFOLLOW) != 0) {
