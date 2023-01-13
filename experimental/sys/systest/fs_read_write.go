@@ -269,7 +269,7 @@ var testReadWriteUnlink = append(testDefaultUnlink,
 	fsTestCase{
 		name: "unlinking a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
-		test: testLoop(func(fsys sys.FS, path string) error { return fsys.Unlink(path + "/test") }),
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Unlink(fsys, path+"/test") }),
 	},
 
 	fsTestCase{
@@ -277,7 +277,7 @@ var testReadWriteUnlink = append(testDefaultUnlink,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Unlink("nope") },
+		test: func(fsys sys.FS) error { return sys.Unlink(fsys, "nope") },
 	},
 
 	fsTestCase{
@@ -285,7 +285,7 @@ var testReadWriteUnlink = append(testDefaultUnlink,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		err:  sys.ErrPermission,
-		test: func(fsys sys.FS) error { return fsys.Unlink("test") },
+		test: func(fsys sys.FS) error { return sys.Unlink(fsys, "test") },
 	},
 
 	fsTestCase{
@@ -299,7 +299,7 @@ var testReadWriteUnlink = append(testDefaultUnlink,
 			"file-1": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
 			"file-3": &fstest.MapFile{Mode: 0644, Data: []byte("3")},
 		},
-		test: func(fsys sys.FS) error { return fsys.Unlink("file-2") },
+		test: func(fsys sys.FS) error { return sys.Unlink(fsys, "file-2") },
 	},
 )
 

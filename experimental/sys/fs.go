@@ -25,8 +25,6 @@ type FS interface {
 	Mkdir(name string, perm fs.FileMode) error
 	// Removes a directory from the file system.
 	Rmdir(name string) error
-	// Removes a file from the file system.
-	Unlink(name string) error
 	// Creates a hard link from oldName to newName. oldName is expressed
 	// relative to the receiver, while newName is expressed relative to newFS.
 	//
@@ -48,13 +46,11 @@ type FS interface {
 // The interfance is similar to fs.File, it may represent different types of
 // files, including regular files and directories.
 type File interface {
-	io.Closer
-	io.Reader
+	fs.File
 	io.ReaderAt
 	io.Writer
 	io.WriterAt
 	io.Seeker
-	fs.ReadDirFile
 	// Returns the target of the symbolic link that file is opened at.
 	Readlink() (string, error)
 	// Sets the file permissions.
@@ -75,6 +71,27 @@ type File interface {
 	// The returned FS remains valid until the file is closed, after which all
 	// method calls on the FS return ErrClosed.
 	FS() FS
+	// A file might be open an a directory of the file system, in which case
+	// the methods provided by the Directory interface allow access to the
+	// file system directory tree relative to the file location.
+	//
+	// If the file is not referencing a directory, calling methods of the
+	// Directory interface will fail returning ErrNotDirectory or ErrPermission.
+	Directory
+}
+
+// Directory is an interface representing an open directory.
+//
+// Methods accepting a file name perform name resolution relative to the
+// location of the directory on the file system.
+//
+// The file names passed to methods of the Directory interface must be valid
+// accoring to ValidPath. For all invalid names, the methods return ErrNotExist.
+type Directory interface {
+	// Reads the list of directory entries (see fs.ReadDirFile).
+	ReadDir(n int) ([]fs.DirEntry, error)
+	// Removes a file from the file system.
+	Unlink(name string) error
 }
 
 // NewFS constructs a FS from a fs.FS.
@@ -148,10 +165,6 @@ func (fsys *errFS) Mkdir(name string, perm fs.FileMode) error {
 
 func (fsys *errFS) Rmdir(name string) error {
 	return fsys.validPath("rmdir", name)
-}
-
-func (fsys *errFS) Unlink(name string) error {
-	return fsys.validPath("unlink", name)
 }
 
 func (fsys *errFS) Link(oldName, newName string, newFS FS) error {
@@ -603,7 +616,27 @@ func Lstat(fsys FS, name string) (fs.FileInfo, error) {
 	return callFile1(fsys, "lstat", name, O_RDONLY|O_NOFOLLOW, File.Stat)
 }
 
-// TODO: rename these to lookup* after rootfs is simplified
+/*
+func Mkdir(fsys FS, name string) error {
+	return callDir(fsys, "mkdir", name, File.Mkdir)
+}
+
+func Rmdir(fsys FS, name string) error {
+	return callDir(fsys, "rmdir", name, File.Rmdir)
+}
+*/
+
+func Unlink(fsys FS, name string) error {
+	return callDir(fsys, "unlink", name, File.Unlink)
+}
+
+/*
+func Symlink(fsys FS, oldName, newName string) error {
+	return callDir(fsys, "symlink", newName, func(dir File, newName string) error {
+		return dir.Symlink(oldName, newName)
+	})
+}
+*/
 
 func callFile(fsys FS, op, name string, flags int, do func(File) error) error {
 	_, err := callFile1(fsys, op, name, flags, func(file File) (struct{}, error) {
@@ -619,4 +652,14 @@ func callFile1[Func func(File) (Ret, error), Ret any](fsys FS, op, name string, 
 	}
 	defer f.Close()
 	return do(f)
+}
+
+func callDir(fsys FS, op, name string, do func(File, string) error) error {
+	dir, base := SplitPath(name)
+	f, err := OpenDir(fsys, dir)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f, base)
 }

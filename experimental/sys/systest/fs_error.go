@@ -52,7 +52,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "unlinking a file errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Unlink("test")
+			return sys.Unlink(fsys, "test")
 		},
 	})
 

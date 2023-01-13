@@ -186,10 +186,6 @@ func (fsys *rootFS) Rmdir(name string) error {
 	return lookupDir(fsys.openFile, "rmdir", name, FS.Rmdir)
 }
 
-func (fsys *rootFS) Unlink(name string) error {
-	return lookupDir(fsys.openFile, "unlink", name, FS.Unlink)
-}
-
 func (fsys *rootFS) Link(oldName, newName string, newFS FS) error {
 	return lookupLinkOrRename(fsys.openFile, "link", oldName, newName, FS.Link)
 }
@@ -241,10 +237,6 @@ func (d rootFileFS) Mkdir(name string, perm fs.FileMode) error {
 
 func (d rootFileFS) Rmdir(name string) error {
 	return lookupDir(d.openFile, "rmdir", name, FS.Rmdir)
-}
-
-func (d rootFileFS) Unlink(name string) error {
-	return lookupDir(d.openFile, "unlink", name, FS.Unlink)
 }
 
 func (d rootFileFS) Link(oldName, newName string, newFS FS) error {
