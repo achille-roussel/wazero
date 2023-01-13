@@ -694,7 +694,7 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 	fsTestCase{
 		name: "truncating a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
-		test: testLoop(func(fsys sys.FS, path string) error { return fsys.Truncate(path+"/test", 0) }),
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Truncate(fsys, path+"/test", 0) }),
 	},
 
 	fsTestCase{
@@ -703,7 +703,7 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 			"test": &fstest.MapFile{Mode: 0644, Data: []byte("123")},
 		},
 		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Truncate("test", -1) },
+		test: func(fsys sys.FS) error { return sys.Truncate(fsys, "test", -1) },
 	},
 
 	fsTestCase{
@@ -714,7 +714,7 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 		want: fstest.MapFS{
 			"test": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
 		},
-		test: func(fsys sys.FS) error { return fsys.Truncate("test", 1) },
+		test: func(fsys sys.FS) error { return sys.Truncate(fsys, "test", 1) },
 	},
 
 	fsTestCase{
@@ -725,7 +725,7 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 		want: fstest.MapFS{
 			"test": &fstest.MapFile{Mode: 0644, Data: []byte("123\x00\x00\x00")},
 		},
-		test: func(fsys sys.FS) error { return fsys.Truncate("test", 6) },
+		test: func(fsys sys.FS) error { return sys.Truncate(fsys, "test", 6) },
 	},
 )
 

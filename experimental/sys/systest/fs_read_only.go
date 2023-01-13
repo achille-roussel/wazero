@@ -177,7 +177,7 @@ var testReadOnlyTruncate = append(testDefaultTruncate,
 		name: "truncating a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Truncate("test", 0) },
+		test: func(fsys sys.FS) error { return sys.Truncate(fsys, "test", 0) },
 	},
 )
 
