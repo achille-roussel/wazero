@@ -3,27 +3,17 @@ package sys
 import (
 	"io"
 	"io/fs"
-	"path"
 	"time"
 )
 
-// ReadFS is a subset of the FS interface implemented by file systems which
-// support only read operations.
-type ReadFS interface {
-	fs.FS
-	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
-}
-
-// ReadOnlyFS constructs a FS from a ReadFS. The returned file system supports
+// ReadOnlyFS constructs a FS from a FS. The returned file system supports
 // only read operations, and will return ErrReadOnly on any method call which
 // attempts to mutate the state of the file system.
-func ReadOnlyFS(base ReadFS) FS { return &readOnlyFS{base} }
+func ReadOnlyFS(base FS) FS { return &readOnlyFS{base} }
 
-type readOnlyFS struct{ base ReadFS }
+type readOnlyFS struct{ base FS }
 
-func (fsys *readOnlyFS) Open(name string) (fs.File, error) {
-	return Open(fsys, name)
-}
+func (fsys *readOnlyFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
 func (fsys *readOnlyFS) OpenFile(name string, flags int, _ fs.FileMode) (File, error) {
 	f, err := fsys.openFile(name, flags)
@@ -204,6 +194,18 @@ func (f *readOnlyFile) Datasync() error {
 	return f.fail("datasync", ErrReadOnly)
 }
 
+func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (file File, err error) {
+	if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		file, err = f.fsys.OpenFile(JoinPath(f.name, name), flags, perm)
+	}
+	if err != nil {
+		err = makePathError("open", name, err)
+	}
+	return file, err
+}
+
 func (f *readOnlyFile) Mkdir(name string, perm fs.FileMode) error {
 	return f.fail("mkdir", ErrReadOnly)
 }
@@ -243,33 +245,6 @@ func (f *readOnlyFile) do(op string, do func() error) (err error) {
 
 func (f *readOnlyFile) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
-}
-func (f *readOnlyFile) FS() FS { return readOnlyFileFS{f} }
-
-type readOnlyFileFS struct{ *readOnlyFile }
-
-func (f readOnlyFileFS) Open(name string) (fs.File, error) {
-	return f.OpenFile(name, O_RDONLY, 0)
-}
-
-func (f readOnlyFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return callFS(f, "open", name, func(fsys *readOnlyFS, path string) (File, error) {
-		return fsys.OpenFile(path, flags, perm)
-	})
-}
-
-func callFS[Func func(*readOnlyFS, string) (Ret, error), Ret any](f readOnlyFileFS, op, name string, do Func) (ret Ret, err error) {
-	if f.fsys == nil {
-		err = ErrClosed
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		ret, err = do(f.fsys, path.Join(f.name, name))
-	}
-	if err != nil {
-		err = makePathError(op, name, err)
-	}
-	return ret, err
 }
 
 var (

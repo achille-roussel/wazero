@@ -8,55 +8,39 @@ import (
 
 // RootFS wraps a file system to ensure that path resolutions are not allowed
 // to escape the root of the file system (e.g. following symbolic links).
-func RootFS(root FS) FS { return &rootFS{root: root} }
+func RootFS(root FS) FS { return &rootFS{root} }
 
 type rootFS struct{ root FS }
 
-func (fsys *rootFS) Open(name string) (fs.File, error) {
-	return Open(fsys, name)
-}
+func (fsys *rootFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if !ValidPath(name) {
-		return nil, ErrNotExist
+		return nil, makePathError("open", name, ErrNotExist)
 	}
-	f, err := fsys.openFile(name, flags, perm)
+	d, err := OpenRoot(fsys.root)
 	if err != nil {
 		return nil, makePathError("open", name, err)
 	}
-	return fsys.newFile(f, name), nil
-}
-
-func (fsys *rootFS) newFile(file File, name string) *rootFile {
-	return &rootFile{root: fsys, name: name, File: file}
-}
-
-func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	root, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
-	if err != nil {
-		return nil, err
-	}
 	if name == "." {
-		return root, nil
+		return fsys.newFile(d, name), nil
 	}
-	defer root.Close()
-	return fsys.openFileAt(root, ".", name, flags, perm)
+	defer d.Close()
+	f, err := fsys.openFileAt(d, ".", name, flags, perm)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	return f, nil
 }
 
-type nopClose struct{ File }
-
-func (nopClose) Close() error { return nil }
-
-var errResolveSymlink = errors.New("resolve symlink")
-
-func (fsys *rootFS) openFileAt(dir File, base, path string, flags int, perm fs.FileMode) (File, error) {
+func (fsys *rootFS) openFileAt(dir File, base, path string, flags int, perm fs.FileMode) (*rootFile, error) {
+	name := JoinPath(base, path)
 	dir = nopClose{dir} // don't close the first directory received as argument
-	dirFS := dir.FS()
 	defer func() { dir.Close() }()
 
 	setCurrentDirectory := func(d File) {
 		dir.Close()
-		dir, dirFS = d, d.FS()
+		dir = d
 	}
 
 	setSymbolicLink := func(link string) error {
@@ -95,7 +79,7 @@ resolvePath:
 	}
 
 	base, path, err = WalkPath(base, path, func(dirname string) error {
-		f, err := dirFS.OpenFile(dirname, rootfsOpenFileFlags, 0)
+		f, err := dir.OpenFile(dirname, rootfsOpenFileFlags, 0)
 		if err != nil {
 			return err
 		}
@@ -149,7 +133,7 @@ resolvePath:
 		openFlags |= O_NOFOLLOW
 	}
 
-	f, err := dirFS.OpenFile(path, openFlags, perm)
+	f, err := dir.OpenFile(path, openFlags, perm)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +157,11 @@ resolvePath:
 		goto resolvePath
 	}
 
-	return f, nil
+	return fsys.newFile(f, name), nil
+}
+
+func (fsys *rootFS) newFile(file File, name string) *rootFile {
+	return &rootFile{root: fsys, name: name, File: file}
 }
 
 type rootFile struct {
@@ -182,25 +170,20 @@ type rootFile struct {
 	File
 }
 
-func (f *rootFile) FS() FS { return rootFileFS{f} }
-
-type rootFileFS struct{ *rootFile }
-
-func (d rootFileFS) Open(name string) (fs.File, error) {
-	return d.OpenFile(name, O_RDONLY, 0)
-}
-
-func (d rootFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+func (f *rootFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if !ValidPath(name) {
 		return nil, makePathError("open", name, ErrNotExist)
 	}
-	f, err := d.openFile(name, flags, perm)
+	newFile, err := f.root.openFileAt(f.File, f.name, name, flags, perm)
 	if err != nil {
 		return nil, makePathError("open", name, err)
 	}
-	return d.root.newFile(f, JoinPath(d.name, name)), nil
+	return newFile, nil
 }
 
-func (d rootFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return d.root.openFileAt(d.File, d.name, name, flags, perm)
-}
+type nopClose struct{ File }
+
+func (nopClose) Close() error { return nil }
+
+// sentinel error value used to break out of WalkPath when resolving symbolic links
+var errResolveSymlink = errors.New("resolve symlink")

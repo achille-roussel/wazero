@@ -1,76 +1,28 @@
 package sys
 
-import (
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"time"
-)
-
-// DirFS constructs a FS instance using the given path as root on the host's
-// file system.
-//
-// The path is first converted to an obsolute path on the file system in order
-// to ensure that the behavior of the returned FS does not change if the working
-// directory changes.
-func DirFS(path string) FS {
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return ErrFS(err)
-	}
-	return &dirFS{root: path}
+/*
+// NewFile constructs a File normalizing the behavior of the
+func NewFile(base File, name string) File {
+	return &file{base: base, name: name}
 }
 
-type dirFS struct{ root string }
-
-func (fsys *dirFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
-
-func (fsys *dirFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	f, err := fsys.openFile(name, flags, perm)
-	if err != nil {
-		return nil, makePathError("open", name, err)
-	}
-	return f, nil
-}
-
-func (fsys *dirFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	if !ValidPath(name) {
-		return nil, ErrNotExist
-	}
-	path := name
-	path = filepath.FromSlash(path)
-	path = filepath.Join(fsys.root, name)
-	f, err := openFile(path, flags, perm)
-	if err != nil {
-		return nil, err
-	}
-	return fsys.newFile(f, name), nil
-}
-
-func (fsys *dirFS) newFile(base *os.File, name string) *dirFile {
-	return &dirFile{fsys: fsys, base: base, name: name}
-}
-
-type dirFile struct {
-	fsys *dirFS
-	base *os.File
+type file struct {
+	base File
 	name string
 }
 
-func (f *dirFile) Fd() uintptr {
+func (f *file) Fd() uintptr {
 	if f.base != nil {
 		return f.base.Fd()
 	}
 	return ^uintptr(0)
 }
 
-func (f *dirFile) Close() (err error) {
+func (f *file) Close() (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
 		err = f.base.Close()
-		f.fsys = nil
 		f.base = nil
 	}
 	if err != nil {
@@ -79,7 +31,7 @@ func (f *dirFile) Close() (err error) {
 	return err
 }
 
-func (f *dirFile) Stat() (info fs.FileInfo, err error) {
+func (f *file) Stat() (info fs.FileInfo, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -91,7 +43,7 @@ func (f *dirFile) Stat() (info fs.FileInfo, err error) {
 	return info, err
 }
 
-func (f *dirFile) Read(b []byte) (n int, err error) {
+func (f *file) Read(b []byte) (n int, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -103,7 +55,7 @@ func (f *dirFile) Read(b []byte) (n int, err error) {
 	return n, err
 }
 
-func (f *dirFile) ReadAt(b []byte, offset int64) (n int, err error) {
+func (f *file) ReadAt(b []byte, offset int64) (n int, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -115,11 +67,11 @@ func (f *dirFile) ReadAt(b []byte, offset int64) (n int, err error) {
 	return n, err
 }
 
-func (f *dirFile) ReadFrom(r io.Reader) (n int64, err error) {
+func (f *file) ReadFrom(r io.Reader) (n int64, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		n, err = f.base.ReadFrom(r)
+		n, err = io.Copy(f.base, r)
 	}
 	if err != nil {
 		err = f.makePathError("write", err)
@@ -127,7 +79,7 @@ func (f *dirFile) ReadFrom(r io.Reader) (n int64, err error) {
 	return n, err
 }
 
-func (f *dirFile) Write(b []byte) (n int, err error) {
+func (f *file) Write(b []byte) (n int, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -139,7 +91,7 @@ func (f *dirFile) Write(b []byte) (n int, err error) {
 	return n, err
 }
 
-func (f *dirFile) WriteAt(b []byte, offset int64) (n int, err error) {
+func (f *file) WriteAt(b []byte, offset int64) (n int, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -151,11 +103,11 @@ func (f *dirFile) WriteAt(b []byte, offset int64) (n int, err error) {
 	return n, err
 }
 
-func (f *dirFile) WriteString(s string) (n int, err error) {
+func (f *file) WriteString(s string) (n int, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		n, err = f.base.WriteString(s)
+		n, err = io.WriteString(f.base, s)
 	}
 	if err != nil {
 		err = f.makePathError("write", err)
@@ -163,7 +115,7 @@ func (f *dirFile) WriteString(s string) (n int, err error) {
 	return n, err
 }
 
-func (f *dirFile) Seek(offset int64, whence int) (seek int64, err error) {
+func (f *file) Seek(offset int64, whence int) (seek int64, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -175,7 +127,7 @@ func (f *dirFile) Seek(offset int64, whence int) (seek int64, err error) {
 	return seek, err
 }
 
-func (f *dirFile) ReadDir(n int) (files []fs.DirEntry, err error) {
+func (f *file) ReadDir(n int) (files []fs.DirEntry, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -187,11 +139,11 @@ func (f *dirFile) ReadDir(n int) (files []fs.DirEntry, err error) {
 	return files, err
 }
 
-func (f *dirFile) Readlink() (link string, err error) {
+func (f *file) Readlink() (link string, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		link, err = readlink(f.base)
+		link, err = f.base.Readlink()
 	}
 	if err != nil {
 		err = f.makePathError("readlink", err)
@@ -199,7 +151,7 @@ func (f *dirFile) Readlink() (link string, err error) {
 	return link, err
 }
 
-func (f *dirFile) Chmod(perm fs.FileMode) (err error) {
+func (f *file) Chmod(perm fs.FileMode) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -211,11 +163,11 @@ func (f *dirFile) Chmod(perm fs.FileMode) (err error) {
 	return err
 }
 
-func (f *dirFile) Chtimes(atime, mtime time.Time) (err error) {
+func (f *file) Chtimes(atime, mtime time.Time) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		err = chtimes(f.base, atime, mtime)
+		err = f.base.Chtimes(atime, mtime)
 	}
 	if err != nil {
 		err = f.makePathError("chtimes", err)
@@ -223,7 +175,7 @@ func (f *dirFile) Chtimes(atime, mtime time.Time) (err error) {
 	return err
 }
 
-func (f *dirFile) Truncate(size int64) (err error) {
+func (f *file) Truncate(size int64) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -235,7 +187,7 @@ func (f *dirFile) Truncate(size int64) (err error) {
 	return err
 }
 
-func (f *dirFile) Sync() (err error) {
+func (f *file) Sync() (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
@@ -247,11 +199,11 @@ func (f *dirFile) Sync() (err error) {
 	return err
 }
 
-func (f *dirFile) Datasync() (err error) {
+func (f *file) Datasync() (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		err = datasync(f.base)
+		err = f.base.Datasync()
 	}
 	if err != nil {
 		err = f.makePathError("datasync", err)
@@ -259,30 +211,27 @@ func (f *dirFile) Datasync() (err error) {
 	return err
 }
 
-func (f *dirFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	var file *os.File
-	var path string
-	var err error
+func (f *file) OpenFile(name string, flags int, perm fs.FileMode) (file File, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
-		file, path, err = f.openFile(name, flags, perm)
+		file, err = f.base.OpenFile(name, flags, perm)
 	}
 	if err != nil {
-		return nil, makePathError("open", name, err)
+		err = makePathError("open", name, err)
 	}
-	return f.fsys.newFile(file, path), nil
+	return file, err
 }
 
-func (f *dirFile) Mkdir(name string, perm fs.FileMode) (err error) {
+func (f *file) Mkdir(name string, perm fs.FileMode) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
-		err = f.mkdir(name, perm)
+		err = f.base.Mkdir(name, perm)
 	}
 	if err != nil {
 		err = makePathError("mkdir", name, err)
@@ -290,13 +239,13 @@ func (f *dirFile) Mkdir(name string, perm fs.FileMode) (err error) {
 	return err
 }
 
-func (f *dirFile) Rmdir(name string) (err error) {
+func (f *file) Rmdir(name string) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
-		err = f.rmdir(name)
+		err = f.base.Rmdir(name)
 	}
 	if err != nil {
 		err = makePathError("rmdir", name, err)
@@ -304,13 +253,13 @@ func (f *dirFile) Rmdir(name string) (err error) {
 	return err
 }
 
-func (f *dirFile) Unlink(name string) (err error) {
+func (f *file) Unlink(name string) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
-		err = f.unlink(name)
+		err = f.base.Unlink(name)
 	}
 	if err != nil {
 		err = f.makePathError("unlink", err)
@@ -318,13 +267,13 @@ func (f *dirFile) Unlink(name string) (err error) {
 	return err
 }
 
-func (f *dirFile) Symlink(oldName, newName string) (err error) {
+func (f *file) Symlink(oldName, newName string) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(newName) {
 		err = ErrNotExist
 	} else {
-		err = f.symlink(oldName, newName)
+		err = f.base.Symlink(oldName, newName)
 	}
 	if err != nil {
 		err = makePathError("symlink", newName, err)
@@ -332,43 +281,46 @@ func (f *dirFile) Symlink(oldName, newName string) (err error) {
 	return err
 }
 
-func (f *dirFile) Link(oldName string, newDir Directory, newName string) (err error) {
+func (f *file) Link(oldName string, newDir Directory, newName string) (err error) {
+	var name string
 	if f.base == nil {
-		err = ErrClosed
+		name, err = oldName, ErrClosed
 	} else if !ValidPath(oldName) {
-		err = ErrNotExist
+		name, err = oldName, ErrNotExist
 	} else if !ValidPath(newName) {
-		err = ErrInvalid
+		name, err = newName, ErrInvalid
 	} else {
-		err = f.link(oldName, newDir.Fd(), newName)
+		name, err = newName, f.base.Rename(oldName, newDir, newName)
 	}
 	if err != nil {
-		err = makePathError("link", newName, err)
+		err = makePathError("link", name, err)
 	}
 	return err
 }
 
-func (f *dirFile) Rename(oldName string, newDir Directory, newName string) (err error) {
+func (f *file) Rename(oldName string, newDir Directory, newName string) (err error) {
+	var name string
 	if f.base == nil {
-		err = ErrClosed
+		name, err = oldName, ErrClosed
 	} else if !ValidPath(oldName) {
-		err = ErrNotExist
+		name, err = oldName, ErrNotExist
 	} else if !ValidPath(newName) {
-		err = ErrInvalid
+		name, err = newName, ErrInvalid
 	} else {
-		err = f.rename(oldName, newDir.Fd(), newName)
+		name, err = newName, f.base.Rename(oldName, newDir, newName)
 	}
 	if err != nil {
-		err = makePathError("rename", newName, err)
+		err = makePathError("rename", name, err)
 	}
 	return err
 }
 
-func (f *dirFile) makePathError(op string, err error) error {
+func (f *file) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
 }
 
 var (
-	_ io.ReaderFrom   = (*dirFile)(nil)
-	_ io.StringWriter = (*dirFile)(nil)
+	_ io.ReaderFrom   = (*file)(nil)
+	_ io.StringWriter = (*file)(nil)
 )
+*/

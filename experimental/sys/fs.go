@@ -45,14 +45,6 @@ type File interface {
 	Sync() error
 	// Flushes buffered data changes to persistent storage.
 	Datasync() error
-	// Returns a view of the file system rooted at the file (which must be a
-	// directory).
-	//
-	// All name resolutions are done relative to the file location.
-	//
-	// The returned FS remains valid until the file is closed, after which all
-	// method calls on the FS return ErrClosed.
-	FS() FS
 	// A file might be open an a directory of the file system, in which case
 	// the methods provided by the Directory interface allow access to the
 	// file system directory tree relative to the file location.
@@ -72,6 +64,8 @@ type File interface {
 type Directory interface {
 	// Returns the file system handle for this directory.
 	Fd() uintptr
+	// Opens a file at the given name, relative to the directory.
+	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 	// Reads the list of directory entries (see fs.ReadDirFile).
 	ReadDir(n int) ([]fs.DirEntry, error)
 	// Creates a directory on the file system.
@@ -88,6 +82,18 @@ type Directory interface {
 	// Moves a file from oldName to newName. oldName is expressed relative to
 	// the receivers, while newName is expressed relative to newDir.
 	Rename(oldName string, newDir Directory, newName string) error
+}
+
+// FuncFS is an implementation of the FS interface using a function to open
+// new files.
+type FuncFS func(string, int, fs.FileMode) (File, error)
+
+func (open FuncFS) Open(name string) (fs.File, error) {
+	return Open(open, name)
+}
+
+func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return open(name, flags, perm)
 }
 
 // NewFS constructs a FS from a fs.FS.
@@ -163,7 +169,7 @@ func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 // root and recursively descending into each directory. The copy is not atomic,
 // an error might leave the destination file system with a partially completed
 // copy of the file tree.
-func CopyFS(dst FS, src ReadFS) error {
+func CopyFS(dst, src FS) error {
 	r, err := OpenRoot(src)
 	if err != nil {
 		return fmt.Errorf("opening source file system root: %w", err)
@@ -180,9 +186,6 @@ func CopyFS(dst FS, src ReadFS) error {
 }
 
 func copyFS(dst, src File) error {
-	dstFS := dst.FS()
-	srcFS := src.FS()
-
 	for {
 		entries, err := src.ReadDir(100)
 
@@ -197,9 +200,9 @@ func copyFS(dst, src File) error {
 			case fs.ModeDir:
 				err = copyDir(dst, src, name, stat)
 			case fs.ModeSymlink:
-				err = copySymlink(dst, srcFS, name, stat)
+				err = copySymlink(dst, src, name, stat)
 			case 0: // regular file
-				err = copyFile(dstFS, srcFS, name, stat)
+				err = copyFile(dst, src, name, stat)
 			}
 			if err != nil {
 				return err
@@ -220,13 +223,13 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 
-	r, err := OpenDir(src.FS(), name)
+	r, err := src.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
 
-	w, err := OpenDir(dst.FS(), name)
+	w, err := dst.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
@@ -240,7 +243,7 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	return w.Chtimes(time, time)
 }
 
-func copySymlink(dst File, src FS, name string, stat fs.FileInfo) error {
+func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
@@ -256,7 +259,7 @@ func copySymlink(dst File, src FS, name string, stat fs.FileInfo) error {
 		return err
 	}
 
-	w, err := dst.FS().OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
+	w, err := dst.OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
@@ -266,7 +269,7 @@ func copySymlink(dst File, src FS, name string, stat fs.FileInfo) error {
 	return w.Chtimes(time, time)
 }
 
-func copyFile(dst, src FS, name string, stat fs.FileInfo) error {
+func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
@@ -291,7 +294,7 @@ const equalFSBufsize = 8192
 
 // EqualFS compares two file systems, returning nil if they are equal, or an
 // error describing their difference when they are not.
-func EqualFS(a, b ReadFS) error {
+func EqualFS(a, b FS) error {
 	var buf [equalFSBufsize]byte
 
 	source, err := OpenRoot(a)
@@ -316,9 +319,6 @@ func EqualFS(a, b ReadFS) error {
 }
 
 func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
-	sourceFS := source.FS()
-	targetFS := target.FS()
-
 	for {
 		entries, err := source.ReadDir(100)
 
@@ -326,11 +326,11 @@ func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 			name := entry.Name()
 			switch entry.Type() {
 			case fs.ModeDir:
-				err = equalDir(sourceFS, targetFS, name, buf)
+				err = equalDir(source, target, name, buf)
 			case fs.ModeSymlink:
-				err = equalSymlink(sourceFS, targetFS, name)
+				err = equalSymlink(source, target, name)
 			default:
-				err = equalFile(sourceFS, targetFS, name, buf)
+				err = equalFile(source, target, name, buf)
 			}
 		}
 
@@ -343,14 +343,14 @@ func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 	}
 }
 
-func equalDir(source, target FS, name string, buf *[equalFSBufsize]byte) error {
-	sourceDir, err := OpenDir(source, name)
+func equalDir(source, target File, name string, buf *[equalFSBufsize]byte) error {
+	sourceDir, err := source.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
 	defer sourceDir.Close()
 
-	targetDir, err := OpenDir(target, name)
+	targetDir, err := target.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
@@ -362,12 +362,24 @@ func equalDir(source, target FS, name string, buf *[equalFSBufsize]byte) error {
 	return equalFS(sourceDir, targetDir, buf)
 }
 
-func equalSymlink(source, target FS, name string) error {
-	sourceLink, err := Readlink(source, name)
+func equalSymlink(source, target File, name string) error {
+	sourceFile, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
-	targetLink, err := Readlink(target, name)
+	defer sourceFile.Close()
+
+	targetFile, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer targetFile.Close()
+
+	sourceLink, err := sourceFile.Readlink()
+	if err != nil {
+		return err
+	}
+	targetLink, err := targetFile.Readlink()
 	if err != nil {
 		return err
 	}
@@ -377,7 +389,7 @@ func equalSymlink(source, target FS, name string) error {
 	return nil
 }
 
-func equalFile(source, target FS, name string, buf *[equalFSBufsize]byte) error {
+func equalFile(source, target File, name string, buf *[equalFSBufsize]byte) error {
 	sourceFile, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
@@ -487,10 +499,6 @@ func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name st
 	return ret, err
 }
 
-// TODO: remove
-type openFileFunc = func(string, int, fs.FileMode) (File, error)
-type linkOrRename = func(FS, string, string, FS) error
-
 // Open opens a file at the given name in fsys.
 //
 // The file is open in read-only mode, it might point to a directory.
@@ -506,17 +514,17 @@ type linkOrRename = func(FS, string, string, FS) error
 //		return sys.Open(fsys, name)
 //	}
 //
-func Open(fsys ReadFS, name string) (File, error) {
+func Open(fsys FS, name string) (File, error) {
 	return fsys.OpenFile(name, O_RDONLY, 0)
 }
 
 // OpenDir opens a directory at the given name in fsys.
-func OpenDir(fsys ReadFS, name string) (File, error) {
+func OpenDir(fsys FS, name string) (File, error) {
 	return fsys.OpenFile(name, O_DIRECTORY, 0)
 }
 
 // OpenRoot opens the root directory of fsys.
-func OpenRoot(fsys ReadFS) (File, error) {
+func OpenRoot(fsys FS) (File, error) {
 	return OpenDir(fsys, ".")
 }
 
