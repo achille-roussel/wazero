@@ -80,22 +80,8 @@ func (fsys *readOnlyFS) Symlink(oldName, newName string) error {
 	return fail("symlink", newName, ErrReadOnly)
 }
 
-func (fsys *readOnlyFS) Chmod(name string, mode fs.FileMode) error {
-	return fail("chmod", name, ErrReadOnly)
-}
-
 func (fsys *readOnlyFS) Chtimes(name string, atime, mtime time.Time) error {
 	return fail("chtimes", name, ErrReadOnly)
-}
-
-func (fsys *readOnlyFS) Truncate(name string, size int64) error {
-	return call(fsys, "truncate", name, func(*readOnlyFS, string) error {
-		if size < 0 {
-			return ErrInvalid
-		} else {
-			return ErrReadOnly
-		}
-	})
 }
 
 func (fsys *readOnlyFS) fail(op, name string, err error) error {
@@ -315,25 +301,8 @@ func (f readOnlyFileFS) Symlink(oldName, newName string) error {
 	return fail("symlink", newName, ErrReadOnly)
 }
 
-func (f readOnlyFileFS) Chmod(name string, mode fs.FileMode) error {
-	return fail("chmod", name, ErrReadOnly)
-}
-
 func (f readOnlyFileFS) Chtimes(name string, atime, mtime time.Time) error {
 	return fail("chtimes", name, ErrReadOnly)
-}
-
-func (f readOnlyFileFS) Truncate(name string, size int64) (err error) {
-	if f.fsys == nil {
-		err = ErrClosed
-	} else if size < 0 {
-		err = ErrInvalid
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		err = ErrReadOnly
-	}
-	return makePathError("truncate", name, err)
 }
 
 func callFS[Func func(*readOnlyFS, string) (Ret, error), Ret any](f readOnlyFileFS, op, name string, do Func) (ret Ret, err error) {

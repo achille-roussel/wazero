@@ -93,7 +93,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "changing file permissions errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Chmod("test", 0644)
+			return sys.Chmod(fsys, "test", 0644)
 		},
 	})
 

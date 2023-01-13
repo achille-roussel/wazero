@@ -19,7 +19,6 @@ const (
 
 	__SYS_OPENAT     = 463
 	__SYS_RENAMEAT   = 465
-	__SYS_FCHMODAT   = 467
 	__SYS_FSTATAT64  = 470
 	__SYS_LINKAT     = 471
 	__SYS_UNLINKAT   = 472
@@ -103,26 +102,6 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 		if e == syscall.EISDIR {
 			e = syscall.EEXIST
 		}
-		return e
-	}
-	return nil
-}
-
-func fchmodat(fd int, path string, perm uint32, flags int) error {
-	p, err := syscall.BytePtrFromString(path)
-	if err != nil {
-		return err
-	}
-	_, _, e := syscall.Syscall6(
-		uintptr(__SYS_FCHMODAT),
-		uintptr(fd),
-		uintptr(unsafe.Pointer(p)),
-		uintptr(perm),
-		uintptr(flags),
-		uintptr(0),
-		uintptr(0),
-	)
-	if e != 0 {
 		return e
 	}
 	return nil

@@ -42,8 +42,6 @@ type FS interface {
 	Rename(oldName, newName string, newFS FS) error
 	// Creates a symolink link from oldName to newName.
 	Symlink(oldName, newName string) error
-	// Changes a file permissions on the file system.
-	Chmod(name string, mode fs.FileMode) error
 	// Changes a file access and modification times.
 	Chtimes(name string, atime, mtime time.Time) error
 }
@@ -154,10 +152,6 @@ func (fsys *errFS) Symlink(oldName, newName string) error {
 
 func (fsys *errFS) Rename(oldName, newName string, newFS FS) error {
 	return fsys.validLink("rename", oldName, newName, newFS)
-}
-
-func (fsys *errFS) Chmod(name string, mode fs.FileMode) error {
-	return fsys.validPath("chmod", name)
 }
 
 func (fsys *errFS) Chtimes(name string, atime, mtime time.Time) error {

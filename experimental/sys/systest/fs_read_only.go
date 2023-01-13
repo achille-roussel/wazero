@@ -159,7 +159,7 @@ var testReadOnlyChmod = append(testDefaultChmod,
 		name: "changing a file permissions fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Chmod("test", 0644) },
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "test", 0644) },
 	},
 )
 

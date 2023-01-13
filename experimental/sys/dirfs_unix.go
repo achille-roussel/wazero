@@ -38,10 +38,6 @@ func (d dirFileFS) rename(oldName, newName string, d2 dirFileFS) error {
 	return renameat(d.fd(), oldName, d2.fd(), newName)
 }
 
-func (d dirFileFS) chmod(name string, mode fs.FileMode) error {
-	return fchmodat(d.fd(), name, uint32(mode), 0)
-}
-
 func (d dirFileFS) truncate(name string, size int64) error {
 	f, err := openat(d.fd(), name, syscall.O_WRONLY, 0)
 	if err != nil {
