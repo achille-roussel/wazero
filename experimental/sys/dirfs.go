@@ -133,10 +133,6 @@ func (fsys *dirFS) Chtimes(name string, atime, mtime time.Time) error {
 	return fsys.do("chtimes", name, func(path string) error { return os.Chtimes(path, atime, mtime) })
 }
 
-func (fsys *dirFS) Truncate(name string, size int64) error {
-	return fsys.do("truncate", name, func(path string) error { return os.Truncate(path, size) })
-}
-
 func (fsys *dirFS) Stat(name string) (info fs.FileInfo, err error) {
 	err = fsys.do("stat", name, func(path string) (err error) {
 		info, err = os.Stat(path)
@@ -511,20 +507,6 @@ func (d dirFileFS) Chtimes(name string, atime, mtime time.Time) (err error) {
 	}
 	if err != nil {
 		err = makePathError("chtimes", name, err)
-	}
-	return err
-}
-
-func (d dirFileFS) Truncate(name string, size int64) (err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		err = d.truncate(name, size)
-	}
-	if err != nil {
-		err = makePathError("truncate", name, err)
 	}
 	return err
 }

@@ -109,7 +109,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "changing file permissions errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Truncate("test", 0)
+			return sys.Truncate(fsys, "test", 0)
 		},
 	})
 

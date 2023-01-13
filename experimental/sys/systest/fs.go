@@ -264,7 +264,7 @@ var testValidateTruncate = fsTestSuite{
 	{
 		name: "truncating a file with and invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Truncate("/", 0) },
+		test: func(fsys sys.FS) error { return sys.Truncate(fsys, "/", 0) },
 	},
 }
 

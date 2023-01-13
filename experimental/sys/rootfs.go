@@ -221,12 +221,6 @@ func (fsys *rootFS) Chtimes(name string, atime, mtime time.Time) error {
 	})
 }
 
-func (fsys *rootFS) Truncate(name string, size int64) error {
-	return lookupFile(fsys.openFile, "truncate", name, O_WRONLY, func(file File) error {
-		return file.Truncate(size)
-	})
-}
-
 func (fsys *rootFS) Stat(name string) (info fs.FileInfo, err error) {
 	return lookupFile1(fsys.openFile, "stat", name, O_RDONLY, File.Stat)
 }
@@ -301,12 +295,6 @@ func (d rootFileFS) Chmod(name string, mode fs.FileMode) error {
 func (d rootFileFS) Chtimes(name string, atime, mtime time.Time) error {
 	return lookupFile(d.openFile, "chtimes", name, O_RDONLY, func(file File) error {
 		return file.Chtimes(atime, mtime)
-	})
-}
-
-func (d rootFileFS) Truncate(name string, size int64) error {
-	return lookupFile(d.openFile, "truncate", name, O_WRONLY, func(file File) error {
-		return file.Truncate(size)
 	})
 }
 

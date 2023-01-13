@@ -46,8 +46,6 @@ type FS interface {
 	Chmod(name string, mode fs.FileMode) error
 	// Changes a file access and modification times.
 	Chtimes(name string, atime, mtime time.Time) error
-	// Changes the size of a file on the file system.
-	Truncate(name string, size int64) error
 }
 
 // File is an interface implemented by files opened by FS instsances.
@@ -164,10 +162,6 @@ func (fsys *errFS) Chmod(name string, mode fs.FileMode) error {
 
 func (fsys *errFS) Chtimes(name string, atime, mtime time.Time) error {
 	return fsys.validPath("chtimes", name)
-}
-
-func (fsys *errFS) Truncate(name string, size int64) error {
-	return fsys.validPath("truncate", name)
 }
 
 func (fsys *errFS) Stat(name string) (fs.FileInfo, error) {
@@ -490,7 +484,7 @@ func Chtimes(fsys FS, name string, atime, mtime time.Time) error {
 // If the name refers to a symbolic link, Truncate dereferences it and modifies
 // the size of the link's target.
 func Truncate(fsys FS, name string, size int64) error {
-	return callFile(fsys, "truncate", name, O_RDONLY, func(file File) error {
+	return callFile(fsys, "truncate", name, O_WRONLY, func(file File) error {
 		return file.Truncate(size)
 	})
 }
