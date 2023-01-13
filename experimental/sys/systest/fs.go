@@ -195,7 +195,7 @@ var testValidateUnlink = fsTestSuite{
 	{
 		name: "unlinking a file with an invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Unlink("/") },
+		test: func(fsys sys.FS) error { return sys.Unlink(fsys, "/") },
 	},
 }
 

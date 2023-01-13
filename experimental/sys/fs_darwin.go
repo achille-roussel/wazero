@@ -107,26 +107,6 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 	return nil
 }
 
-func fstatat(fd int, path string, stat *syscall.Stat_t, flags int) error {
-	p, err := syscall.BytePtrFromString(path)
-	if err != nil {
-		return err
-	}
-	_, _, e := syscall.Syscall6(
-		uintptr(__SYS_FSTATAT64),
-		uintptr(fd),
-		uintptr(unsafe.Pointer(p)),
-		uintptr(unsafe.Pointer(stat)),
-		uintptr(flags),
-		uintptr(0),
-		uintptr(0),
-	)
-	if e != 0 {
-		return e
-	}
-	return nil
-}
-
 func linkat(oldfd int, oldpath string, newfd int, newpath string, flags int) error {
 	p0, err := syscall.BytePtrFromString(oldpath)
 	if err != nil {

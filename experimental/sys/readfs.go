@@ -60,10 +60,6 @@ func (fsys *readOnlyFS) Rmdir(name string) error {
 	return fail("rmdir", name, ErrReadOnly)
 }
 
-func (fsys *readOnlyFS) Unlink(name string) error {
-	return fail("unlink", name, ErrReadOnly)
-}
-
 func (fsys *readOnlyFS) Link(oldName, newName string, newFS FS) error {
 	return fail2("link", oldName, newName, ErrReadOnly)
 }
@@ -243,6 +239,10 @@ func (f *readOnlyFile) Datasync() error {
 	return f.fail("datasync", ErrReadOnly)
 }
 
+func (f *readOnlyFile) Unlink(name string) error {
+	return f.fail("unlink", ErrReadOnly)
+}
+
 func (f *readOnlyFile) fail(op string, err error) error {
 	return f.do(op, func() error { return err })
 }
@@ -279,10 +279,6 @@ func (f readOnlyFileFS) Mkdir(name string, perm fs.FileMode) error {
 
 func (f readOnlyFileFS) Rmdir(name string) error {
 	return fail("rmdir", name, ErrReadOnly)
-}
-
-func (f readOnlyFileFS) Unlink(name string) error {
-	return fail("unlink", name, ErrReadOnly)
 }
 
 func (f readOnlyFileFS) Link(oldName, newName string, newFS FS) error {

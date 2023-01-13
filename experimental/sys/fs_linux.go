@@ -176,26 +176,6 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 	return err
 }
 
-func fstatat(fd int, path string, stat *syscall.Stat_t, flags int) error {
-	p, err := syscall.BytePtrFromString(path)
-	if err != nil {
-		return err
-	}
-	_, _, e := syscall.Syscall6(
-		uintptr(syscall.SYS_NEWFSTATAT),
-		uintptr(fd),
-		uintptr(unsafe.Pointer(p)),
-		uintptr(unsafe.Pointer(stat)),
-		uintptr(flags),
-		uintptr(0),
-		uintptr(0),
-	)
-	if e != 0 {
-		return e
-	}
-	return nil
-}
-
 func (info *fileInfo) ModTime() time.Time {
 	return time.Unix(info.stat.Mtim.Unix())
 }
