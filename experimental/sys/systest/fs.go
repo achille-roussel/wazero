@@ -203,12 +203,12 @@ var testValidateLink = fsTestSuite{
 	{
 		name: "linking a file with an invalid source name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Link("/", "new", fsys) },
+		test: func(fsys sys.FS) error { return sys.Link(fsys, "/", "new") },
 	},
 	{
 		name: "linking a file with an invalid target name fails with ErrInvalid",
 		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Link("old", "/", fsys) },
+		test: func(fsys sys.FS) error { return sys.Link(fsys, "old", "/") },
 	},
 }
 
@@ -216,7 +216,7 @@ var testValidateSymlink = fsTestSuite{
 	{
 		name: "creating a symbolic link with an invalid target name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Symlink("old", "/") },
+		test: func(fsys sys.FS) error { return sys.Symlink(fsys, "old", "/") },
 	},
 }
 
@@ -235,12 +235,12 @@ var testValidateRename = fsTestSuite{
 	{
 		name: "renaming a file with an invalid source name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Rename("/", "new", fsys) },
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "/", "new") },
 	},
 	{
 		name: "renaming a file with an invalid target name fails with ErrInvalid",
 		err:  sys.ErrInvalid,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "/", fsys) },
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "/") },
 	},
 }
 

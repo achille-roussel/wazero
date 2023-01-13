@@ -56,19 +56,11 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		},
 	})
 
-	link := append(testValidateLink, fsTestCase{
-		name: "linking a file errors",
-		err:  want,
-		test: func(fsys sys.FS) error {
-			return fsys.Link("old", "new", fsys)
-		},
-	})
-
 	symlink := append(testValidateSymlink, fsTestCase{
 		name: "creating a symbolic link errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Symlink("old", "new")
+			return sys.Symlink(fsys, "old", "new")
 		},
 	})
 
@@ -81,11 +73,19 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		},
 	})
 
+	link := append(testValidateLink, fsTestCase{
+		name: "linking a file errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			return sys.Link(fsys, "old", "new")
+		},
+	})
+
 	rename := append(testValidateRename, fsTestCase{
 		name: "renaming a file errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Rename("old", "new", fsys)
+			return sys.Rename(fsys, "old", "new")
 		},
 	})
 

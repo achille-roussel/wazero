@@ -59,60 +59,6 @@ func (fsys *dirFS) openRoot() (*dirFile, error) {
 	return fsys.openFile(".", O_DIRECTORY, 0)
 }
 
-func (fsys *dirFS) Link(oldName, newName string, newFS FS) error {
-	return fsys.linkOrRename("link", oldName, newName, newFS, FS.Link)
-}
-
-func (fsys *dirFS) Rename(oldName, newName string, newFS FS) error {
-	return fsys.linkOrRename("rename", oldName, newName, newFS, FS.Rename)
-}
-
-func (fsys *dirFS) linkOrRename(op, oldName, newName string, newFS FS, method linkOrRename) (err error) {
-	switch fsys2 := newFS.(type) {
-	case *dirFS:
-		return fsys.linkOrRenameFS(op, oldName, newName, fsys2, method)
-	case dirFileFS:
-		return fsys.linkOrRenameFile(op, oldName, newName, fsys2, method)
-	default:
-		return makePathError(op, newName, ErrInvalid)
-	}
-}
-
-func (fsys *dirFS) linkOrRenameFS(op, oldName, newName string, fsys2 *dirFS, method linkOrRename) error {
-	if !ValidPath(newName) {
-		return makePathError(op, newName, ErrInvalid)
-	}
-	newRoot, err := fsys2.openRoot()
-	if err != nil {
-		return makePathError(op, newName, err)
-	}
-	defer newRoot.Close()
-	return fsys.linkOrRenameFile(op, oldName, newName, dirFileFS{newRoot}, method)
-}
-
-func (fsys *dirFS) linkOrRenameFile(op, oldName, newName string, fsys2 dirFileFS, method linkOrRename) error {
-	if !ValidPath(oldName) {
-		return makePathError(op, oldName, ErrNotExist)
-	}
-	oldRoot, err := fsys.openRoot()
-	if err != nil {
-		return makePathError(op, oldName, err)
-	}
-	defer oldRoot.Close()
-	return method(dirFileFS{oldRoot}, oldName, newName, fsys2)
-}
-
-func (fsys *dirFS) Symlink(oldName, newName string) error {
-	newPath, err := fsys.join(newName)
-	if err != nil {
-		return makePathError("symlink", newName, ErrNotExist)
-	}
-	if err := os.Symlink(oldName, newPath); err != nil {
-		return makePathError("symlink", oldName, err)
-	}
-	return nil
-}
-
 func (fsys *dirFS) do(op, name string, do func(string) error) error {
 	path, err := fsys.join(name)
 	if err != nil {
@@ -137,6 +83,13 @@ type dirFile struct {
 	fsys *dirFS
 	base *os.File
 	name string
+}
+
+func (f *dirFile) Fd() uintptr {
+	if f.base != nil {
+		return f.base.Fd()
+	}
+	return ^uintptr(0)
 }
 
 func (f *dirFile) Close() (err error) {
@@ -376,6 +329,52 @@ func (f *dirFile) Unlink(name string) (err error) {
 	return err
 }
 
+func (f *dirFile) Symlink(oldName, newName string) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if !ValidPath(newName) {
+		err = ErrNotExist
+	} else {
+		err = f.symlink(oldName, newName)
+	}
+	if err != nil {
+		err = makePathError("symlink", newName, err)
+	}
+	return err
+}
+
+func (f *dirFile) Link(oldName string, newDir Directory, newName string) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if !ValidPath(oldName) {
+		err = ErrNotExist
+	} else if !ValidPath(newName) {
+		err = ErrInvalid
+	} else {
+		err = f.link(oldName, newDir.Fd(), newName)
+	}
+	if err != nil {
+		err = makePathError("link", newName, err)
+	}
+	return err
+}
+
+func (f *dirFile) Rename(oldName string, newDir Directory, newName string) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if !ValidPath(oldName) {
+		err = ErrNotExist
+	} else if !ValidPath(newName) {
+		err = ErrInvalid
+	} else {
+		err = f.rename(oldName, newDir.Fd(), newName)
+	}
+	if err != nil {
+		err = makePathError("rename", newName, err)
+	}
+	return err
+}
+
 func (f *dirFile) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
 }
@@ -400,60 +399,6 @@ func (d dirFileFS) OpenFile(name string, flags int, perm fs.FileMode) (f File, e
 		err = makePathError("open", name, err)
 	}
 	return f, err
-}
-
-func (d dirFileFS) Link(oldName, newName string, newFS FS) (err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if d2, ok := newFS.(dirFileFS); !ok {
-		err = ErrInvalid
-	} else if d2.base == nil {
-		err = ErrInvalid
-	} else if !ValidPath(oldName) {
-		err = ErrNotExist
-	} else if !ValidPath(newName) {
-		err = ErrInvalid
-	} else {
-		err = d.link(oldName, newName, d2)
-	}
-	if err != nil {
-		err = makePathError("link", newName, err)
-	}
-	return err
-}
-
-func (d dirFileFS) Rename(oldName, newName string, newFS FS) (err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if d2, ok := newFS.(dirFileFS); !ok {
-		err = ErrInvalid
-	} else if d2.base == nil {
-		err = ErrInvalid
-	} else if !ValidPath(oldName) {
-		err = ErrNotExist
-	} else if !ValidPath(newName) {
-		err = ErrInvalid
-	} else {
-		err = d.rename(oldName, newName, d2)
-	}
-	if err != nil {
-		err = makePathError("rename", newName, err)
-	}
-	return err
-}
-
-func (d dirFileFS) Symlink(oldName, newName string) (err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if !ValidPath(newName) {
-		err = ErrNotExist
-	} else {
-		err = d.symlink(oldName, newName)
-	}
-	if err != nil {
-		err = makePathError("symlink", newName, err)
-	}
-	return err
 }
 
 var (

@@ -52,41 +52,14 @@ func (fsys *readOnlyFS) openFile(name string, flags int) (*readOnlyFile, error) 
 	return &readOnlyFile{fsys: fsys, base: f, name: name}, nil
 }
 
-func (fsys *readOnlyFS) Link(oldName, newName string, newFS FS) error {
-	return fail2("link", oldName, newName, ErrReadOnly)
-}
-
-func (fsys *readOnlyFS) Rename(oldName, newName string, newFS FS) error {
-	return fail2("rename", oldName, newName, ErrReadOnly)
-}
-
-func (fsys *readOnlyFS) Symlink(oldName, newName string) error {
-	return fail("symlink", newName, ErrReadOnly)
-}
-
-func (fsys *readOnlyFS) fail(op, name string, err error) error {
-	if !ValidPath(name) {
-		err = ErrNotExist
-	}
-	return makePathError(op, name, err)
-}
-
-func (fsys *readOnlyFS) fail2(op, oldName, newName string, err error) error {
-	var name string
-	if !ValidPath(newName) {
-		name, err = newName, ErrInvalid
-	} else if !ValidPath(oldName) {
-		name, err = oldName, ErrNotExist
-	} else {
-		name = newName
-	}
-	return makePathError(op, name, err)
-}
-
 type readOnlyFile struct {
 	fsys *readOnlyFS
 	base fs.File
 	name string
+}
+
+func (f *readOnlyFile) Fd() uintptr {
+	return ^uintptr(0)
 }
 
 func (f *readOnlyFile) Close() (err error) {
@@ -243,6 +216,18 @@ func (f *readOnlyFile) Unlink(name string) error {
 	return f.fail("unlink", ErrReadOnly)
 }
 
+func (f *readOnlyFile) Symlink(oldName, newName string) error {
+	return f.fail("symlink", ErrReadOnly)
+}
+
+func (f *readOnlyFile) Link(oldName string, newDir Directory, newName string) error {
+	return f.fail("link", ErrReadOnly)
+}
+
+func (f *readOnlyFile) Rename(oldName string, newDir Directory, newName string) error {
+	return f.fail("rename", ErrReadOnly)
+}
+
 func (f *readOnlyFile) fail(op string, err error) error {
 	return f.do(op, func() error { return err })
 }
@@ -273,18 +258,6 @@ func (f readOnlyFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File
 	})
 }
 
-func (f readOnlyFileFS) Link(oldName, newName string, newFS FS) error {
-	return fail2("link", oldName, newName, ErrReadOnly)
-}
-
-func (f readOnlyFileFS) Rename(oldName, newName string, newFS FS) error {
-	return fail2("rename", oldName, newName, ErrReadOnly)
-}
-
-func (f readOnlyFileFS) Symlink(oldName, newName string) error {
-	return fail("symlink", newName, ErrReadOnly)
-}
-
 func callFS[Func func(*readOnlyFS, string) (Ret, error), Ret any](f readOnlyFileFS, op, name string, do Func) (ret Ret, err error) {
 	if f.fsys == nil {
 		err = ErrClosed
@@ -297,25 +270,6 @@ func callFS[Func func(*readOnlyFS, string) (Ret, error), Ret any](f readOnlyFile
 		err = makePathError(op, name, err)
 	}
 	return ret, err
-}
-
-func fail(op, name string, err error) error {
-	if !ValidPath(name) {
-		err = ErrNotExist
-	}
-	return makePathError(op, name, err)
-}
-
-func fail2(op, oldName, newName string, err error) error {
-	var name string
-	if !ValidPath(newName) {
-		name, err = newName, ErrInvalid
-	} else if !ValidPath(oldName) {
-		name, err = oldName, ErrNotExist
-	} else {
-		name = newName
-	}
-	return makePathError(op, name, err)
 }
 
 var (
