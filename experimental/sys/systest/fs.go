@@ -123,7 +123,7 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 			if err := test.test(fsys); !errors.Is(err, test.err) {
 				t.Errorf("error mismatch: want=%v got=%v", test.err, err)
 			} else if test.want != nil {
-				if err := sys.EqualFS(test.want, fsys); err != nil {
+				if err := sys.EqualFS(fsys, sys.NewFS(test.want)); err != nil {
 					t.Error(err)
 				}
 			}

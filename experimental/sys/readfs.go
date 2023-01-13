@@ -204,8 +204,16 @@ func (f *readOnlyFile) ReadDir(n int) (files []fs.DirEntry, err error) {
 func (f *readOnlyFile) Readlink() (link string, err error) {
 	if f.base == nil {
 		err = ErrClosed
+	} else if r, ok := f.base.(interface{ Readlink() (string, error) }); ok {
+		link, err = r.Readlink()
+	} else if s, e := f.base.Stat(); e != nil {
+		err = e
+	} else if s.Mode().Type() != fs.ModeSymlink {
+		err = ErrInvalid
+	} else if b, e := io.ReadAll(f.base); e != nil {
+		err = e
 	} else {
-		err = ErrNotImplemented // TODO
+		link = string(b)
 	}
 	if err != nil {
 		err = f.makePathError("readlink", err)

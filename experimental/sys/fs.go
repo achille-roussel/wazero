@@ -2,7 +2,6 @@ package sys
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -186,13 +185,13 @@ func (fsys *errFS) validLink(op, oldName, newName string, newFS FS) error {
 // an error might leave the destination file system with a partially completed
 // copy of the file tree.
 func CopyFS(dst FS, src ReadFS) error {
-	r, err := src.OpenFile(".", O_DIRECTORY, 0)
+	r, err := OpenRoot(src)
 	if err != nil {
 		return fmt.Errorf("opening source file system root: %w", err)
 	}
 	defer r.Close()
 
-	w, err := dst.OpenFile(".", O_DIRECTORY, 0)
+	w, err := OpenRoot(dst)
 	if err != nil {
 		return fmt.Errorf("opening destination file system root: %w", err)
 	}
@@ -242,13 +241,13 @@ func copyDir(dst, src FS, name string, stat fs.FileInfo) error {
 		return err
 	}
 
-	r, err := src.OpenFile(name, O_DIRECTORY, 0)
+	r, err := OpenDir(src, name)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
 
-	w, err := dst.OpenFile(name, O_DIRECTORY, 0)
+	w, err := OpenDir(dst, name)
 	if err != nil {
 		return err
 	}
@@ -309,114 +308,185 @@ func copyFile(dst, src FS, name string, stat fs.FileInfo) error {
 	return w.Chtimes(time, time)
 }
 
+const equalFSBufsize = 8192
+
 // EqualFS compares two file systems, returning nil if they are equal, or an
 // error describing their difference when they are not.
-func EqualFS(a, b fs.FS) error {
-	var buf [8192]byte
-	if err := equalFS(a, b, &buf); err != nil {
+func EqualFS(a, b ReadFS) error {
+	var buf [equalFSBufsize]byte
+
+	source, err := OpenRoot(a)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	target, err := OpenRoot(b)
+	if err != nil {
+		return err
+	}
+	defer target.Close()
+
+	if err := equalFS(source, target, &buf); err != nil {
 		return fmt.Errorf("equalFS(a,b): %w", err)
 	}
-	if err := equalFS(b, a, &buf); err != nil {
+	if err := equalFS(target, source, &buf); err != nil {
 		return fmt.Errorf("equalFS(b,a): %w", err)
 	}
 	return nil
 }
 
-func equalFS(source, target fs.FS, buf *[8192]byte) error {
-	return fs.WalkDir(source, ".", func(path string, d fs.DirEntry, err error) error {
+func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
+	sourceFS := source.FS()
+	targetFS := target.FS()
+
+	for {
+		entries, err := source.ReadDir(100)
+
+		for _, entry := range entries {
+			name := entry.Name()
+			switch entry.Type() {
+			case fs.ModeDir:
+				err = equalDir(sourceFS, targetFS, name, buf)
+			case fs.ModeSymlink:
+				err = equalSymlink(sourceFS, targetFS, name)
+			default:
+				err = equalFile(sourceFS, targetFS, name, buf)
+			}
+		}
+
 		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
 			return err
 		}
-		if path == "." {
-			return nil
+	}
+}
+
+func equalDir(source, target FS, name string, buf *[equalFSBufsize]byte) error {
+	sourceDir, err := OpenDir(source, name)
+	if err != nil {
+		return err
+	}
+	defer sourceDir.Close()
+
+	targetDir, err := OpenDir(target, name)
+	if err != nil {
+		return err
+	}
+	defer targetDir.Close()
+
+	if err := equalStat(sourceDir, targetDir); err != nil {
+		return equalErrorf(name, "%w", err)
+	}
+	return equalFS(sourceDir, targetDir, buf)
+}
+
+func equalSymlink(source, target FS, name string) error {
+	sourceLink, err := Readlink(source, name)
+	if err != nil {
+		return err
+	}
+	targetLink, err := Readlink(target, name)
+	if err != nil {
+		return err
+	}
+	if sourceLink != targetLink {
+		return equalErrorf(name, "symbolic links mimatch: want=%q got=%q", sourceLink, targetLink)
+	}
+	return nil
+}
+
+func equalFile(source, target FS, name string, buf *[equalFSBufsize]byte) error {
+	sourceFile, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	targetFile, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer targetFile.Close()
+
+	if err := equalStat(sourceFile, targetFile); err != nil {
+		return equalErrorf(name, "%w", err)
+	}
+	if err := equalData(sourceFile, targetFile, buf); err != nil {
+		return equalErrorf(name, "%w", err)
+	}
+	return nil
+}
+
+func equalData(source, target File, buf *[equalFSBufsize]byte) error {
+	buf1 := buf[:equalFSBufsize/2]
+	buf2 := buf[equalFSBufsize/2:]
+	for {
+		n1, err1 := source.Read(buf1)
+		n2, err2 := target.Read(buf2)
+		if n1 != n2 {
+			return fmt.Errorf("file read size mismatch: want=%d got=%d", n1, n2)
 		}
 
-		sourceInfo, err := d.Info()
-		if err != nil {
-			return err
+		b1 := buf1[:n1]
+		b2 := buf2[:n2]
+		if !bytes.Equal(b1, b2) {
+			return fmt.Errorf("file content mismatch: want=%q got=%q", b1, b2)
 		}
 
-		if sourceInfo.Mode().Type() == fs.ModeSymlink {
-			// fs.Stat follows symbolic links, but they may be broken.
-			sourceInfo, err = fs.Stat(source, path)
-			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					_, targetErr := fs.Stat(target, path)
-					if errors.Is(targetErr, fs.ErrNotExist) {
-						err = nil
-					}
-				}
-				return err
-			}
+		if err1 != err2 {
+			return fmt.Errorf("file read error mismatch: want=%v got=%v", err1, err2)
 		}
-
-		targetInfo, err := fs.Stat(target, path)
-		if err != nil {
-			return err
+		if err1 != nil {
+			break
 		}
+	}
+	return nil
+}
 
-		sourceMode := sourceInfo.Mode()
-		targetMode := targetInfo.Mode()
-		if sourceMode != targetMode {
-			return pathErrorf("stat", path, "file modes mismatch: want=%s got=%s", sourceMode, targetMode)
-		}
-		if sourceMode.IsDir() {
-			return nil
-		}
+func equalStat(source, target File) error {
+	sourceInfo, err := source.Stat()
+	if err != nil {
+		return err
+	}
 
-		sourceTime := sourceInfo.ModTime()
-		targetTime := targetInfo.ModTime()
-		// Only compare the modification times if both file systems support it,
-		// assuming a zero time means it's not supported.
-		if !sourceTime.IsZero() && !targetTime.IsZero() {
-			if !sourceTime.Equal(targetTime) {
-				return pathErrorf("stat", path, "file times mismatch: want=%v got=%v", sourceTime, targetTime)
-			}
-		}
+	targetInfo, err := target.Stat()
+	if err != nil {
+		return err
+	}
 
-		sourceSize := sourceInfo.Size()
-		targetSize := targetInfo.Size()
-		if sourceSize != targetSize {
-			return pathErrorf("stat", path, "files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
-		}
-
-		sourceFile, err := source.Open(path)
-		if err != nil {
-			return err
-		}
-		defer sourceFile.Close()
-
-		targetFile, err := target.Open(path)
-		if err != nil {
-			return err
-		}
-		defer targetFile.Close()
-
-		buf1 := buf[:4096]
-		buf2 := buf[4096:]
-		for {
-			n1, err1 := sourceFile.Read(buf1)
-			n2, err2 := targetFile.Read(buf2)
-			if n1 != n2 {
-				return pathErrorf("read", path, "file read size mismatch: want=%d got=%d", n1, n2)
-			}
-
-			b1 := buf1[:n1]
-			b2 := buf2[:n2]
-			if !bytes.Equal(b1, b2) {
-				return pathErrorf("read", path, "file content mismatch: want=%q got=%q", b1, b2)
-			}
-
-			if err1 != err2 {
-				return pathErrorf("read", path, "file read error mismatch: want=%v got=%v", err1, err2)
-			}
-			if err1 != nil {
-				break
-			}
-		}
-
+	sourceMode := sourceInfo.Mode()
+	targetMode := targetInfo.Mode()
+	if sourceMode != targetMode {
+		return fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
+	}
+	if sourceMode.IsDir() {
 		return nil
-	})
+	}
+
+	sourceTime := sourceInfo.ModTime()
+	targetTime := targetInfo.ModTime()
+	// Only compare the modification times if both file systems support it,
+	// assuming a zero time means it's not supported.
+	if !sourceTime.IsZero() && !targetTime.IsZero() {
+		if !sourceTime.Equal(targetTime) {
+			return fmt.Errorf("file times mismatch: want=%v got=%v", sourceTime, targetTime)
+		}
+	}
+
+	sourceSize := sourceInfo.Size()
+	targetSize := targetInfo.Size()
+	if sourceSize != targetSize {
+		return fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
+	}
+
+	return nil
+}
+
+func equalErrorf(name, msg string, args ...any) error {
+	return &fs.PathError{Op: "equal", Path: name, Err: fmt.Errorf(msg, args...)}
 }
 
 func call[Func func(FS, string) error, FS any](fsys FS, op, name string, do Func) error {
@@ -441,6 +511,16 @@ func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name st
 type openFileFunc = func(string, int, fs.FileMode) (File, error)
 
 type linkOrRename = func(FS, string, string, FS) error
+
+// OpenDir opens a directory at the given name in fsys.
+func OpenDir(fsys ReadFS, name string) (File, error) {
+	return fsys.OpenFile(name, O_DIRECTORY, 0)
+}
+
+// OpenRoot opens the root directory of fsys.
+func OpenRoot(fsys ReadFS) (File, error) {
+	return OpenDir(fsys, ".")
+}
 
 // Readlink returns the value of the symbolic link at the given name in fsys.
 func Readlink(fsys FS, name string) (string, error) {
@@ -509,17 +589,4 @@ func callFile1[Func func(File) (Ret, error), Ret any](fsys FS, op, name string, 
 	}
 	defer f.Close()
 	return do(f)
-}
-
-func callDir(open openFileFunc, op, name string, do func(FS, string) error) error {
-	if !ValidPath(name) {
-		return makePathError(op, name, ErrNotExist)
-	}
-	dir, base := SplitPath(name)
-	f, err := open(dir, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name, err)
-	}
-	defer f.Close()
-	return do(f.FS(), base)
 }

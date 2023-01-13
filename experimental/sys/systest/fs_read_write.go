@@ -24,7 +24,7 @@ func TestReadWriteFS(t *testing.T, newFS NewFS) {
 		if err := sys.CopyFS(testFS, readFS); err != nil {
 			t.Fatal(err)
 		}
-		if err := sys.EqualFS(testFS, baseFS); err != nil {
+		if err := sys.EqualFS(testFS, readFS); err != nil {
 			t.Fatal(err)
 		}
 		return testFS
@@ -444,7 +444,7 @@ var testReadWriteSymlink = append(testDefaultSymlink,
 		},
 		want: fstest.MapFS{
 			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
-			"target": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+			"target": &fstest.MapFile{Mode: 0755 | fs.ModeDir, Data: []byte("source")},
 		},
 		err:  sys.ErrExist,
 		test: func(fsys sys.FS) error { return fsys.Symlink("source", "target") },
@@ -457,7 +457,7 @@ var testReadWriteSymlink = append(testDefaultSymlink,
 		},
 		want: fstest.MapFS{
 			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
-			"target": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
+			"target": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("source")},
 		},
 		test: func(fsys sys.FS) error { return fsys.Symlink("source", "target") },
 	},
@@ -469,13 +469,13 @@ var testReadWriteSymlink = append(testDefaultSymlink,
 		},
 		want: fstest.MapFS{
 			"source": &fstest.MapFile{Mode: 0644, Data: []byte("2")},
-			"target": &fstest.MapFile{Mode: 0644, Data: []byte("2")},
+			"target": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("source")},
 		},
 		test: func(fsys sys.FS) error {
 			if err := fsys.Symlink("source", "target"); err != nil {
 				return err
 			}
-			return writeFile(fsys, "source", []byte("2"))
+			return writeFile(fsys, "target", []byte("2"))
 		},
 	},
 
@@ -537,7 +537,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 		},
 		want: fstest.MapFS{
 			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
-			"target": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
+			"target": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("./source")},
 		},
 		test: func(fsys sys.FS) error {
 			const source = "./source" // preserve relative location
