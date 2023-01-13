@@ -21,20 +21,6 @@ type FS interface {
 	// is to be created (e.g. because O_CREATE was passed) the perm argument
 	// is used to set the initial permissions on the newly created file.
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
-	// Creates a hard link from oldName to newName. oldName is expressed
-	// relative to the receiver, while newName is expressed relative to newFS.
-	//
-	// The newFS value should either be the same as the receiver, or a FS
-	// instance obtained by calling FS on a File obtained from the receiver.
-	Link(oldName, newName string, newFS FS) error
-	// Moves a file from oldName to newName. oldName is expressed relative to
-	// the receivers, while newName is expressed relative to newFS.
-	//
-	// The newFS value should either be the same as the receiver, or a FS
-	// instance obtained by calling FS on a File obtained from the receiver.
-	Rename(oldName, newName string, newFS FS) error
-	// Creates a symolink link from oldName to newName.
-	Symlink(oldName, newName string) error
 }
 
 // File is an interface implemented by files opened by FS instsances.
@@ -84,6 +70,8 @@ type File interface {
 // The file names passed to methods of the Directory interface must be valid
 // accoring to ValidPath. For all invalid names, the methods return ErrNotExist.
 type Directory interface {
+	// Returns the file system handle for this directory.
+	Fd() uintptr
 	// Reads the list of directory entries (see fs.ReadDirFile).
 	ReadDir(n int) ([]fs.DirEntry, error)
 	// Creates a directory on the file system.
@@ -92,6 +80,14 @@ type Directory interface {
 	Rmdir(name string) error
 	// Removes a file from the file system.
 	Unlink(name string) error
+	// Creates a symolink link from oldName to newName.
+	Symlink(oldName, newName string) error
+	// Creates a hard link from oldName to newName. oldName is expressed
+	// relative to the receiver, while newName is expressed relative to newDir.
+	Link(oldName string, newDir Directory, newName string) error
+	// Moves a file from oldName to newName. oldName is expressed relative to
+	// the receivers, while newName is expressed relative to newDir.
+	Rename(oldName string, newDir Directory, newName string) error
 }
 
 // NewFS constructs a FS from a fs.FS.
@@ -149,47 +145,16 @@ func ErrFS(err error) FS { return &errFS{err: err} }
 
 type errFS struct{ err error }
 
-func (fsys *errFS) Open(name string) (fs.File, error) {
-	return fsys.OpenFile(name, O_RDONLY, 0)
-}
+func (fsys *errFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
 func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return nil, fsys.validPath("open", name)
-}
-
-func (fsys *errFS) Link(oldName, newName string, newFS FS) error {
-	return fsys.validLink("link", oldName, newName, newFS)
-}
-
-func (fsys *errFS) Symlink(oldName, newName string) error {
-	return fsys.validPath("symlink", newName)
-}
-
-func (fsys *errFS) Rename(oldName, newName string, newFS FS) error {
-	return fsys.validLink("rename", oldName, newName, newFS)
-}
-
-func (fsys *errFS) validPath(op, name string) (err error) {
+	var err error
 	if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
 		err = fsys.err
 	}
-	return makePathError(op, name, err)
-}
-
-func (fsys *errFS) validLink(op, oldName, newName string, newFS FS) error {
-	var name string
-	var err error
-	switch {
-	case !ValidPath(oldName):
-		name, err = oldName, ErrNotExist
-	case !ValidPath(newName):
-		name, err = newName, ErrInvalid
-	default:
-		name, err = oldName, fsys.err
-	}
-	return makePathError(op, name, err)
+	return nil, makePathError("open", name, err)
 }
 
 // CopyFS copies the file system src into dst.
@@ -232,7 +197,7 @@ func copyFS(dst, src File) error {
 			case fs.ModeDir:
 				err = copyDir(dst, src, name, stat)
 			case fs.ModeSymlink:
-				err = copySymlink(dstFS, srcFS, name, stat)
+				err = copySymlink(dst, srcFS, name, stat)
 			case 0: // regular file
 				err = copyFile(dstFS, srcFS, name, stat)
 			}
@@ -275,7 +240,7 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	return w.Chtimes(time, time)
 }
 
-func copySymlink(dst, src FS, name string, stat fs.FileInfo) error {
+func copySymlink(dst File, src FS, name string, stat fs.FileInfo) error {
 	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
@@ -291,7 +256,7 @@ func copySymlink(dst, src FS, name string, stat fs.FileInfo) error {
 		return err
 	}
 
-	w, err := dst.OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
+	w, err := dst.FS().OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
@@ -522,8 +487,8 @@ func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name st
 	return ret, err
 }
 
+// TODO: remove
 type openFileFunc = func(string, int, fs.FileMode) (File, error)
-
 type linkOrRename = func(FS, string, string, FS) error
 
 // Open opens a file at the given name in fsys.
@@ -606,27 +571,37 @@ func Lstat(fsys FS, name string) (fs.FileInfo, error) {
 	return callFile1(fsys, "lstat", name, O_RDONLY|O_NOFOLLOW, File.Stat)
 }
 
+// Mkdir creates a directory in fsys with the given name and permissions.
 func Mkdir(fsys FS, name string, perm fs.FileMode) error {
-	return callDir(fsys, "mkdir", name, func(dir File, name string) error {
+	return callDir(fsys, "mkdir", name, func(dir Directory, name string) error {
 		return dir.Mkdir(name, perm)
 	})
 }
 
+// Rmdir removes a directory with the given name from fsys.
 func Rmdir(fsys FS, name string) error {
-	return callDir(fsys, "rmdir", name, File.Rmdir)
+	return callDir(fsys, "rmdir", name, Directory.Rmdir)
 }
 
+// Unlink removes a file with the given name from fsys.
 func Unlink(fsys FS, name string) error {
-	return callDir(fsys, "unlink", name, File.Unlink)
+	return callDir(fsys, "unlink", name, Directory.Unlink)
 }
 
-/*
+// Symlink creates a symbolic like to oldName at newName in fsys.
 func Symlink(fsys FS, oldName, newName string) error {
-	return callDir(fsys, "symlink", newName, func(dir File, newName string) error {
+	return callDir(fsys, "symlink", newName, func(dir Directory, newName string) error {
 		return dir.Symlink(oldName, newName)
 	})
 }
-*/
+
+func Link(fsys FS, oldName, newName string) error {
+	return callDir2(fsys, "link", oldName, newName, Directory.Link)
+}
+
+func Rename(fsys FS, oldName, newName string) error {
+	return callDir2(fsys, "rename", oldName, newName, Directory.Rename)
+}
 
 func callFile(fsys FS, op, name string, flags int, do func(File) error) error {
 	_, err := callFile1(fsys, op, name, flags, func(file File) (struct{}, error) {
@@ -636,6 +611,9 @@ func callFile(fsys FS, op, name string, flags int, do func(File) error) error {
 }
 
 func callFile1[Func func(File) (Ret, error), Ret any](fsys FS, op, name string, flags int, do Func) (ret Ret, err error) {
+	if !ValidPath(name) {
+		return ret, makePathError(op, name, ErrNotExist)
+	}
 	f, err := fsys.OpenFile(name, flags, 0)
 	if err != nil {
 		return ret, makePathError(op, name, err)
@@ -644,12 +622,37 @@ func callFile1[Func func(File) (Ret, error), Ret any](fsys FS, op, name string, 
 	return do(f)
 }
 
-func callDir(fsys FS, op, name string, do func(File, string) error) error {
+func callDir(fsys FS, op, name string, do func(Directory, string) error) error {
+	if !ValidPath(name) {
+		return makePathError(op, name, ErrNotExist)
+	}
 	dir, base := SplitPath(name)
-	f, err := OpenDir(fsys, dir)
+	d, err := OpenDir(fsys, dir)
 	if err != nil {
 		return makePathError(op, name, err)
 	}
-	defer f.Close()
-	return do(f, base)
+	defer d.Close()
+	return do(d, base)
+}
+
+func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
+	if !ValidPath(name1) {
+		return makePathError(op, name1, ErrNotExist)
+	}
+	if !ValidPath(name2) {
+		return makePathError(op, name2, ErrInvalid)
+	}
+	dir1, base1 := SplitPath(name1)
+	dir2, base2 := SplitPath(name2)
+	d1, err := OpenDir(fsys, dir1)
+	if err != nil {
+		return makePathError(op, name1, err)
+	}
+	defer d1.Close()
+	d2, err := OpenDir(fsys, dir2)
+	if err != nil {
+		return makePathError(op, name2, err)
+	}
+	defer d2.Close()
+	return do(d1, base1, d2, base2)
 }

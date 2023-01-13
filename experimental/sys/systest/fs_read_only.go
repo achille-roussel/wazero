@@ -131,7 +131,7 @@ var testReadOnlyLink = append(testDefaultLink,
 		name: "linking a file fails with ErrReadOnly",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Link("old", "new", fsys) },
+		test: func(fsys sys.FS) error { return sys.Link(fsys, "old", "new") },
 	},
 )
 
@@ -140,7 +140,7 @@ var testReadOnlySymlink = append(testDefaultSymlink,
 		name: "creating a symbolic link fails with ErrReadOnly",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Symlink("old", "new") },
+		test: func(fsys sys.FS) error { return sys.Symlink(fsys, "old", "new") },
 	},
 )
 
@@ -151,7 +151,7 @@ var testReadOnlyRename = append(testDefaultRename,
 		name: "renaming a file fails with ErrReadOnly",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Rename("old", "new", fsys) },
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "new") },
 	},
 )
 
