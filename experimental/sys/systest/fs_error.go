@@ -44,7 +44,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "removing a directory errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Rmdir("test")
+			return sys.Rmdir(fsys, "test")
 		},
 	})
 

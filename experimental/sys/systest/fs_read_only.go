@@ -113,7 +113,7 @@ var testReadOnlyRmdir = append(testDefaultRmdir,
 		name: "removing a directory fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Rmdir("test") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "test") },
 	},
 )
 

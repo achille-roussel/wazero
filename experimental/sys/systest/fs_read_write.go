@@ -205,7 +205,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 	fsTestCase{
 		name: "removing a directory at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
-		test: testLoop(func(fsys sys.FS, path string) error { return fsys.Rmdir(path + "/test") }),
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Rmdir(fsys, path+"/test") }),
 	},
 
 	fsTestCase{
@@ -213,7 +213,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Rmdir("nope") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "nope") },
 	},
 
 	fsTestCase{
@@ -221,7 +221,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotDirectory,
-		test: func(fsys sys.FS) error { return fsys.Rmdir("test") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "test") },
 	},
 
 	fsTestCase{
@@ -235,7 +235,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 			"dir/file": &fstest.MapFile{Mode: 0644},
 		},
 		err:  sys.ErrNotEmpty,
-		test: func(fsys sys.FS) error { return fsys.Rmdir("dir") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "dir") },
 	},
 
 	fsTestCase{
@@ -249,7 +249,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 			"dir-1": &fstest.MapFile{Mode: 0700 | fs.ModeDir},
 			"dir-3": &fstest.MapFile{Mode: 0700 | fs.ModeDir},
 		},
-		test: func(fsys sys.FS) error { return fsys.Rmdir("dir-2") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "dir-2") },
 	},
 
 	fsTestCase{
@@ -261,7 +261,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 		want: fstest.MapFS{
 			"top": &fstest.MapFile{Mode: 0700 | fs.ModeDir},
 		},
-		test: func(fsys sys.FS) error { return fsys.Rmdir("top/sub") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "top/sub") },
 	},
 )
 

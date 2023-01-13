@@ -187,7 +187,7 @@ var testValidateRmdir = fsTestSuite{
 	{
 		name: "removing a directory with an invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Rmdir("/") },
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "/") },
 	},
 }
 
