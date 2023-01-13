@@ -125,14 +125,6 @@ func (fsys *dirFS) Symlink(oldName, newName string) error {
 	return nil
 }
 
-func (fsys *dirFS) Readlink(name string) (link string, err error) {
-	err = fsys.do("readlink", name, func(path string) (err error) {
-		link, err = os.Readlink(path)
-		return
-	})
-	return link, err
-}
-
 func (fsys *dirFS) Chmod(name string, perm fs.FileMode) error {
 	return fsys.do("chmod", name, func(path string) error { return os.Chmod(path, perm) })
 }
@@ -493,20 +485,6 @@ func (d dirFileFS) Symlink(oldName, newName string) (err error) {
 		err = makePathError("symlink", newName, err)
 	}
 	return err
-}
-
-func (d dirFileFS) Readlink(name string) (link string, err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		link, err = d.readlink(name)
-	}
-	if err != nil {
-		err = makePathError("readlink", name, err)
-	}
-	return link, err
 }
 
 func (d dirFileFS) Chmod(name string, perm fs.FileMode) (err error) {

@@ -492,7 +492,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 		name: "reading a link at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
 		test: testLoop(func(fsys sys.FS, path string) error {
-			_, err := fsys.Readlink(path + "/test")
+			_, err := sys.Readlink(fsys, path+"/test")
 			return err
 		}),
 	},
@@ -503,7 +503,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Readlink("nope")
+			_, err := sys.Readlink(fsys, "nope")
 			return err
 		},
 	},
@@ -514,7 +514,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrInvalid,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Readlink("test")
+			_, err := sys.Readlink(fsys, "test")
 			return err
 		},
 	},
@@ -525,7 +525,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
 		err:  sys.ErrInvalid,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Readlink("test")
+			_, err := sys.Readlink(fsys, "test")
 			return err
 		},
 	},
@@ -545,7 +545,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 			if err := fsys.Symlink(source, target); err != nil {
 				return err
 			}
-			s, err := fsys.Readlink(target)
+			s, err := sys.Readlink(fsys, target)
 			if err != nil {
 				return err
 			}

@@ -37,10 +37,6 @@ func (layers layerFS) Stat(name string) (fs.FileInfo, error) {
 	return layerFSLookup(layers, "stat", name, ReadFS.Stat)
 }
 
-func (layers layerFS) Readlink(name string) (string, error) {
-	return layerFSLookup(layers, "readlink", name, ReadFS.Readlink)
-}
-
 func layerFSLookup[F func(ReadFS, string) (R, error), R any](layers layerFS, op, name string, do F) (ret R, err error) {
 	for _, layer := range layers {
 		v, err := do(layer, name)
