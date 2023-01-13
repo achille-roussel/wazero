@@ -31,17 +31,17 @@ func (fsys *dirFS) Open(name string) (fs.File, error) {
 func (fsys *dirFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	f, err := fsys.openFile(name, flags, perm)
 	if err != nil {
-		return nil, makePathError("open", name, err)
+		return nil, err
 	}
 	return f, nil
 }
 
 func (fsys *dirFS) openFile(name string, flags int, perm fs.FileMode) (*dirFile, error) {
-	path, err := fsys.join(name)
-	if err != nil {
-		return nil, err
-	}
-	f, err := openFile(path, flags, perm)
+	var f *os.File
+	err := fsys.do("open", name, func(path string) (err error) {
+		f, err = openFile(path, flags, perm)
+		return
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -60,116 +60,58 @@ func (fsys *dirFS) openRoot() (*dirFile, error) {
 }
 
 func (fsys *dirFS) Mkdir(name string, perm fs.FileMode) error {
-	path, err := fsys.join(name)
-	if err != nil {
-		return makePathError("mkdir", name, err)
-	}
-	if err := os.Mkdir(path, perm); err != nil {
-		return makePathError("mkdir", name, err)
-	}
-	return nil
+	return fsys.do("mkdir", name, func(path string) error { return os.Mkdir(path, perm) })
 }
 
 func (fsys *dirFS) Rmdir(name string) error {
-	path, err := fsys.join(name)
-	if err != nil {
-		return makePathError("rmdir", name, err)
-	}
-	if err := rmdir(path); err != nil {
-		return makePathError("rmdir", name, err)
-	}
-	return nil
+	return fsys.do("rmdir", name, rmdir)
 }
 
 func (fsys *dirFS) Unlink(name string) error {
-	path, err := fsys.join(name)
-	if err != nil {
-		return makePathError("unlink", name, err)
-	}
-	if err := unlink(path); err != nil {
-		return makePathError("unlink", name, err)
-	}
-	return nil
+	return fsys.do("unlink", name, unlink)
 }
 
-func (fsys *dirFS) Link(oldName, newName string, newFS FS) (err error) {
-	var name string
+func (fsys *dirFS) Link(oldName, newName string, newFS FS) error {
+	return fsys.linkOrRename("link", oldName, newName, newFS, FS.Link)
+}
+
+func (fsys *dirFS) Rename(oldName, newName string, newFS FS) error {
+	return fsys.linkOrRename("rename", oldName, newName, newFS, FS.Rename)
+}
+
+func (fsys *dirFS) linkOrRename(op, oldName, newName string, newFS FS, method linkOrRename) (err error) {
 	switch fsys2 := newFS.(type) {
 	case *dirFS:
-		name, err = fsys.linkFS(oldName, newName, fsys2)
+		return fsys.linkOrRenameFS(op, oldName, newName, fsys2, method)
 	case dirFileFS:
-		name, err = fsys.linkFile(oldName, newName, fsys2)
+		return fsys.linkOrRenameFile(op, oldName, newName, fsys2, method)
 	default:
-		name, err = oldName, ErrInvalid
+		return makePathError(op, newName, ErrInvalid)
 	}
-	if err != nil {
-		err = makePathError("link", name, err)
-	}
-	return err
 }
 
-func (fsys *dirFS) linkFS(oldName, newName string, fsys2 *dirFS) (string, error) {
+func (fsys *dirFS) linkOrRenameFS(op, oldName, newName string, fsys2 *dirFS, method linkOrRename) error {
 	if !ValidPath(newName) {
-		return newName, ErrInvalid
+		return makePathError(op, newName, ErrInvalid)
 	}
 	newRoot, err := fsys2.openRoot()
 	if err != nil {
-		return newName, err
+		return makePathError(op, newName, err)
 	}
 	defer newRoot.Close()
-	return fsys.linkFile(oldName, newName, dirFileFS{newRoot})
+	return fsys.linkOrRenameFile(op, oldName, newName, dirFileFS{newRoot}, method)
 }
 
-func (fsys *dirFS) linkFile(oldName, newName string, fsys2 dirFileFS) (string, error) {
+func (fsys *dirFS) linkOrRenameFile(op, oldName, newName string, fsys2 dirFileFS, method linkOrRename) error {
 	if !ValidPath(oldName) {
-		return oldName, ErrNotExist
+		return makePathError(op, oldName, ErrNotExist)
 	}
 	oldRoot, err := fsys.openRoot()
 	if err != nil {
-		return oldName, err
+		return makePathError(op, oldName, err)
 	}
 	defer oldRoot.Close()
-	return newName, dirFileFS{oldRoot}.link(oldName, newName, fsys2)
-}
-
-func (fsys *dirFS) Rename(oldName, newName string, newFS FS) (err error) {
-	var name string
-	switch fsys2 := newFS.(type) {
-	case *dirFS:
-		name, err = fsys.renameFS(oldName, newName, fsys2)
-	case dirFileFS:
-		name, err = fsys.renameFile(oldName, newName, fsys2)
-	default:
-		name, err = oldName, ErrInvalid
-	}
-	if err != nil {
-		err = makePathError("rename", name, err)
-	}
-	return err
-}
-
-func (fsys *dirFS) renameFS(oldName, newName string, fsys2 *dirFS) (string, error) {
-	if !ValidPath(newName) {
-		return newName, ErrInvalid
-	}
-	newRoot, err := fsys2.openRoot()
-	if err != nil {
-		return newName, err
-	}
-	defer newRoot.Close()
-	return fsys.renameFile(oldName, newName, dirFileFS{newRoot})
-}
-
-func (fsys *dirFS) renameFile(oldName, newName string, fsys2 dirFileFS) (string, error) {
-	if !ValidPath(oldName) {
-		return oldName, ErrNotExist
-	}
-	oldRoot, err := fsys.openRoot()
-	if err != nil {
-		return oldName, err
-	}
-	defer oldRoot.Close()
-	return newName, dirFileFS{oldRoot}.rename(oldName, newName, fsys2)
+	return method(dirFileFS{oldRoot}, oldName, newName, fsys2)
 }
 
 func (fsys *dirFS) Symlink(oldName, newName string) error {
@@ -183,61 +125,43 @@ func (fsys *dirFS) Symlink(oldName, newName string) error {
 	return nil
 }
 
-func (fsys *dirFS) Readlink(name string) (string, error) {
-	path, err := fsys.join(name)
-	if err != nil {
-		return "", makePathError("readlink", name, err)
-	}
-	link, err := os.Readlink(path)
-	if err != nil {
-		return "", makePathError("readlink", name, err)
-	}
-	return link, nil
+func (fsys *dirFS) Readlink(name string) (link string, err error) {
+	err = fsys.do("readlink", name, func(path string) (err error) {
+		link, err = os.Readlink(path)
+		return
+	})
+	return link, err
 }
 
-func (fsys *dirFS) Chmod(name string, mode fs.FileMode) error {
-	path, err := fsys.join(name)
-	if err != nil {
-		return makePathError("chmod", name, err)
-	}
-	if err := os.Chmod(path, mode); err != nil {
-		return makePathError("chmod", name, err)
-	}
-	return nil
+func (fsys *dirFS) Chmod(name string, perm fs.FileMode) error {
+	return fsys.do("chmod", name, func(path string) error { return os.Chmod(path, perm) })
 }
 
 func (fsys *dirFS) Chtimes(name string, atime, mtime time.Time) error {
-	path, err := fsys.join(name)
-	if err != nil {
-		return makePathError("chtimes", name, err)
-	}
-	if err := os.Chtimes(path, atime, mtime); err != nil {
-		return makePathError("chtimes", name, err)
-	}
-	return nil
+	return fsys.do("chtimes", name, func(path string) error { return os.Chtimes(path, atime, mtime) })
 }
 
 func (fsys *dirFS) Truncate(name string, size int64) error {
-	path, err := fsys.join(name)
-	if err != nil {
-		return makePathError("truncate", name, err)
-	}
-	if err := os.Truncate(path, size); err != nil {
-		return makePathError("truncate", name, err)
-	}
-	return nil
+	return fsys.do("truncate", name, func(path string) error { return os.Truncate(path, size) })
 }
 
-func (fsys *dirFS) Stat(name string) (fs.FileInfo, error) {
+func (fsys *dirFS) Stat(name string) (info fs.FileInfo, err error) {
+	err = fsys.do("stat", name, func(path string) (err error) {
+		info, err = os.Stat(path)
+		return
+	})
+	return info, err
+}
+
+func (fsys *dirFS) do(op, name string, do func(string) error) error {
 	path, err := fsys.join(name)
 	if err != nil {
-		return nil, makePathError("stat", name, err)
+		return makePathError(op, name, err)
 	}
-	stat, err := os.Stat(path)
-	if err != nil {
-		return nil, makePathError("stat", name, err)
+	if err := do(path); err != nil {
+		return makePathError(op, name, err)
 	}
-	return stat, nil
+	return nil
 }
 
 func (fsys *dirFS) join(name string) (string, error) {
@@ -388,11 +312,11 @@ func (f *dirFile) Readlink() (link string, err error) {
 	return link, err
 }
 
-func (f *dirFile) Chmod(mode fs.FileMode) (err error) {
+func (f *dirFile) Chmod(perm fs.FileMode) (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		err = f.base.Chmod(mode)
+		err = f.base.Chmod(perm)
 	}
 	if err != nil {
 		err = f.makePathError("chmod", err)
@@ -584,13 +508,13 @@ func (d dirFileFS) Readlink(name string) (link string, err error) {
 	return link, err
 }
 
-func (d dirFileFS) Chmod(name string, mode fs.FileMode) (err error) {
+func (d dirFileFS) Chmod(name string, perm fs.FileMode) (err error) {
 	if d.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(name) {
 		err = ErrNotExist
 	} else {
-		err = d.chmod(name, mode)
+		err = d.chmod(name, perm)
 	}
 	if err != nil {
 		err = makePathError("chmod", name, err)

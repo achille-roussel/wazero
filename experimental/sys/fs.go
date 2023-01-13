@@ -87,6 +87,8 @@ type File interface {
 	FS() FS
 }
 
+type linkOrRename = func(FS, string, string, FS) error
+
 // NewFS constructs a FS from a fs.FS.
 //
 // The returned file system is read-only, all attempts to open files in write
@@ -146,34 +148,26 @@ func (fsys *fsFS) Stat(name string) (fs.FileInfo, error) {
 }
 
 func (fsys *fsFS) Link(oldName, newName string, newFS FS) error {
-	switch fsys2 := newFS.(type) {
-	case *fsFS:
-		return fsys.errFS.Link(oldName, newName, &fsys2.errFS)
-	case fsFileFS:
-		f, err := fsys.openFile(".", O_DIRECTORY, 0)
-		if err != nil {
-			return makePathError("link", oldName, err)
-		}
-		defer f.Close()
-		return fsFileFS{f}.Link(oldName, newName, fsys2)
-	default:
-		return makePathError("link", newName, ErrInvalid)
-	}
+	return fsys.linkOrRename("link", oldName, newName, newFS, FS.Link)
 }
 
 func (fsys *fsFS) Rename(oldName, newName string, newFS FS) error {
+	return fsys.linkOrRename("rename", oldName, newName, newFS, FS.Rename)
+}
+
+func (fsys *fsFS) linkOrRename(op, oldName, newName string, newFS FS, method linkOrRename) error {
 	switch fsys2 := newFS.(type) {
 	case *fsFS:
-		return fsys.errFS.Link(oldName, newName, &fsys2.errFS)
+		return method(&fsys.errFS, oldName, newName, &fsys2.errFS)
 	case fsFileFS:
 		f, err := fsys.openFile(".", O_DIRECTORY, 0)
 		if err != nil {
-			return makePathError("rename", oldName, err)
+			return makePathError(op, oldName, err)
 		}
 		defer f.Close()
-		return fsFileFS{f}.Rename(oldName, newName, fsys2)
+		return method(fsFileFS{f}, oldName, newName, fsys2)
 	default:
-		return makePathError("rename", newName, ErrInvalid)
+		return makePathError(op, newName, ErrInvalid)
 	}
 }
 
@@ -418,39 +412,27 @@ func (f fsFileFS) Unlink(name string) error {
 }
 
 func (f fsFileFS) Link(oldName, newName string, newFS FS) error {
-	oldName, err := f.join("link", oldName)
-	if err != nil {
-		return err
-	}
-	switch g := newFS.(type) {
-	case fsFileFS:
-		newName, err = g.join("link", newName)
-		if err != nil {
-			return ErrInvalid
-		}
-		newFS = g.fsys
-	default:
-		return makePathError("link", newName, ErrInvalid)
-	}
-	return f.fsys.Link(oldName, newName, newFS)
+	return f.linkOrRename("link", oldName, newName, newFS, FS.Link)
 }
 
 func (f fsFileFS) Rename(oldName, newName string, newFS FS) error {
-	oldName, err := f.join("rename", oldName)
+	return f.linkOrRename("rename", oldName, newName, newFS, FS.Rename)
+}
+
+func (f fsFileFS) linkOrRename(op, oldName, newName string, newFS FS, method func(FS, string, string, FS) error) error {
+	oldPath, err := f.join(op, oldName)
 	if err != nil {
 		return err
 	}
-	switch g := newFS.(type) {
-	case fsFileFS:
-		newName, err = g.join("rename", newName)
-		if err != nil {
-			return ErrInvalid
-		}
-		newFS = g.fsys
-	default:
-		return ErrInvalid
+	f2, ok := newFS.(fsFileFS)
+	if !ok {
+		return makePathError(op, newName, ErrInvalid)
 	}
-	return f.fsys.Rename(oldName, newName, newFS)
+	newPath, err := f2.join(op, newName)
+	if err != nil {
+		return makePathError(op, newName, ErrInvalid)
+	}
+	return method(f.fsys, oldPath, newPath, f2.fsys)
 }
 
 func (f fsFileFS) Symlink(oldName, newName string) error {
