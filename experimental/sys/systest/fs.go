@@ -225,7 +225,7 @@ var testValidateReadlink = fsTestSuite{
 		name: "reading a symbolic link with an invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Readlink("/")
+			_, err := sys.Readlink(fsys, "/")
 			return err
 		},
 	},

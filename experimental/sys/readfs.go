@@ -12,7 +12,6 @@ import (
 type ReadFS interface {
 	fs.StatFS
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
-	Readlink(name string) (string, error)
 }
 
 // ReadOnlyFS constructs a FS from a ReadFS. The returned file system supports
@@ -51,10 +50,6 @@ func (fsys *readOnlyFS) openFile(name string, flags int) (*readOnlyFile, error) 
 		return r, nil
 	}
 	return &readOnlyFile{fsys: fsys, base: f, name: name}, nil
-}
-
-func (fsys *readOnlyFS) Readlink(name string) (link string, err error) {
-	return call1(fsys.base, "readlink", name, ReadFS.Readlink)
 }
 
 func (fsys *readOnlyFS) Stat(name string) (info fs.FileInfo, err error) {
@@ -228,7 +223,7 @@ func (f *readOnlyFile) Readlink() (link string, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		link, err = f.fsys.Readlink(f.name)
+		err = ErrNotImplemented // TODO
 	}
 	if err != nil {
 		err = f.makePathError("readlink", err)
@@ -290,10 +285,6 @@ func (f readOnlyFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File
 	return callFS(f, "open", name, func(fsys *readOnlyFS, path string) (File, error) {
 		return fsys.OpenFile(path, flags, perm)
 	})
-}
-
-func (f readOnlyFileFS) Readlink(name string) (link string, err error) {
-	return callFS(f, "readlink", name, (*readOnlyFS).Readlink)
 }
 
 func (f readOnlyFileFS) Stat(name string) (info fs.FileInfo, err error) {

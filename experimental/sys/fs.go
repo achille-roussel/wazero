@@ -42,8 +42,6 @@ type FS interface {
 	Rename(oldName, newName string, newFS FS) error
 	// Creates a symolink link from oldName to newName.
 	Symlink(oldName, newName string) error
-	// Reads the value of the given symbolic link.
-	Readlink(name string) (string, error)
 	// Changes a file permissions on the file system.
 	Chmod(name string, mode fs.FileMode) error
 	// Changes a file access and modification times.
@@ -123,10 +121,6 @@ func (fsys fsFS) Stat(name string) (fs.FileInfo, error) {
 	return call1(fsys.base, "stat", name, fs.Stat)
 }
 
-func (fsys fsFS) Readlink(name string) (string, error) {
-	return "", makePathError("readlink", name, ErrNotSupported)
-}
-
 // ErrFS returns a FS which errors with err on all its method calls.
 func ErrFS(err error) FS { return &errFS{err: err} }
 
@@ -158,10 +152,6 @@ func (fsys *errFS) Link(oldName, newName string, newFS FS) error {
 
 func (fsys *errFS) Symlink(oldName, newName string) error {
 	return fsys.validPath("symlink", newName)
-}
-
-func (fsys *errFS) Readlink(name string) (string, error) {
-	return "", fsys.validPath("readlink", name)
 }
 
 func (fsys *errFS) Rename(oldName, newName string, newFS FS) error {
@@ -469,3 +459,85 @@ func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name st
 type openFileFunc = func(string, int, fs.FileMode) (File, error)
 
 type linkOrRename = func(FS, string, string, FS) error
+
+// Readlink returns the value of the symbolic link at the given name in fsys.
+func Readlink(fsys FS, name string) (string, error) {
+	return callFile1(fsys, "readlink", name, O_RDONLY|O_NOFOLLOW, File.Readlink)
+}
+
+// Chmod changes permissions of a file at the given name in fsys.
+//
+// If the name refers to a symbolic link, Chmod dereferences it and modifies the
+// permissions of the link's target.
+func Chmod(fsys FS, name string, mode fs.FileMode) error {
+	return callFile(fsys, "chmod", name, O_RDONLY, func(file File) error {
+		return file.Chmod(mode)
+	})
+}
+
+// Chtimes changes times of a file at the given name in fsys.
+//
+// If the name refers to a symbolic link, Chtimes dereferences it and modifies the
+// times of the link's target.
+func Chtimes(fsys FS, name string, atime, mtime time.Time) error {
+	return callFile(fsys, "chtimes", name, O_RDONLY, func(file File) error {
+		return file.Chtimes(atime, mtime)
+	})
+}
+
+// Truncate truncates to a specified size the file at the given name in fsys.
+//
+// If the name refers to a symbolic link, Truncate dereferences it and modifies
+// the size of the link's target.
+func Truncate(fsys FS, name string, size int64) error {
+	return callFile(fsys, "truncate", name, O_RDONLY, func(file File) error {
+		return file.Truncate(size)
+	})
+}
+
+// Stat returns file information for the file with the given name in fsys.
+//
+// If the name refers to a symbolic link, Stat dereferences it returns
+// information about the link's target.
+func Stat(fsys FS, name string) (fs.FileInfo, error) {
+	return callFile1(fsys, "stat", name, O_RDONLY, File.Stat)
+}
+
+// Lstat returns file information for the file with the given name in fsys.
+//
+// If the name refers to a symbolic link, Lstat returns information about the
+// link, and not its target.
+func Lstat(fsys FS, name string) (fs.FileInfo, error) {
+	return callFile1(fsys, "lstat", name, O_RDONLY|O_NOFOLLOW, File.Stat)
+}
+
+// TODO: rename these to lookup* after rootfs is simplified
+
+func callFile(fsys FS, op, name string, flags int, do func(File) error) error {
+	_, err := callFile1(fsys, op, name, flags, func(file File) (struct{}, error) {
+		return struct{}{}, do(file)
+	})
+	return err
+}
+
+func callFile1[Func func(File) (Ret, error), Ret any](fsys FS, op, name string, flags int, do Func) (ret Ret, err error) {
+	f, err := fsys.OpenFile(name, flags, 0)
+	if err != nil {
+		return ret, makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f)
+}
+
+func callDir(open openFileFunc, op, name string, do func(FS, string) error) error {
+	if !ValidPath(name) {
+		return makePathError(op, name, ErrNotExist)
+	}
+	dir, base := SplitPath(name)
+	f, err := open(dir, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f.FS(), base)
+}

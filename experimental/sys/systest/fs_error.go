@@ -76,7 +76,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "reading a symbolic link errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Readlink("test")
+			_, err := sys.Readlink(fsys, "test")
 			return err
 		},
 	})
