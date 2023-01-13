@@ -209,12 +209,6 @@ func (fsys *rootFS) Readlink(name string) (link string, err error) {
 	return lookupFile1(fsys.openFile, "readlink", name, rootfsReadlinkFlags, File.Readlink)
 }
 
-func (fsys *rootFS) Chmod(name string, mode fs.FileMode) error {
-	return lookupFile(fsys.openFile, "chmod", name, O_RDONLY, func(file File) error {
-		return file.Chmod(mode)
-	})
-}
-
 func (fsys *rootFS) Chtimes(name string, atime, mtime time.Time) error {
 	return lookupFile(fsys.openFile, "chtimes", name, O_RDONLY, func(file File) error {
 		return file.Chtimes(atime, mtime)
@@ -284,12 +278,6 @@ func (d rootFileFS) Symlink(oldName, newName string) error {
 
 func (d rootFileFS) Readlink(name string) (string, error) {
 	return lookupFile1(d.openFile, "readlink", name, rootfsReadlinkFlags, File.Readlink)
-}
-
-func (d rootFileFS) Chmod(name string, mode fs.FileMode) error {
-	return lookupFile(d.openFile, "chmod", name, O_RDONLY, func(file File) error {
-		return file.Chmod(mode)
-	})
 }
 
 func (d rootFileFS) Chtimes(name string, atime, mtime time.Time) error {

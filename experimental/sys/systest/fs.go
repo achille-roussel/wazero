@@ -248,7 +248,7 @@ var testValidateChmod = fsTestSuite{
 	{
 		name: "changing permissions of a file with and invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Chmod("/", 0644) },
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "/", 0644) },
 	},
 }
 

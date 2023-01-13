@@ -176,10 +176,6 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 	return err
 }
 
-func fchmodat(fd int, path string, mode uint32, flags int) error {
-	return syscall.Fchmodat(fd, path, mode, flags)
-}
-
 func fstatat(fd int, path string, stat *syscall.Stat_t, flags int) error {
 	p, err := syscall.BytePtrFromString(path)
 	if err != nil {

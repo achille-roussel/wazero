@@ -640,7 +640,7 @@ var testReadWriteChmod = append(testDefaultChmod,
 	fsTestCase{
 		name: "changing file permissions at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
-		test: testLoop(func(fsys sys.FS, path string) error { return fsys.Chmod(path+"/test", 0600) }),
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Chmod(fsys, path+"/test", 0600) }),
 	},
 
 	fsTestCase{
@@ -648,14 +648,14 @@ var testReadWriteChmod = append(testDefaultChmod,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Chmod("nope", 0) },
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "nope", 0) },
 	},
 
 	fsTestCase{
 		name: "chaging file permissions of an existing file",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0600}},
-		test: func(fsys sys.FS) error { return fsys.Chmod("test", 0600) },
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "test", 0600) },
 	},
 )
 
