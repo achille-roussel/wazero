@@ -1,6 +1,9 @@
 package sys
 
-import "io/fs"
+import (
+	"errors"
+	"io/fs"
+)
 
 // LayerFS construcst a read-only file system exposing a stacked view of
 // other file systems.
@@ -33,21 +36,15 @@ func (layers layerFS) Readlink(name string) (string, error) {
 }
 
 func layerFSLookup[F func(ReadFS, string) (R, error), R any](layers layerFS, op, name string, do F) (ret R, err error) {
-	var lastErr error
-
 	for _, layer := range layers {
 		v, err := do(layer, name)
 		if err != nil {
-			lastErr = err
+			if !errors.Is(err, ErrNotExist) {
+				return ret, err
+			}
 		} else {
 			return v, nil
 		}
 	}
-
-	if lastErr != nil {
-		err = lastErr
-	} else {
-		err = makePathError(op, name, ErrNotImplemented)
-	}
-	return
+	return ret, makePathError(op, name, ErrNotExist)
 }
