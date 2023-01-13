@@ -2,7 +2,6 @@ package sys
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"syscall"
 )
@@ -41,8 +40,4 @@ func makePathError(op, name string, err error) error {
 	}
 
 	return &fs.PathError{Op: op, Path: name, Err: err}
-}
-
-func pathErrorf(op, name, msg string, args ...interface{}) error {
-	return &fs.PathError{Op: op, Path: name, Err: fmt.Errorf(msg, args...)}
 }
