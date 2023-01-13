@@ -28,10 +28,10 @@ func TestDirFS_ReadWrite(t *testing.T) {
 func TestDirFS_RootFile(t *testing.T) {
 	systest.TestReadWriteFS(t, func(t *testing.T) sys.FS {
 		testFS := sys.DirFS(t.TempDir())
-		if err := testFS.Mkdir("tmp", 0755); err != nil {
+		if err := sys.Mkdir(testFS, "tmp", 0755); err != nil {
 			t.Fatal(err)
 		}
-		f, err := testFS.OpenFile("tmp", sys.O_DIRECTORY, 0)
+		f, err := sys.OpenDir(testFS, "tmp")
 		if err != nil {
 			t.Fatal(err)
 		}

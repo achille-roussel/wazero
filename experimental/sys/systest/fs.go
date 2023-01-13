@@ -179,7 +179,7 @@ var testValidateMkdir = fsTestSuite{
 	{
 		name: "creating a directory with an invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Mkdir("/", 0755) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "/", 0755) },
 	},
 }
 

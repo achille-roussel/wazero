@@ -21,8 +21,6 @@ type FS interface {
 	// is to be created (e.g. because O_CREATE was passed) the perm argument
 	// is used to set the initial permissions on the newly created file.
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
-	// Creates a directory on the file system.
-	Mkdir(name string, perm fs.FileMode) error
 	// Creates a hard link from oldName to newName. oldName is expressed
 	// relative to the receiver, while newName is expressed relative to newFS.
 	//
@@ -88,6 +86,8 @@ type File interface {
 type Directory interface {
 	// Reads the list of directory entries (see fs.ReadDirFile).
 	ReadDir(n int) ([]fs.DirEntry, error)
+	// Creates a directory on the file system.
+	Mkdir(name string, perm fs.FileMode) error
 	// Removes a directory from the file system.
 	Rmdir(name string) error
 	// Removes a file from the file system.
@@ -155,10 +155,6 @@ func (fsys *errFS) Open(name string) (fs.File, error) {
 
 func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	return nil, fsys.validPath("open", name)
-}
-
-func (fsys *errFS) Mkdir(name string, perm fs.FileMode) error {
-	return fsys.validPath("mkdir", name)
 }
 
 func (fsys *errFS) Link(oldName, newName string, newFS FS) error {
@@ -234,7 +230,7 @@ func copyFS(dst, src File) error {
 			name := entry.Name()
 			switch entry.Type() {
 			case fs.ModeDir:
-				err = copyDir(dstFS, srcFS, name, stat)
+				err = copyDir(dst, src, name, stat)
 			case fs.ModeSymlink:
 				err = copySymlink(dstFS, srcFS, name, stat)
 			case 0: // regular file
@@ -254,18 +250,18 @@ func copyFS(dst, src File) error {
 	}
 }
 
-func copyDir(dst, src FS, name string, stat fs.FileInfo) error {
+func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	if err := dst.Mkdir(name, stat.Mode()); err != nil {
 		return err
 	}
 
-	r, err := OpenDir(src, name)
+	r, err := OpenDir(src.FS(), name)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
 
-	w, err := OpenDir(dst, name)
+	w, err := OpenDir(dst.FS(), name)
 	if err != nil {
 		return err
 	}
@@ -610,11 +606,11 @@ func Lstat(fsys FS, name string) (fs.FileInfo, error) {
 	return callFile1(fsys, "lstat", name, O_RDONLY|O_NOFOLLOW, File.Stat)
 }
 
-/*
-func Mkdir(fsys FS, name string) error {
-	return callDir(fsys, "mkdir", name, File.Mkdir)
+func Mkdir(fsys FS, name string, perm fs.FileMode) error {
+	return callDir(fsys, "mkdir", name, func(dir File, name string) error {
+		return dir.Mkdir(name, perm)
+	})
 }
-*/
 
 func Rmdir(fsys FS, name string) error {
 	return callDir(fsys, "rmdir", name, File.Rmdir)

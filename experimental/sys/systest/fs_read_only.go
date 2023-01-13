@@ -104,7 +104,7 @@ var testReadOnlyMkdir = append(testDefaultMkdir,
 	fsTestCase{
 		name: "creating a directory fails with ErrReadOnly",
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Mkdir("test", 0755) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "test", 0755) },
 	},
 )
 

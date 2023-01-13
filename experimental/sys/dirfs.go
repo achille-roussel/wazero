@@ -59,10 +59,6 @@ func (fsys *dirFS) openRoot() (*dirFile, error) {
 	return fsys.openFile(".", O_DIRECTORY, 0)
 }
 
-func (fsys *dirFS) Mkdir(name string, perm fs.FileMode) error {
-	return fsys.do("mkdir", name, func(path string) error { return os.Mkdir(path, perm) })
-}
-
 func (fsys *dirFS) Link(oldName, newName string, newFS FS) error {
 	return fsys.linkOrRename("link", oldName, newName, newFS, FS.Link)
 }
@@ -337,6 +333,21 @@ func (f *dirFile) Datasync() (err error) {
 	return err
 
 }
+
+func (f *dirFile) Mkdir(name string, perm fs.FileMode) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		err = f.mkdir(name, perm)
+	}
+	if err != nil {
+		err = makePathError("mkdir", name, err)
+	}
+	return err
+}
+
 func (f *dirFile) Rmdir(name string) (err error) {
 	if f.base == nil {
 		err = ErrClosed
@@ -389,20 +400,6 @@ func (d dirFileFS) OpenFile(name string, flags int, perm fs.FileMode) (f File, e
 		err = makePathError("open", name, err)
 	}
 	return f, err
-}
-
-func (d dirFileFS) Mkdir(name string, perm fs.FileMode) (err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		err = d.mkdir(name, perm)
-	}
-	if err != nil {
-		err = makePathError("mkdir", name, err)
-	}
-	return err
 }
 
 func (d dirFileFS) Link(oldName, newName string, newFS FS) (err error) {
