@@ -95,17 +95,11 @@ func NewFS(base fs.FS) FS { return ReadOnlyFS(fsFS{base}) }
 type fsFS struct{ base fs.FS }
 
 func (fsys fsFS) Open(name string) (fs.File, error) {
-	if !ValidPath(name) {
-		return nil, makePathError("open", name, ErrNotExist)
-	}
-	return fsys.base.Open(name)
+	return call1(fsys.base, "open", name, fs.FS.Open)
 }
 
 func (fsys fsFS) Stat(name string) (fs.FileInfo, error) {
-	if !ValidPath(name) {
-		return nil, makePathError("stat", name, ErrNotExist)
-	}
-	return fs.Stat(fsys.base, name)
+	return call1(fsys.base, "stat", name, fs.Stat)
 }
 
 func (fsys fsFS) Readlink(name string) (string, error) {
@@ -357,3 +351,26 @@ func equalFS(source, target fs.FS, buf *[8192]byte) error {
 		return nil
 	})
 }
+
+func call[Func func(FS, string) error, FS any](fsys FS, op, name string, do Func) error {
+	_, err := call1(fsys, op, name, func(fsys FS, name string) (struct{}, error) {
+		return struct{}{}, do(fsys, name)
+	})
+	return err
+}
+
+func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name string, do Func) (ret Ret, err error) {
+	if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		ret, err = do(fsys, name)
+	}
+	if err != nil {
+		err = makePathError(op, name, err)
+	}
+	return ret, err
+}
+
+type openFileFunc = func(string, int, fs.FileMode) (File, error)
+
+type linkOrRename = func(FS, string, string, FS) error

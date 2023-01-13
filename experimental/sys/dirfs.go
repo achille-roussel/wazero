@@ -71,8 +71,6 @@ func (fsys *dirFS) Unlink(name string) error {
 	return fsys.do("unlink", name, unlink)
 }
 
-type linkOrRename = func(FS, string, string, FS) error
-
 func (fsys *dirFS) Link(oldName, newName string, newFS FS) error {
 	return fsys.linkOrRename("link", oldName, newName, newFS, FS.Link)
 }
@@ -185,8 +183,9 @@ func (f *dirFile) Close() (err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		defer func() { f.base = nil }()
 		err = f.base.Close()
+		f.fsys = nil
+		f.base = nil
 	}
 	if err != nil {
 		err = f.makePathError("close", err)

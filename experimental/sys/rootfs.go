@@ -13,51 +13,8 @@ func RootFS(root FS) FS { return &rootFS{root: root} }
 
 type rootFS struct{ root FS }
 
-func (fsys *rootFS) lookup(op, name string, flags int, do func(File) error) error {
-	if !ValidPath(name) {
-		return makePathError(op, name, ErrNotExist)
-	}
-	f, err := fsys.openFile(name, flags, 0)
-	if err != nil {
-		return makePathError(op, name, err)
-	}
-	defer f.Close()
-	return do(f)
-}
-
-func (fsys *rootFS) lookup1(op, name string, do func(FS, string) error) error {
-	if !ValidPath(name) {
-		return makePathError(op, name, ErrNotExist)
-	}
-	dir, base := SplitPath(name)
-	f, err := fsys.openFile(dir, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name, err)
-	}
-	defer f.Close()
-	return do(f.FS(), base)
-}
-
-func (fsys *rootFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
-	if !ValidPath(name1) {
-		return makePathError(op, name1, ErrNotExist)
-	}
-	if !ValidPath(name2) {
-		return makePathError(op, name2, ErrInvalid)
-	}
-	dir1, base1 := SplitPath(name1)
-	dir2, base2 := SplitPath(name2)
-	d1, err := fsys.openFile(dir1, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name1, err)
-	}
-	defer d1.Close()
-	d2, err := fsys.openFile(dir2, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name2, err)
-	}
-	defer d2.Close()
-	return do(d1.FS(), base1, d2.FS(), base2)
+func (fsys *rootFS) Open(name string) (fs.File, error) {
+	return fsys.OpenFile(name, O_RDONLY, 0)
 }
 
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
@@ -220,78 +177,58 @@ resolvePath:
 	return f, nil
 }
 
-func (fsys *rootFS) Open(name string) (fs.File, error) {
-	return fsys.OpenFile(name, O_RDONLY, 0)
-}
-
 func (fsys *rootFS) Mkdir(name string, perm fs.FileMode) error {
-	return fsys.lookup1("mkdir", name, func(dir FS, name string) error {
+	return lookupDir(fsys.openFile, "mkdir", name, func(dir FS, name string) error {
 		return dir.Mkdir(name, perm)
 	})
 }
 
 func (fsys *rootFS) Rmdir(name string) error {
-	return fsys.lookup1("rmdir", name, FS.Rmdir)
+	return lookupDir(fsys.openFile, "rmdir", name, FS.Rmdir)
 }
 
 func (fsys *rootFS) Unlink(name string) error {
-	return fsys.lookup1("unlink", name, FS.Unlink)
+	return lookupDir(fsys.openFile, "unlink", name, FS.Unlink)
 }
 
 func (fsys *rootFS) Link(oldName, newName string, newFS FS) error {
-	return fsys.lookup2("link", oldName, newName,
-		func(oldDir FS, oldName string, newDir FS, newName string) error {
-			return oldDir.Link(oldName, newName, newDir)
-		},
-	)
+	return lookupLinkOrRename(fsys.openFile, "link", oldName, newName, FS.Link)
 }
 
 func (fsys *rootFS) Rename(oldName, newName string, newFS FS) error {
-	return fsys.lookup2("rename", oldName, newName,
-		func(oldDir FS, oldName string, newDir FS, newName string) error {
-			return oldDir.Rename(oldName, newName, newDir)
-		},
-	)
+	return lookupLinkOrRename(fsys.openFile, "rename", oldName, newName, FS.Rename)
 }
 
 func (fsys *rootFS) Symlink(oldName, newName string) error {
-	return fsys.lookup1("symlink", newName, func(dir FS, name string) error {
+	return lookupDir(fsys.openFile, "symlink", newName, func(dir FS, name string) error {
 		return dir.Symlink(oldName, name)
 	})
 }
 
 func (fsys *rootFS) Readlink(name string) (link string, err error) {
-	err = fsys.lookup("readlink", name, rootfsReadlinkFlags, func(file File) (err error) {
-		link, err = file.Readlink()
-		return
-	})
-	return link, err
+	return lookupFile1(fsys.openFile, "readlink", name, rootfsReadlinkFlags, File.Readlink)
 }
 
 func (fsys *rootFS) Chmod(name string, mode fs.FileMode) error {
-	return fsys.lookup("chmod", name, O_RDONLY, func(file File) error {
+	return lookupFile(fsys.openFile, "chmod", name, O_RDONLY, func(file File) error {
 		return file.Chmod(mode)
 	})
 }
 
 func (fsys *rootFS) Chtimes(name string, atime, mtime time.Time) error {
-	return fsys.lookup("chtimes", name, O_RDONLY, func(file File) error {
+	return lookupFile(fsys.openFile, "chtimes", name, O_RDONLY, func(file File) error {
 		return file.Chtimes(atime, mtime)
 	})
 }
 
 func (fsys *rootFS) Truncate(name string, size int64) error {
-	return fsys.lookup("truncate", name, O_WRONLY, func(file File) error {
+	return lookupFile(fsys.openFile, "truncate", name, O_WRONLY, func(file File) error {
 		return file.Truncate(size)
 	})
 }
 
 func (fsys *rootFS) Stat(name string) (info fs.FileInfo, err error) {
-	err = fsys.lookup("stat", name, O_RDONLY, func(file File) (err error) {
-		info, err = file.Stat()
-		return
-	})
-	return info, err
+	return lookupFile1(fsys.openFile, "stat", name, O_RDONLY, File.Stat)
 }
 
 type rootFile struct {
@@ -304,51 +241,8 @@ func (f *rootFile) FS() FS { return rootFileFS{f} }
 
 type rootFileFS struct{ *rootFile }
 
-func (d rootFileFS) lookup(op, name string, flags int, do func(File) error) error {
-	if !ValidPath(name) {
-		return makePathError(op, name, ErrNotExist)
-	}
-	f, err := d.openFile(name, flags, 0)
-	if err != nil {
-		return makePathError(op, name, err)
-	}
-	defer f.Close()
-	return do(f)
-}
-
-func (d rootFileFS) lookup1(op, name string, do func(FS, string) error) error {
-	if !ValidPath(name) {
-		return makePathError(op, name, ErrNotExist)
-	}
-	dir, base := SplitPath(name)
-	f, err := d.openFile(dir, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name, err)
-	}
-	defer f.Close()
-	return do(f.FS(), base)
-}
-
-func (d rootFileFS) lookup2(op, name1, name2 string, do func(FS, string, FS, string) error) error {
-	if !ValidPath(name1) {
-		return makePathError(op, name1, ErrNotExist)
-	}
-	if !ValidPath(name2) {
-		return makePathError(op, name2, ErrInvalid)
-	}
-	dir1, base1 := SplitPath(name1)
-	dir2, base2 := SplitPath(name2)
-	d1, err := d.openFile(dir1, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name1, err)
-	}
-	defer d1.Close()
-	d2, err := d.openFile(dir2, O_DIRECTORY, 0)
-	if err != nil {
-		return makePathError(op, name2, err)
-	}
-	defer d2.Close()
-	return do(d1.FS(), base1, d2.FS(), base2)
+func (d rootFileFS) Open(name string) (fs.File, error) {
+	return d.OpenFile(name, O_RDONLY, 0)
 }
 
 func (d rootFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
@@ -366,76 +260,115 @@ func (d rootFileFS) openFile(name string, flags int, perm fs.FileMode) (File, er
 	return d.root.openFileAt(d.File, d.name, name, flags, perm)
 }
 
-func (d rootFileFS) Open(name string) (fs.File, error) {
-	return d.OpenFile(name, O_RDONLY, 0)
-}
-
 func (d rootFileFS) Mkdir(name string, perm fs.FileMode) error {
-	return d.lookup1("mkdir", name, func(dir FS, name string) error {
+	return lookupDir(d.openFile, "mkdir", name, func(dir FS, name string) error {
 		return dir.Mkdir(name, perm)
 	})
 }
 
 func (d rootFileFS) Rmdir(name string) error {
-	return d.lookup1("rmdir", name, FS.Rmdir)
+	return lookupDir(d.openFile, "rmdir", name, FS.Rmdir)
 }
 
 func (d rootFileFS) Unlink(name string) error {
-	return d.lookup1("unlink", name, FS.Unlink)
+	return lookupDir(d.openFile, "unlink", name, FS.Unlink)
 }
 
 func (d rootFileFS) Link(oldName, newName string, newFS FS) error {
-	return d.lookup2("link", oldName, newName,
-		func(oldDir FS, oldName string, newDir FS, newName string) error {
-			return oldDir.Link(oldName, newName, newDir)
-		},
-	)
+	return lookupLinkOrRename(d.openFile, "link", oldName, newName, FS.Link)
 }
 
 func (d rootFileFS) Rename(oldName, newName string, newFS FS) error {
-	return d.lookup2("rename", oldName, newName,
-		func(oldDir FS, oldName string, newDir FS, newName string) error {
-			return oldDir.Rename(oldName, newName, newDir)
-		},
-	)
+	return lookupLinkOrRename(d.openFile, "rename", oldName, newName, FS.Rename)
 }
 
 func (d rootFileFS) Symlink(oldName, newName string) error {
-	return d.lookup1("symlink", newName, func(dir FS, name string) error {
+	return lookupDir(d.openFile, "symlink", newName, func(dir FS, name string) error {
 		return dir.Symlink(oldName, name)
 	})
 }
 
-func (d rootFileFS) Readlink(name string) (link string, err error) {
-	err = d.lookup("readlink", name, rootfsReadlinkFlags, func(file File) (err error) {
-		link, err = file.Readlink()
-		return
-	})
-	return link, err
+func (d rootFileFS) Readlink(name string) (string, error) {
+	return lookupFile1(d.openFile, "readlink", name, rootfsReadlinkFlags, File.Readlink)
 }
 
 func (d rootFileFS) Chmod(name string, mode fs.FileMode) error {
-	return d.lookup("chmod", name, O_RDONLY, func(file File) error {
+	return lookupFile(d.openFile, "chmod", name, O_RDONLY, func(file File) error {
 		return file.Chmod(mode)
 	})
 }
 
 func (d rootFileFS) Chtimes(name string, atime, mtime time.Time) error {
-	return d.lookup("chtimes", name, O_RDONLY, func(file File) error {
+	return lookupFile(d.openFile, "chtimes", name, O_RDONLY, func(file File) error {
 		return file.Chtimes(atime, mtime)
 	})
 }
 
 func (d rootFileFS) Truncate(name string, size int64) error {
-	return d.lookup("truncate", name, O_WRONLY, func(file File) error {
+	return lookupFile(d.openFile, "truncate", name, O_WRONLY, func(file File) error {
 		return file.Truncate(size)
 	})
 }
 
-func (d rootFileFS) Stat(name string) (info fs.FileInfo, err error) {
-	err = d.lookup("stat", name, O_RDONLY, func(file File) (err error) {
-		info, err = file.Stat()
-		return
-	})
-	return info, err
+func (d rootFileFS) Stat(name string) (fs.FileInfo, error) {
+	return lookupFile1(d.openFile, "stat", name, O_RDONLY, File.Stat)
+}
+
+func lookupFile(open openFileFunc, op, name string, flags int, do func(File) error) error {
+	if !ValidPath(name) {
+		return makePathError(op, name, ErrNotExist)
+	}
+	f, err := open(name, flags, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f)
+}
+
+func lookupFile1[Func func(File) (Ret, error), Ret any](open openFileFunc, op, name string, flags int, do Func) (ret Ret, err error) {
+	if !ValidPath(name) {
+		return ret, makePathError(op, name, ErrNotExist)
+	}
+	f, err := open(name, flags, 0)
+	if err != nil {
+		return ret, makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f)
+}
+
+func lookupDir(open openFileFunc, op, name string, do func(FS, string) error) error {
+	if !ValidPath(name) {
+		return makePathError(op, name, ErrNotExist)
+	}
+	dir, base := SplitPath(name)
+	f, err := open(dir, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name, err)
+	}
+	defer f.Close()
+	return do(f.FS(), base)
+}
+
+func lookupLinkOrRename(open openFileFunc, op, name1, name2 string, do linkOrRename) error {
+	if !ValidPath(name1) {
+		return makePathError(op, name1, ErrNotExist)
+	}
+	if !ValidPath(name2) {
+		return makePathError(op, name2, ErrInvalid)
+	}
+	dir1, base1 := SplitPath(name1)
+	dir2, base2 := SplitPath(name2)
+	d1, err := open(dir1, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name1, err)
+	}
+	defer d1.Close()
+	d2, err := open(dir2, O_DIRECTORY, 0)
+	if err != nil {
+		return makePathError(op, name2, err)
+	}
+	defer d2.Close()
+	return do(d1.FS(), base1, base2, d2.FS())
 }
