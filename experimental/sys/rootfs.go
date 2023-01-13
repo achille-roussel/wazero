@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/fs"
 	"strings"
-	"time"
 )
 
 // RootFS wraps a file system to ensure that path resolutions are not allowed
@@ -205,16 +204,6 @@ func (fsys *rootFS) Symlink(oldName, newName string) error {
 	})
 }
 
-func (fsys *rootFS) Readlink(name string) (link string, err error) {
-	return lookupFile1(fsys.openFile, "readlink", name, rootfsReadlinkFlags, File.Readlink)
-}
-
-func (fsys *rootFS) Chtimes(name string, atime, mtime time.Time) error {
-	return lookupFile(fsys.openFile, "chtimes", name, O_RDONLY, func(file File) error {
-		return file.Chtimes(atime, mtime)
-	})
-}
-
 func (fsys *rootFS) Stat(name string) (info fs.FileInfo, err error) {
 	return lookupFile1(fsys.openFile, "stat", name, O_RDONLY, File.Stat)
 }
@@ -273,16 +262,6 @@ func (d rootFileFS) Rename(oldName, newName string, newFS FS) error {
 func (d rootFileFS) Symlink(oldName, newName string) error {
 	return lookupDir(d.openFile, "symlink", newName, func(dir FS, name string) error {
 		return dir.Symlink(oldName, name)
-	})
-}
-
-func (d rootFileFS) Readlink(name string) (string, error) {
-	return lookupFile1(d.openFile, "readlink", name, rootfsReadlinkFlags, File.Readlink)
-}
-
-func (d rootFileFS) Chtimes(name string, atime, mtime time.Time) error {
-	return lookupFile(d.openFile, "chtimes", name, O_RDONLY, func(file File) error {
-		return file.Chtimes(atime, mtime)
 	})
 }
 

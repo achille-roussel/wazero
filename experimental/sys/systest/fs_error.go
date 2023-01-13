@@ -101,7 +101,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "changing file times errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Chtimes("test", epoch, epoch)
+			return sys.Chtimes(fsys, "test", epoch, epoch)
 		},
 	})
 

@@ -125,10 +125,6 @@ func (fsys *dirFS) Symlink(oldName, newName string) error {
 	return nil
 }
 
-func (fsys *dirFS) Chtimes(name string, atime, mtime time.Time) error {
-	return fsys.do("chtimes", name, func(path string) error { return os.Chtimes(path, atime, mtime) })
-}
-
 func (fsys *dirFS) Stat(name string) (info fs.FileInfo, err error) {
 	err = fsys.do("stat", name, func(path string) (err error) {
 		info, err = os.Stat(path)
@@ -475,20 +471,6 @@ func (d dirFileFS) Symlink(oldName, newName string) (err error) {
 	}
 	if err != nil {
 		err = makePathError("symlink", newName, err)
-	}
-	return err
-}
-
-func (d dirFileFS) Chtimes(name string, atime, mtime time.Time) (err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		err = d.chtimes(name, atime, mtime)
-	}
-	if err != nil {
-		err = makePathError("chtimes", name, err)
 	}
 	return err
 }

@@ -666,7 +666,7 @@ var testReadWriteChtimes = append(testDefaultChtimes,
 		test: testLoop(func(fsys sys.FS, path string) error {
 			atime := time.Time{}
 			mtime := time.Time{}
-			return fsys.Chtimes(path+"/test", atime, mtime)
+			return sys.Chtimes(fsys, path+"/test", atime, mtime)
 		}),
 	},
 
@@ -675,7 +675,7 @@ var testReadWriteChtimes = append(testDefaultChtimes,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Chtimes("nope", epoch, epoch) },
+		test: func(fsys sys.FS) error { return sys.Chtimes(fsys, "nope", epoch, epoch) },
 	},
 
 	fsTestCase{
@@ -685,7 +685,7 @@ var testReadWriteChtimes = append(testDefaultChtimes,
 		test: func(fsys sys.FS) error {
 			atime := time.Time{}
 			mtime := epoch.Add(-time.Second)
-			return fsys.Chtimes("test", atime, mtime)
+			return sys.Chtimes(fsys, "test", atime, mtime)
 		},
 	},
 )
