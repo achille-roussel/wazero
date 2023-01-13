@@ -32,6 +32,7 @@ func TestReadOnlyFS(t *testing.T, makeFS MakeFS) {
 		{"Chtimes", testReadOnlyChtimes},
 		{"Truncate", testReadOnlyTruncate},
 		{"Stat", testReadOnlyStat},
+		{"Lstat", testReadOnlyLstat},
 	})
 
 	t.Run("File", func(t *testing.T) {
@@ -182,6 +183,8 @@ var testReadOnlyTruncate = append(testDefaultTruncate,
 )
 
 var testReadOnlyStat = append(testDefaultStat)
+
+var testReadOnlyLstat = append(testDefaultLstat)
 
 var testReadOnlyFileOpen = append(testDefaultFileOpen)
 

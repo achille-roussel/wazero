@@ -10,7 +10,7 @@ import (
 // ReadFS is a subset of the FS interface implemented by file systems which
 // support only read operations.
 type ReadFS interface {
-	fs.StatFS
+	fs.FS
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 }
 
@@ -22,7 +22,7 @@ func ReadOnlyFS(base ReadFS) FS { return &readOnlyFS{base} }
 type readOnlyFS struct{ base ReadFS }
 
 func (fsys *readOnlyFS) Open(name string) (fs.File, error) {
-	return fsys.OpenFile(name, O_RDONLY, 0)
+	return Open(fsys, name)
 }
 
 func (fsys *readOnlyFS) OpenFile(name string, flags int, _ fs.FileMode) (File, error) {
@@ -50,10 +50,6 @@ func (fsys *readOnlyFS) openFile(name string, flags int) (*readOnlyFile, error) 
 		return r, nil
 	}
 	return &readOnlyFile{fsys: fsys, base: f, name: name}, nil
-}
-
-func (fsys *readOnlyFS) Stat(name string) (info fs.FileInfo, err error) {
-	return call1(fsys.base, "stat", name, ReadFS.Stat)
 }
 
 func (fsys *readOnlyFS) Mkdir(name string, perm fs.FileMode) error {
@@ -275,10 +271,6 @@ func (f readOnlyFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File
 	return callFS(f, "open", name, func(fsys *readOnlyFS, path string) (File, error) {
 		return fsys.OpenFile(path, flags, perm)
 	})
-}
-
-func (f readOnlyFileFS) Stat(name string) (info fs.FileInfo, err error) {
-	return callFS(f, "stat", name, (*readOnlyFS).Stat)
 }
 
 func (f readOnlyFileFS) Mkdir(name string, perm fs.FileMode) error {

@@ -44,6 +44,7 @@ func TestReadWriteFS(t *testing.T, newFS NewFS) {
 		{"Chtimes", testReadWriteChtimes},
 		{"Truncate", testReadWriteTruncate},
 		{"Stat", testReadWriteStat},
+		{"Lstat", testReadWriteLstat},
 	})
 
 	t.Run("File", func(t *testing.T) {
@@ -407,6 +408,14 @@ var testReadWriteSymlink = append(testDefaultSymlink,
 	},
 
 	fsTestCase{
+		name: "linking with an empty source location fails with ErrNotExist",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return fsys.Symlink("", "link") },
+	},
+
+	fsTestCase{
 		name: "linking with a target location which does not exist fails with ErrNotExist",
 		base: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"source": &fstest.MapFile{Mode: 0644}},
@@ -734,27 +743,20 @@ var testReadWriteStat = append(testDefaultStat,
 		name: "stat at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
 		test: testLoop(func(fsys sys.FS, path string) error {
-			_, err := fsys.Stat(path + "/test")
+			_, err := sys.Stat(fsys, path+"/test")
 			return err
 		}),
 	},
+)
 
+var testReadWriteLstat = append(testDefaultLstat,
 	fsTestCase{
-		name: "stat on a symolic link returns information about the target file",
-		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0600}},
-		test: func(fsys sys.FS) error {
-			if err := fsys.Symlink("test", "link"); err != nil {
-				return err
-			}
-			s, err := fsys.Stat("link")
-			if err != nil {
-				return err
-			}
-			if mode := s.Mode(); mode.Type() != 0 {
-				return fmt.Errorf("wrong mode: %s", mode)
-			}
-			return nil
-		},
+		name: "stat at a path containing a symbolic link loop fails with ErrLoop",
+		err:  sys.ErrLoop,
+		test: testLoop(func(fsys sys.FS, path string) error {
+			_, err := sys.Lstat(fsys, path+"/test")
+			return err
+		}),
 	},
 )
 

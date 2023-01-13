@@ -117,7 +117,16 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "stating a file errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Stat("test")
+			_, err := sys.Stat(fsys, "test")
+			return err
+		},
+	})
+
+	lstat := append(testValidateStat, fsTestCase{
+		name: "stating a link errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			_, err := sys.Lstat(fsys, "test")
 			return err
 		},
 	})
@@ -140,5 +149,6 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		{"Chtimes", chtimes},
 		{"Truncate", truncate},
 		{"Stat", stat},
+		{"Lstat", lstat},
 	})
 }

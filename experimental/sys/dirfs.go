@@ -25,7 +25,7 @@ func DirFS(path string) FS {
 type dirFS struct{ root string }
 
 func (fsys *dirFS) Open(name string) (fs.File, error) {
-	return fsys.OpenFile(name, O_RDONLY, 0)
+	return Open(fsys, name)
 }
 
 func (fsys *dirFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
@@ -123,14 +123,6 @@ func (fsys *dirFS) Symlink(oldName, newName string) error {
 		return makePathError("symlink", oldName, err)
 	}
 	return nil
-}
-
-func (fsys *dirFS) Stat(name string) (info fs.FileInfo, err error) {
-	err = fsys.do("stat", name, func(path string) (err error) {
-		info, err = os.Stat(path)
-		return
-	})
-	return info, err
 }
 
 func (fsys *dirFS) do(op, name string, do func(string) error) error {
@@ -361,6 +353,10 @@ func (f *dirFile) FS() FS { return dirFileFS{f} }
 
 type dirFileFS struct{ *dirFile }
 
+func (d dirFileFS) Open(name string) (fs.File, error) {
+	return Open(d, name)
+}
+
 func (d dirFileFS) OpenFile(name string, flags int, perm fs.FileMode) (f File, err error) {
 	if d.base == nil {
 		err = ErrClosed
@@ -373,10 +369,6 @@ func (d dirFileFS) OpenFile(name string, flags int, perm fs.FileMode) (f File, e
 		err = makePathError("open", name, err)
 	}
 	return f, err
-}
-
-func (d dirFileFS) Open(name string) (fs.File, error) {
-	return d.OpenFile(name, O_RDONLY, 0)
 }
 
 func (d dirFileFS) Mkdir(name string, perm fs.FileMode) (err error) {
@@ -473,20 +465,6 @@ func (d dirFileFS) Symlink(oldName, newName string) (err error) {
 		err = makePathError("symlink", newName, err)
 	}
 	return err
-}
-
-func (d dirFileFS) Stat(name string) (info fs.FileInfo, err error) {
-	if d.base == nil {
-		err = ErrClosed
-	} else if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		info, err = d.stat(name)
-	}
-	if err != nil {
-		err = makePathError("stat", name, err)
-	}
-	return info, err
 }
 
 var (

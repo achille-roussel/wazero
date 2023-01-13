@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
-	"time"
 )
 
 func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
@@ -23,16 +22,4 @@ func (d dirFileFS) openFile(name string, flags int, perm fs.FileMode) (File, err
 		return nil, err
 	}
 	return d.fsys.newFile(os.NewFile(uintptr(f), osPath), fsPath), nil
-}
-
-func (d dirFileFS) chtimes(name string, atime, mtime time.Time) error {
-	f, err := openat(d.fd(), name, O_RDONLY, 0)
-	if err != nil {
-		return err
-	}
-	defer syscall.Close(f)
-	return syscall.Futimes(f, []syscall.Timeval{
-		syscall.NsecToTimeval(atime.UnixNano()),
-		syscall.NsecToTimeval(mtime.UnixNano()),
-	})
 }

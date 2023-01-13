@@ -23,30 +23,18 @@ func LayerFS(layers ...ReadFS) ReadFS {
 
 type layerFS []ReadFS
 
+func (layers layerFS) Open(name string) (fs.File, error) { return Open(layers, name) }
+
 func (layers layerFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return layerFSLookup(layers, "open", name, func(layer ReadFS, name string) (File, error) {
-		return layer.OpenFile(name, flags, perm)
-	})
-}
-
-func (layers layerFS) Open(name string) (fs.File, error) {
-	return layerFSLookup(layers, "open", name, ReadFS.Open)
-}
-
-func (layers layerFS) Stat(name string) (fs.FileInfo, error) {
-	return layerFSLookup(layers, "stat", name, ReadFS.Stat)
-}
-
-func layerFSLookup[F func(ReadFS, string) (R, error), R any](layers layerFS, op, name string, do F) (ret R, err error) {
 	for _, layer := range layers {
-		v, err := do(layer, name)
+		f, err := layer.OpenFile(name, flags, perm)
 		if err != nil {
 			if !errors.Is(err, ErrNotExist) {
-				return ret, err
+				return nil, err
 			}
 		} else {
-			return v, nil
+			return f, nil
 		}
 	}
-	return ret, makePathError(op, name, ErrNotExist)
+	return nil, makePathError("open", name, ErrNotExist)
 }
