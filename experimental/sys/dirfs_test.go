@@ -36,6 +36,6 @@ func TestDirFS_RootFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { f.Close() })
-		return f.FS()
+		return sys.FuncFS(f.OpenFile)
 	})
 }

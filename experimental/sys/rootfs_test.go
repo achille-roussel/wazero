@@ -33,12 +33,12 @@ func TestRootFS_Sandbox(t *testing.T) {
 		testSandbox(t, rootFS)
 	})
 	t.Run("File", func(t *testing.T) {
-		f, err := rootFS.OpenFile(".", sys.O_DIRECTORY, 0)
+		f, err := sys.OpenRoot(rootFS)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer f.Close()
-		testSandbox(t, f.FS())
+		testSandbox(t, sys.FuncFS(f.OpenFile))
 	})
 	t.Run("Wrap", func(t *testing.T) {
 		testSandbox(t, sys.RootFS(rootFS))
