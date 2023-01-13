@@ -176,12 +176,6 @@ resolvePath:
 	return f, nil
 }
 
-func (fsys *rootFS) Mkdir(name string, perm fs.FileMode) error {
-	return lookupDir(fsys.openFile, "mkdir", name, func(dir FS, name string) error {
-		return dir.Mkdir(name, perm)
-	})
-}
-
 func (fsys *rootFS) Link(oldName, newName string, newFS FS) error {
 	return lookupLinkOrRename(fsys.openFile, "link", oldName, newName, FS.Link)
 }
@@ -223,12 +217,6 @@ func (d rootFileFS) OpenFile(name string, flags int, perm fs.FileMode) (File, er
 
 func (d rootFileFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
 	return d.root.openFileAt(d.File, d.name, name, flags, perm)
-}
-
-func (d rootFileFS) Mkdir(name string, perm fs.FileMode) error {
-	return lookupDir(d.openFile, "mkdir", name, func(dir FS, name string) error {
-		return dir.Mkdir(name, perm)
-	})
 }
 
 func (d rootFileFS) Link(oldName, newName string, newFS FS) error {

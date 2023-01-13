@@ -153,7 +153,7 @@ var testReadWriteMkdir = append(testDefaultMkdir,
 	fsTestCase{
 		name: "creating a directory at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
-		test: testLoop(func(fsys sys.FS, path string) error { return fsys.Mkdir(path+"/test", 0755) }),
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Mkdir(fsys, path+"/test", 0755) }),
 	},
 
 	fsTestCase{
@@ -161,7 +161,7 @@ var testReadWriteMkdir = append(testDefaultMkdir,
 		want: fstest.MapFS{
 			"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
 		},
-		test: func(fsys sys.FS) error { return fsys.Mkdir("test", 0755) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "test", 0755) },
 	},
 
 	fsTestCase{
@@ -173,7 +173,7 @@ var testReadWriteMkdir = append(testDefaultMkdir,
 			"top":     &fstest.MapFile{Mode: 0755 | fs.ModeDir},
 			"top/sub": &fstest.MapFile{Mode: 0700 | fs.ModeDir},
 		},
-		test: func(fsys sys.FS) error { return fsys.Mkdir("top/sub", 0700) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "top/sub", 0700) },
 	},
 
 	fsTestCase{
@@ -182,7 +182,7 @@ var testReadWriteMkdir = append(testDefaultMkdir,
 			"top": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
 		},
 		err:  sys.ErrExist,
-		test: func(fsys sys.FS) error { return fsys.Mkdir("top", 0755) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "top", 0755) },
 	},
 
 	fsTestCase{
@@ -191,13 +191,13 @@ var testReadWriteMkdir = append(testDefaultMkdir,
 			"test": &fstest.MapFile{Mode: 0644},
 		},
 		err:  sys.ErrExist,
-		test: func(fsys sys.FS) error { return fsys.Mkdir("test", 0755) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "test", 0755) },
 	},
 
 	fsTestCase{
 		name: "creating a directory at a location which does not exist fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Mkdir("top/sub", 0755) },
+		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "top/sub", 0755) },
 	},
 )
 

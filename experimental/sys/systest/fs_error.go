@@ -36,7 +36,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "creating a directory errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			return fsys.Mkdir("test", 0755)
+			return sys.Mkdir(fsys, "test", 0755)
 		},
 	})
 

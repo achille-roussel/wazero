@@ -19,7 +19,6 @@ const (
 
 	__SYS_OPENAT     = 463
 	__SYS_RENAMEAT   = 465
-	__SYS_FSTATAT64  = 470
 	__SYS_LINKAT     = 471
 	__SYS_UNLINKAT   = 472
 	__SYS_READLINKAT = 473
