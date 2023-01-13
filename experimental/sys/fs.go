@@ -42,8 +42,6 @@ type FS interface {
 	Rename(oldName, newName string, newFS FS) error
 	// Creates a symolink link from oldName to newName.
 	Symlink(oldName, newName string) error
-	// Changes a file access and modification times.
-	Chtimes(name string, atime, mtime time.Time) error
 }
 
 // File is an interface implemented by files opened by FS instsances.
@@ -152,10 +150,6 @@ func (fsys *errFS) Symlink(oldName, newName string) error {
 
 func (fsys *errFS) Rename(oldName, newName string, newFS FS) error {
 	return fsys.validLink("rename", oldName, newName, newFS)
-}
-
-func (fsys *errFS) Chtimes(name string, atime, mtime time.Time) error {
-	return fsys.validPath("chtimes", name)
 }
 
 func (fsys *errFS) Stat(name string) (fs.FileInfo, error) {

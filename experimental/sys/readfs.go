@@ -80,10 +80,6 @@ func (fsys *readOnlyFS) Symlink(oldName, newName string) error {
 	return fail("symlink", newName, ErrReadOnly)
 }
 
-func (fsys *readOnlyFS) Chtimes(name string, atime, mtime time.Time) error {
-	return fail("chtimes", name, ErrReadOnly)
-}
-
 func (fsys *readOnlyFS) fail(op, name string, err error) error {
 	if !ValidPath(name) {
 		err = ErrNotExist
@@ -299,10 +295,6 @@ func (f readOnlyFileFS) Rename(oldName, newName string, newFS FS) error {
 
 func (f readOnlyFileFS) Symlink(oldName, newName string) error {
 	return fail("symlink", newName, ErrReadOnly)
-}
-
-func (f readOnlyFileFS) Chtimes(name string, atime, mtime time.Time) error {
-	return fail("chtimes", name, ErrReadOnly)
 }
 
 func callFS[Func func(*readOnlyFS, string) (Ret, error), Ret any](f readOnlyFileFS, op, name string, do Func) (ret Ret, err error) {

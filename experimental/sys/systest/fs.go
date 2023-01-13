@@ -256,7 +256,7 @@ var testValidateChtimes = fsTestSuite{
 	{
 		name: "changing times of a file with and invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
-		test: func(fsys sys.FS) error { return fsys.Chtimes("/", epoch, epoch) },
+		test: func(fsys sys.FS) error { return sys.Chtimes(fsys, "/", epoch, epoch) },
 	},
 }
 

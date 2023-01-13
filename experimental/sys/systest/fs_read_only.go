@@ -168,7 +168,7 @@ var testReadOnlyChtimes = append(testDefaultChtimes,
 		name: "changing a file times fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return fsys.Chtimes("test", epoch, epoch) },
+		test: func(fsys sys.FS) error { return sys.Chtimes(fsys, "test", epoch, epoch) },
 	},
 )
 
