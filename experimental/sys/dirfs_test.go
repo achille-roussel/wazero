@@ -14,7 +14,7 @@ func TestDirFS_ReadOnly(t *testing.T) {
 		if err := sys.CopyFS(testFS, baseFS); err != nil {
 			t.Fatal(err)
 		}
-		return sys.NewFS(testFS)
+		return sys.ReadOnlyFS(testFS)
 	})
 }
 
