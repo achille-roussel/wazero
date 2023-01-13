@@ -100,13 +100,27 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 //
 // The returned file system is read-only, all attempts to open files in write
 // mode, or mutate the state of the file system will error with ErrReadOnly.
-func NewFS(base fs.FS) FS { return &readOnlyFS{fsFS{base}} }
+func NewFS(base fs.FS) FS { return &fsFS{base} }
 
 type fsFS struct{ base fs.FS }
 
-func (fsys fsFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
+func (fsys *fsFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
-func (fsys fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+func (fsys *fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	f, err := fsys.openFile(name, flags, perm)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	return f, nil
+}
+
+func (fsys *fsFS) openFile(name string, flags int, perm fs.FileMode) (*fsFile, error) {
+	if !ValidPath(name) {
+		return nil, ErrNotExist
+	}
+	if (flags & ^openFileReadOnlyFlags) != 0 {
+		return nil, ErrReadOnly
+	}
 	link := name
 	loop := 0
 openFile:
@@ -143,8 +157,211 @@ openFile:
 		}
 	}
 
-	return &readOnlyFile{base: f}, nil
+	return &fsFile{fsys: fsys, base: f, name: name}, nil
 }
+
+type fsFile struct {
+	fsys *fsFS
+	base fs.File
+	name string
+}
+
+func (f *fsFile) Fd() uintptr { return ^uintptr(0) }
+
+func (f *fsFile) Close() (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else {
+		err = f.base.Close()
+		f.fsys = nil
+		f.base = nil
+	}
+	if err != nil {
+		err = f.makePathError("close", err)
+	}
+	return err
+}
+
+func (f *fsFile) Stat() (info fs.FileInfo, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else {
+		info, err = f.base.Stat()
+	}
+	if err != nil {
+		err = f.makePathError("stat", err)
+	}
+	return info, err
+}
+
+func (f *fsFile) Read(b []byte) (n int, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else {
+		n, err = f.base.Read(b)
+	}
+	if err != nil && err != io.EOF {
+		err = f.makePathError("read", err)
+	}
+	return n, err
+}
+
+func (f *fsFile) ReadAt(b []byte, offset int64) (n int, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if r, ok := f.base.(io.ReaderAt); ok {
+		n, err = r.ReadAt(b, offset)
+	} else {
+		err = ErrNotSupported
+	}
+	if err != nil && err != io.EOF {
+		err = f.makePathError("read", err)
+	}
+	return n, err
+}
+
+func (f *fsFile) Seek(offset int64, whence int) (seek int64, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if r, ok := f.base.(io.Seeker); ok {
+		seek, err = r.Seek(offset, whence)
+	} else {
+		err = ErrNotSupported
+	}
+	if err != nil {
+		err = f.makePathError("seek", err)
+	}
+	return seek, err
+}
+
+func (f *fsFile) ReadDir(n int) (files []fs.DirEntry, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if d, ok := f.base.(fs.ReadDirFile); ok {
+		files, err = d.ReadDir(n)
+	} else {
+		err = ErrNotSupported
+	}
+	if err != nil && err != io.EOF {
+		err = f.makePathError("readdir", err)
+	}
+	return files, err
+}
+
+func (f *fsFile) Readlink() (link string, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if r, ok := f.base.(interface{ Readlink() (string, error) }); ok {
+		link, err = r.Readlink()
+	} else if s, e := f.base.Stat(); e != nil {
+		err = e
+	} else if s.Mode().Type() != fs.ModeSymlink {
+		err = ErrInvalid
+	} else if b, e := io.ReadAll(f.base); e != nil {
+		err = e
+	} else {
+		link = string(b)
+	}
+	if err != nil {
+		err = f.makePathError("readlink", err)
+	}
+	return link, err
+}
+
+func (f *fsFile) Write([]byte) (int, error) {
+	return 0, f.fail("write", ErrNotSupported)
+}
+
+func (f *fsFile) WriteAt([]byte, int64) (int, error) {
+	return 0, f.fail("write", ErrNotSupported)
+}
+
+func (f *fsFile) WriteString(string) (int, error) {
+	return 0, f.fail("write", ErrNotSupported)
+}
+
+func (f *fsFile) ReadFrom(io.Reader) (int64, error) {
+	return 0, f.fail("write", ErrNotSupported)
+}
+
+func (f *fsFile) Chmod(fs.FileMode) error {
+	return f.fail("chmod", ErrReadOnly)
+}
+
+func (f *fsFile) Chtimes(time.Time, time.Time) error {
+	return f.fail("chtimes", ErrReadOnly)
+}
+
+func (f *fsFile) Truncate(size int64) (err error) {
+	if f.fsys == nil {
+		err = ErrClosed
+	} else if size < 0 {
+		err = ErrInvalid
+	} else {
+		err = ErrReadOnly
+	}
+	return f.makePathError("truncate", err)
+}
+
+func (f *fsFile) Sync() error {
+	return f.fail("sync", ErrReadOnly)
+}
+
+func (f *fsFile) Datasync() error {
+	return f.fail("datasync", ErrReadOnly)
+}
+
+func (f *fsFile) Mkdir(string, fs.FileMode) error {
+	return f.fail("mkdir", ErrReadOnly)
+}
+
+func (f *fsFile) Rmdir(string) error {
+	return f.fail("rmdir", ErrReadOnly)
+}
+
+func (f *fsFile) Unlink(string) error {
+	return f.fail("unlink", ErrReadOnly)
+}
+
+func (f *fsFile) Symlink(string, string) error {
+	return f.fail("symlink", ErrReadOnly)
+}
+
+func (f *fsFile) Link(string, Directory, string) error {
+	return f.fail("link", ErrReadOnly)
+}
+
+func (f *fsFile) Rename(string, Directory, string) error {
+	return f.fail("rename", ErrReadOnly)
+
+}
+func (f *fsFile) OpenFile(name string, flags int, perm fs.FileMode) (file File, err error) {
+	if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		file, err = f.fsys.OpenFile(JoinPath(f.name, name), flags, perm)
+	}
+	if err != nil {
+		err = makePathError("open", name, err)
+	}
+	return file, err
+}
+
+func (f *fsFile) fail(op string, err error) error {
+	if f.fsys == nil {
+		err = ErrClosed
+	}
+	return f.makePathError(op, err)
+}
+
+func (f *fsFile) makePathError(op string, err error) error {
+	return makePathError(op, f.name, err)
+}
+
+var (
+	_ io.ReaderFrom   = (*fsFile)(nil)
+	_ io.StringWriter = (*fsFile)(nil)
+)
 
 // ErrFS returns a FS which errors with err on all its method calls.
 func ErrFS(err error) FS { return &errFS{err: err} }
@@ -175,26 +392,22 @@ func CopyFS(dst, src FS) error {
 		return fmt.Errorf("opening source file system root: %w", err)
 	}
 	defer r.Close()
-
 	w, err := OpenRoot(dst)
 	if err != nil {
 		return fmt.Errorf("opening destination file system root: %w", err)
 	}
 	defer w.Close()
-
 	return copyFS(w, r)
 }
 
 func copyFS(dst, src File) error {
 	for {
 		entries, err := src.ReadDir(100)
-
 		for _, entry := range entries {
 			stat, err := entry.Info()
 			if err != nil {
 				return err
 			}
-
 			name := entry.Name()
 			switch entry.Type() {
 			case fs.ModeDir:
@@ -208,7 +421,6 @@ func copyFS(dst, src File) error {
 				return err
 			}
 		}
-
 		if err != nil {
 			if err == io.EOF {
 				err = nil
@@ -222,23 +434,19 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	if err := dst.Mkdir(name, stat.Mode()); err != nil {
 		return err
 	}
-
 	r, err := src.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
-
 	w, err := dst.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
 	defer w.Close()
-
 	if err := copyFS(w, r); err != nil {
 		return err
 	}
-
 	time := stat.ModTime()
 	return w.Chtimes(time, time)
 }
@@ -249,22 +457,18 @@ func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 	defer r.Close()
-
 	s, err := r.Readlink()
 	if err != nil {
 		return err
 	}
-
 	if err := dst.Symlink(s, name); err != nil {
 		return err
 	}
-
 	w, err := dst.OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
 	defer w.Close()
-
 	time := stat.ModTime()
 	return w.Chtimes(time, time)
 }
@@ -275,17 +479,14 @@ func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 	defer r.Close()
-
 	w, err := dst.OpenFile(name, O_WRONLY|O_NOFOLLOW|O_CREATE|O_TRUNC, stat.Mode())
 	if err != nil {
 		return err
 	}
 	defer w.Close()
-
 	if _, err := io.Copy(w, r); err != nil {
 		return err
 	}
-
 	time := stat.ModTime()
 	return w.Chtimes(time, time)
 }
@@ -296,19 +497,16 @@ const equalFSBufsize = 8192
 // error describing their difference when they are not.
 func EqualFS(a, b FS) error {
 	var buf [equalFSBufsize]byte
-
 	source, err := OpenRoot(a)
 	if err != nil {
 		return err
 	}
 	defer source.Close()
-
 	target, err := OpenRoot(b)
 	if err != nil {
 		return err
 	}
 	defer target.Close()
-
 	if err := equalFS(source, target, &buf); err != nil {
 		return fmt.Errorf("equalFS(a,b): %w", err)
 	}
@@ -321,7 +519,6 @@ func EqualFS(a, b FS) error {
 func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 	for {
 		entries, err := source.ReadDir(100)
-
 		for _, entry := range entries {
 			name := entry.Name()
 			switch entry.Type() {
@@ -333,7 +530,6 @@ func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 				err = equalFile(source, target, name, buf)
 			}
 		}
-
 		if err != nil {
 			if err == io.EOF {
 				err = nil
@@ -349,13 +545,11 @@ func equalDir(source, target File, name string, buf *[equalFSBufsize]byte) error
 		return err
 	}
 	defer sourceDir.Close()
-
 	targetDir, err := target.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
 		return err
 	}
 	defer targetDir.Close()
-
 	if err := equalStat(sourceDir, targetDir); err != nil {
 		return equalErrorf(name, "%w", err)
 	}
@@ -368,13 +562,11 @@ func equalSymlink(source, target File, name string) error {
 		return err
 	}
 	defer sourceFile.Close()
-
 	targetFile, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
 	defer targetFile.Close()
-
 	sourceLink, err := sourceFile.Readlink()
 	if err != nil {
 		return err
@@ -395,13 +587,11 @@ func equalFile(source, target File, name string, buf *[equalFSBufsize]byte) erro
 		return err
 	}
 	defer sourceFile.Close()
-
 	targetFile, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
 	defer targetFile.Close()
-
 	if err := equalStat(sourceFile, targetFile); err != nil {
 		return equalErrorf(name, "%w", err)
 	}
@@ -420,13 +610,11 @@ func equalData(source, target File, buf *[equalFSBufsize]byte) error {
 		if n1 != n2 {
 			return fmt.Errorf("file read size mismatch: want=%d got=%d", n1, n2)
 		}
-
 		b1 := buf1[:n1]
 		b2 := buf2[:n2]
 		if !bytes.Equal(b1, b2) {
 			return fmt.Errorf("file content mismatch: want=%q got=%q", b1, b2)
 		}
-
 		if err1 != err2 {
 			return fmt.Errorf("file read error mismatch: want=%v got=%v", err1, err2)
 		}
@@ -442,12 +630,10 @@ func equalStat(source, target File) error {
 	if err != nil {
 		return err
 	}
-
 	targetInfo, err := target.Stat()
 	if err != nil {
 		return err
 	}
-
 	sourceMode := sourceInfo.Mode()
 	targetMode := targetInfo.Mode()
 	if sourceMode != targetMode {
@@ -456,7 +642,6 @@ func equalStat(source, target File) error {
 	if sourceMode.IsDir() {
 		return nil
 	}
-
 	sourceTime := sourceInfo.ModTime()
 	targetTime := targetInfo.ModTime()
 	// Only compare the modification times if both file systems support it,
@@ -466,37 +651,16 @@ func equalStat(source, target File) error {
 			return fmt.Errorf("file times mismatch: want=%v got=%v", sourceTime, targetTime)
 		}
 	}
-
 	sourceSize := sourceInfo.Size()
 	targetSize := targetInfo.Size()
 	if sourceSize != targetSize {
 		return fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
 	}
-
 	return nil
 }
 
 func equalErrorf(name, msg string, args ...any) error {
 	return &fs.PathError{Op: "equal", Path: name, Err: fmt.Errorf(msg, args...)}
-}
-
-func call[Func func(FS, string) error, FS any](fsys FS, op, name string, do Func) error {
-	_, err := call1(fsys, op, name, func(fsys FS, name string) (struct{}, error) {
-		return struct{}{}, do(fsys, name)
-	})
-	return err
-}
-
-func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name string, do Func) (ret Ret, err error) {
-	if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		ret, err = do(fsys, name)
-	}
-	if err != nil {
-		err = makePathError(op, name, err)
-	}
-	return ret, err
 }
 
 // Open opens a file at the given name in fsys.
@@ -603,10 +767,12 @@ func Symlink(fsys FS, oldName, newName string) error {
 	})
 }
 
+// Link creates a link from oldName to newName in fsys.
 func Link(fsys FS, oldName, newName string) error {
 	return callDir2(fsys, "link", oldName, newName, Directory.Link)
 }
 
+// Rename renames a file from oldName to newName in fsys.
 func Rename(fsys FS, oldName, newName string) error {
 	return callDir2(fsys, "rename", oldName, newName, Directory.Rename)
 }

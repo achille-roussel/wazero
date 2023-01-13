@@ -27,23 +27,15 @@ type dirFS struct{ root string }
 func (fsys *dirFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
 func (fsys *dirFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	f, err := fsys.openFile(name, flags, perm)
-	if err != nil {
-		return nil, makePathError("open", name, err)
-	}
-	return f, nil
-}
-
-func (fsys *dirFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if !ValidPath(name) {
-		return nil, ErrNotExist
+		return nil, makePathError("open", name, ErrNotExist)
 	}
 	path := name
 	path = filepath.FromSlash(path)
 	path = filepath.Join(fsys.root, name)
 	f, err := openFile(path, flags, perm)
 	if err != nil {
-		return nil, err
+		return nil, makePathError("open", name, err)
 	}
 	return fsys.newFile(f, name), nil
 }
