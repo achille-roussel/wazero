@@ -273,7 +273,18 @@ var testValidateStat = fsTestSuite{
 		name: "stat of a file with and invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Stat("/")
+			_, err := sys.Stat(fsys, "/")
+			return err
+		},
+	},
+}
+
+var testValidateLstat = fsTestSuite{
+	{
+		name: "lstat of a file with and invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error {
+			_, err := sys.Lstat(fsys, "/")
 			return err
 		},
 	},
@@ -423,8 +434,55 @@ var testDefaultStat = append(testValidateStat,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Stat("nope")
+			_, err := sys.Stat(fsys, "nope")
 			return err
+		},
+	},
+
+	fsTestCase{
+		name: "stat on a symolic link returns information about the target file",
+		base: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0600},
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		test: func(fsys sys.FS) error {
+			s, err := sys.Stat(fsys, "link")
+			if err != nil {
+				return err
+			}
+			if mode := s.Mode(); mode.Type() != 0 {
+				return fmt.Errorf("wrong mode: %s", mode)
+			}
+			return nil
+		},
+	},
+)
+
+var testDefaultLstat = append(testValidateLstat,
+	fsTestCase{
+		name: "lstat of a location which does not exist fails with ErrNotExist",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error {
+			_, err := sys.Lstat(fsys, "nope")
+			return err
+		},
+	},
+
+	fsTestCase{
+		name: "lstat on a symolic link returns information about the link itself",
+		base: fstest.MapFS{
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		test: func(fsys sys.FS) error {
+			s, err := sys.Lstat(fsys, "link")
+			if err != nil {
+				return err
+			}
+			if mode := s.Mode(); mode.Type() != fs.ModeSymlink {
+				return fmt.Errorf("wrong mode: %s", mode)
+			}
+			return nil
 		},
 	},
 )

@@ -13,7 +13,7 @@ import (
 // FS is an extension of fs.FS which depending on the underlying backend,
 // may allow write operations.
 type FS interface {
-	fs.StatFS
+	fs.FS
 	// Opens a file on the file system.
 	//
 	// The signature of this method is similar to os.OpenFile, it receives a
@@ -86,20 +86,39 @@ func NewFS(base fs.FS) FS { return &readOnlyFS{fsFS{base}} }
 type fsFS struct{ base fs.FS }
 
 func (fsys fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	f, err := fsys.base.Open(name)
+	link := name
+	loop := 0
+openFile:
+	if loop++; loop == 40 {
+		return nil, ErrLoop
+	}
+	f, err := fsys.base.Open(link)
 	if err != nil {
 		return nil, err
 	}
 
-	if (flags & O_DIRECTORY) != 0 {
+	if ((flags & O_DIRECTORY) != 0) || ((flags & O_NOFOLLOW) == 0) {
 		s, err := f.Stat()
 		if err != nil {
 			f.Close()
 			return nil, err
 		}
-		if !s.IsDir() {
+		m := s.Mode()
+		t := m.Type()
+
+		if (flags & O_DIRECTORY) != 0 {
+			if t != fs.ModeDir {
+				f.Close()
+				return nil, ErrNotDirectory
+			}
+		} else if t == fs.ModeSymlink {
+			b, err := io.ReadAll(f)
 			f.Close()
-			return nil, ErrNotDirectory
+			if err != nil {
+				return nil, err
+			}
+			link = string(b)
+			goto openFile
 		}
 	}
 
@@ -108,10 +127,6 @@ func (fsys fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error
 
 func (fsys fsFS) Open(name string) (fs.File, error) {
 	return call1(fsys.base, "open", name, fs.FS.Open)
-}
-
-func (fsys fsFS) Stat(name string) (fs.FileInfo, error) {
-	return call1(fsys.base, "stat", name, fs.Stat)
 }
 
 // ErrFS returns a FS which errors with err on all its method calls.
@@ -149,10 +164,6 @@ func (fsys *errFS) Symlink(oldName, newName string) error {
 
 func (fsys *errFS) Rename(oldName, newName string, newFS FS) error {
 	return fsys.validLink("rename", oldName, newName, newFS)
-}
-
-func (fsys *errFS) Stat(name string) (fs.FileInfo, error) {
-	return nil, fsys.validPath("stat", name)
 }
 
 func (fsys *errFS) validPath(op, name string) (err error) {
@@ -511,6 +522,25 @@ func call1[Func func(FS, string) (Ret, error), FS, Ret any](fsys FS, op, name st
 type openFileFunc = func(string, int, fs.FileMode) (File, error)
 
 type linkOrRename = func(FS, string, string, FS) error
+
+// Open opens a file at the given name in fsys.
+//
+// The file is open in read-only mode, it might point to a directory.
+//
+// If the file name points to a symbolic link, the function returns a file
+// opened on the link's target.
+//
+// This function is a valid implementation of the FS.Open methods.
+// Implementations of the interface can define their Open method in terms
+// of this function as:
+//
+//	func (fsys customFS) Open(name string) (File, error) {
+//		return sys.Open(fsys, name)
+//	}
+//
+func Open(fsys ReadFS, name string) (File, error) {
+	return fsys.OpenFile(name, O_RDONLY, 0)
+}
 
 // OpenDir opens a directory at the given name in fsys.
 func OpenDir(fsys ReadFS, name string) (File, error) {

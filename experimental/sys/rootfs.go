@@ -13,7 +13,7 @@ func RootFS(root FS) FS { return &rootFS{root: root} }
 type rootFS struct{ root FS }
 
 func (fsys *rootFS) Open(name string) (fs.File, error) {
-	return fsys.OpenFile(name, O_RDONLY, 0)
+	return Open(fsys, name)
 }
 
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
@@ -204,10 +204,6 @@ func (fsys *rootFS) Symlink(oldName, newName string) error {
 	})
 }
 
-func (fsys *rootFS) Stat(name string) (info fs.FileInfo, err error) {
-	return lookupFile1(fsys.openFile, "stat", name, O_RDONLY, File.Stat)
-}
-
 type rootFile struct {
 	root *rootFS
 	name string
@@ -263,10 +259,6 @@ func (d rootFileFS) Symlink(oldName, newName string) error {
 	return lookupDir(d.openFile, "symlink", newName, func(dir FS, name string) error {
 		return dir.Symlink(oldName, name)
 	})
-}
-
-func (d rootFileFS) Stat(name string) (fs.FileInfo, error) {
-	return lookupFile1(d.openFile, "stat", name, O_RDONLY, File.Stat)
 }
 
 func lookupFile(open openFileFunc, op, name string, flags int, do func(File) error) error {
