@@ -23,8 +23,6 @@ type FS interface {
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 	// Creates a directory on the file system.
 	Mkdir(name string, perm fs.FileMode) error
-	// Removes a directory from the file system.
-	Rmdir(name string) error
 	// Creates a hard link from oldName to newName. oldName is expressed
 	// relative to the receiver, while newName is expressed relative to newFS.
 	//
@@ -90,6 +88,8 @@ type File interface {
 type Directory interface {
 	// Reads the list of directory entries (see fs.ReadDirFile).
 	ReadDir(n int) ([]fs.DirEntry, error)
+	// Removes a directory from the file system.
+	Rmdir(name string) error
 	// Removes a file from the file system.
 	Unlink(name string) error
 }
@@ -101,6 +101,8 @@ type Directory interface {
 func NewFS(base fs.FS) FS { return &readOnlyFS{fsFS{base}} }
 
 type fsFS struct{ base fs.FS }
+
+func (fsys fsFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
 func (fsys fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	link := name
@@ -142,10 +144,6 @@ openFile:
 	return &readOnlyFile{base: f}, nil
 }
 
-func (fsys fsFS) Open(name string) (fs.File, error) {
-	return call1(fsys.base, "open", name, fs.FS.Open)
-}
-
 // ErrFS returns a FS which errors with err on all its method calls.
 func ErrFS(err error) FS { return &errFS{err: err} }
 
@@ -161,10 +159,6 @@ func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 
 func (fsys *errFS) Mkdir(name string, perm fs.FileMode) error {
 	return fsys.validPath("mkdir", name)
-}
-
-func (fsys *errFS) Rmdir(name string) error {
-	return fsys.validPath("rmdir", name)
 }
 
 func (fsys *errFS) Link(oldName, newName string, newFS FS) error {
@@ -620,11 +614,11 @@ func Lstat(fsys FS, name string) (fs.FileInfo, error) {
 func Mkdir(fsys FS, name string) error {
 	return callDir(fsys, "mkdir", name, File.Mkdir)
 }
+*/
 
 func Rmdir(fsys FS, name string) error {
 	return callDir(fsys, "rmdir", name, File.Rmdir)
 }
-*/
 
 func Unlink(fsys FS, name string) error {
 	return callDir(fsys, "unlink", name, File.Unlink)
