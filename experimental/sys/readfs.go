@@ -11,6 +11,7 @@ import (
 // support only read operations.
 type ReadFS interface {
 	fs.StatFS
+	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 	Readlink(name string) (string, error)
 }
 
@@ -40,24 +41,15 @@ func (fsys *readOnlyFS) openFile(name string, flags int) (*readOnlyFile, error) 
 	if (flags & ^openFileReadOnlyFlags) != 0 {
 		return nil, ErrReadOnly
 	}
-
-	f, err := fsys.base.Open(name)
+	f, err := fsys.base.OpenFile(name, flags, 0)
 	if err != nil {
 		return nil, err
 	}
-
-	if (flags & O_DIRECTORY) != 0 {
-		s, err := f.Stat()
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
-		if !s.IsDir() {
-			f.Close()
-			return nil, ErrNotDirectory
-		}
+	if r, ok := f.(*readOnlyFile); ok {
+		r.fsys = fsys
+		r.name = name
+		return r, nil
 	}
-
 	return &readOnlyFile{fsys: fsys, base: f, name: name}, nil
 }
 

@@ -90,9 +90,30 @@ type File interface {
 //
 // The returned file system is read-only, all attempts to open files in write
 // mode, or mutate the state of the file system will error with ErrReadOnly.
-func NewFS(base fs.FS) FS { return ReadOnlyFS(fsFS{base}) }
+func NewFS(base fs.FS) FS { return &readOnlyFS{fsFS{base}} }
 
 type fsFS struct{ base fs.FS }
+
+func (fsys fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	f, err := fsys.base.Open(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if (flags & O_DIRECTORY) != 0 {
+		s, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		if !s.IsDir() {
+			f.Close()
+			return nil, ErrNotDirectory
+		}
+	}
+
+	return &readOnlyFile{base: f}, nil
+}
 
 func (fsys fsFS) Open(name string) (fs.File, error) {
 	return call1(fsys.base, "open", name, fs.FS.Open)
@@ -192,54 +213,128 @@ func (fsys *errFS) validLink(op, oldName, newName string, newFS FS) error {
 // root and recursively descending into each directory. The copy is not atomic,
 // an error might leave the destination file system with a partially completed
 // copy of the file tree.
-func CopyFS(dst FS, src fs.FS) error {
-	return fs.WalkDir(src, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == "." {
-			return nil
-		}
+func CopyFS(dst FS, src ReadFS) error {
+	r, err := src.OpenFile(".", O_DIRECTORY, 0)
+	if err != nil {
+		return fmt.Errorf("opening source file system root: %w", err)
+	}
+	defer r.Close()
 
-		if d.IsDir() {
-			s, err := d.Info()
+	w, err := dst.OpenFile(".", O_DIRECTORY, 0)
+	if err != nil {
+		return fmt.Errorf("opening destination file system root: %w", err)
+	}
+	defer w.Close()
+
+	return copyFS(w, r)
+}
+
+func copyFS(dst, src File) error {
+	dstFS := dst.FS()
+	srcFS := src.FS()
+
+	for {
+		entries, err := src.ReadDir(100)
+
+		for _, entry := range entries {
+			stat, err := entry.Info()
 			if err != nil {
 				return err
 			}
-			err = dst.Mkdir(path, s.Mode())
-			if err == nil {
-				atime := time.Time{}
-				mtime := s.ModTime()
-				err = dst.Chtimes(path, atime, mtime)
+
+			name := entry.Name()
+			switch entry.Type() {
+			case fs.ModeDir:
+				err = copyDir(dstFS, srcFS, name, stat)
+			case fs.ModeSymlink:
+				err = copySymlink(dstFS, srcFS, name, stat)
+			case 0: // regular file
+				err = copyFile(dstFS, srcFS, name, stat)
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				err = nil
 			}
 			return err
 		}
+	}
+}
 
-		r, err := src.Open(path)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
+func copyDir(dst, src FS, name string, stat fs.FileInfo) error {
+	if err := dst.Mkdir(name, stat.Mode()); err != nil {
+		return err
+	}
 
-		s, err := r.Stat()
-		if err != nil {
-			return err
-		}
+	r, err := src.OpenFile(name, O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
 
-		w, err := dst.OpenFile(path, O_CREATE|O_TRUNC|O_WRONLY, s.Mode())
-		if err != nil {
-			return err
-		}
-		defer w.Close()
+	w, err := dst.OpenFile(name, O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
 
-		if _, err := io.Copy(w, r); err != nil {
-			return err
-		}
+	if err := copyFS(w, r); err != nil {
+		return err
+	}
 
-		atime := time.Time{}
-		mtime := s.ModTime()
-		return w.Chtimes(atime, mtime)
-	})
+	time := stat.ModTime()
+	return w.Chtimes(time, time)
+}
+
+func copySymlink(dst, src FS, name string, stat fs.FileInfo) error {
+	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	s, err := r.Readlink()
+	if err != nil {
+		return err
+	}
+
+	if err := dst.Symlink(s, name); err != nil {
+		return err
+	}
+
+	w, err := dst.OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+
+	time := stat.ModTime()
+	return w.Chtimes(time, time)
+}
+
+func copyFile(dst, src FS, name string, stat fs.FileInfo) error {
+	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	w, err := dst.OpenFile(name, O_WRONLY|O_NOFOLLOW|O_CREATE|O_TRUNC, stat.Mode())
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+
+	if _, err := io.Copy(w, r); err != nil {
+		return err
+	}
+
+	time := stat.ModTime()
+	return w.Chtimes(time, time)
 }
 
 // EqualFS compares two file systems, returning nil if they are equal, or an
