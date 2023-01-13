@@ -11,7 +11,8 @@ import (
 func TestDirFS_ReadOnly(t *testing.T) {
 	systest.TestReadOnlyFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {
 		testFS := sys.DirFS(t.TempDir())
-		if err := sys.CopyFS(testFS, baseFS); err != nil {
+		readFS := sys.NewFS(baseFS)
+		if err := sys.CopyFS(testFS, readFS); err != nil {
 			t.Fatal(err)
 		}
 		return sys.ReadOnlyFS(testFS)

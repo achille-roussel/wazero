@@ -23,6 +23,12 @@ func LayerFS(layers ...ReadFS) ReadFS {
 
 type layerFS []ReadFS
 
+func (layers layerFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return layerFSLookup(layers, "open", name, func(layer ReadFS, name string) (File, error) {
+		return layer.OpenFile(name, flags, perm)
+	})
+}
+
 func (layers layerFS) Open(name string) (fs.File, error) {
 	return layerFSLookup(layers, "open", name, ReadFS.Open)
 }

@@ -20,7 +20,8 @@ import (
 func TestReadWriteFS(t *testing.T, newFS NewFS) {
 	makeFS := func(t *testing.T, baseFS fs.FS) sys.FS {
 		testFS := newFS(t)
-		if err := sys.CopyFS(testFS, baseFS); err != nil {
+		readFS := sys.NewFS(baseFS)
+		if err := sys.CopyFS(testFS, readFS); err != nil {
 			t.Fatal(err)
 		}
 		if err := sys.EqualFS(testFS, baseFS); err != nil {

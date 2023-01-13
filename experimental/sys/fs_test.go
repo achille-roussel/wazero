@@ -42,7 +42,7 @@ func TestCopyFS(t *testing.T) {
 	t2 := t0.Add(time.Millisecond)
 
 	testFS := sys.DirFS(t.TempDir())
-	baseFS := fstest.MapFS{
+	baseFS := sys.NewFS(fstest.MapFS{
 		"top_level_file": &fstest.MapFile{
 			Data:    []byte(`top level data`),
 			Mode:    0644,
@@ -59,7 +59,7 @@ func TestCopyFS(t *testing.T) {
 			Mode:    0600,
 			ModTime: t2,
 		},
-	}
+	})
 
 	if err := sys.CopyFS(testFS, baseFS); err != nil {
 		t.Fatal(err)
