@@ -3,6 +3,7 @@ package sys
 import (
 	"io"
 	"io/fs"
+	"sync/atomic"
 	"time"
 )
 
@@ -405,6 +406,33 @@ var (
 	_ io.ReaderFrom   = (*file)(nil)
 	_ io.StringWriter = (*file)(nil)
 )
+
+type sharedFile struct {
+	refc atomic.Uintptr
+	File
+}
+
+func (f *sharedFile) Close() error {
+	panic("closed explicitly instead of via reference counting")
+}
+
+func (f *sharedFile) ref() {
+	f.refc.Add(1)
+}
+
+func (f *sharedFile) unref() {
+	if f.refc.Add(^uintptr(0)) == 0 {
+		f.File.Close()
+		f.File = nil
+	}
+}
+
+type sharedFileRef struct{ *sharedFile }
+
+func (ref sharedFileRef) Close() error {
+	ref.unref()
+	return nil
+}
 
 type errRoot struct{ err error }
 

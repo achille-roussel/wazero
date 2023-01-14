@@ -8,46 +8,62 @@ import (
 
 // RootFS wraps a file system to ensure that path resolutions are not allowed
 // to escape the root of the file system (e.g. following symbolic links).
-func RootFS(root FS) FS { return &rootFS{root} }
-
-type rootFS struct{ root FS }
-
-func (fsys *rootFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
-
-func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	f, err := fsys.openFile(name, flags, perm)
-	if err != nil {
-		return nil, makePathError("open", name, err)
-	}
-	return f, nil
+func RootFS(root FS) FS {
+	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+		d, err := OpenRoot(root)
+		if err != nil {
+			return nil, err
+		}
+		root := &sharedFile{File: d}
+		root.ref()
+		defer root.unref()
+		if name == "." {
+			root.ref() // +1 because we keep 2 references to it
+			return newRootFile(root, sharedFileRef{root}, "."), nil
+		}
+		f, err := lookup(d, d, ".", name, flags, perm)
+		if err != nil {
+			return nil, err
+		}
+		return newRootFile(root, f, name), nil
+	})
 }
 
-func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (*rootFile, error) {
-	if !ValidPath(name) {
-		return nil, ErrNotExist
-	}
-	d, err := OpenRoot(fsys.root)
+func newRootFile(root *sharedFile, file File, name string) *rootFile {
+	root.ref()
+	return &rootFile{root: root, name: name, File: file}
+}
+
+type rootFile struct {
+	root *sharedFile
+	name string
+	File
+}
+
+func (f *rootFile) Close() error {
+	f.root.unref()
+	f.root = nil
+	return f.File.Close()
+}
+
+func (f *rootFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	newFile, err := lookup(f.root.File, f.File, f.name, name, flags, perm)
 	if err != nil {
 		return nil, err
 	}
-	if name == "." {
-		return fsys.newFile(d, name), nil
-	}
-	defer d.Close()
-	f, err := fsys.openFileAt(d, ".", name, flags, perm)
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
+	return newRootFile(f.root, newFile, JoinPath(f.name, name)), nil
 }
 
-func (fsys *rootFS) openFileAt(dir File, base, path string, flags int, perm fs.FileMode) (*rootFile, error) {
-	dir = nopClose{dir} // don't close the first directory received as argument
+type nopClose struct{ File }
+
+func (nopClose) Close() error { return nil }
+
+// sentinel error value used to break out of WalkPath when resolving symbolic links
+var errResolveSymlink = errors.New("resolve symlink")
+
+func lookup(root, dir File, base, path string, flags int, perm fs.FileMode) (File, error) {
+	dir = nopClose{dir} // don't close the first directories received as arguments
 	defer func() { dir.Close() }()
-	// Capture these input values because we need them to compute the file name
-	// if it is successfully opened.
-	openBase := base
-	openPath := path
 
 	setCurrentDirectory := func(d File) {
 		dir.Close()
@@ -58,11 +74,7 @@ func (fsys *rootFS) openFileAt(dir File, base, path string, flags int, perm fs.F
 		if link = CleanPath(link); strings.HasPrefix(link, "/") {
 			// The symbolic link contained an absolute path starting with a "/".
 			// We go back to the root and start resolving paths back from there.
-			r, err := fsys.root.OpenFile(".", O_DIRECTORY, 0)
-			if err != nil {
-				return err
-			}
-			setCurrentDirectory(r)
+			setCurrentDirectory(nopClose{root})
 			base = "."
 			path = link[1:]
 		} else if path != "" {
@@ -168,34 +180,5 @@ resolvePath:
 		goto resolvePath
 	}
 
-	name := JoinPath(openBase, openPath)
-	return fsys.newFile(f, name), nil
+	return f, nil
 }
-
-func (fsys *rootFS) newFile(file File, name string) *rootFile {
-	return &rootFile{root: fsys, name: name, File: file}
-}
-
-type rootFile struct {
-	root *rootFS
-	name string
-	File
-}
-
-func (f *rootFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	if !ValidPath(name) {
-		return nil, makePathError("open", name, ErrNotExist)
-	}
-	newFile, err := f.root.openFileAt(f.File, f.name, name, flags, perm)
-	if err != nil {
-		return nil, makePathError("open", name, err)
-	}
-	return newFile, nil
-}
-
-type nopClose struct{ File }
-
-func (nopClose) Close() error { return nil }
-
-// sentinel error value used to break out of WalkPath when resolving symbolic links
-var errResolveSymlink = errors.New("resolve symlink")
