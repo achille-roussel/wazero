@@ -307,3 +307,20 @@ func TestWalkPath(t *testing.T) {
 		}
 	}
 }
+
+func TestMkdirAll(t *testing.T) {
+	testFS := sys.DirFS(t.TempDir())
+
+	mkdirAll := func(path string) {
+		if err := sys.MkdirAll(testFS, path, 0755); err != nil {
+			t.Error(err)
+		}
+	}
+
+	mkdirAll(".")
+	mkdirAll("a")
+	mkdirAll("a/b/c")
+	mkdirAll("a/b/c")
+	mkdirAll("a/b/c/d")
+	mkdirAll("a/b/c")
+}
