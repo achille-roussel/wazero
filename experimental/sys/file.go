@@ -405,3 +405,31 @@ var (
 	_ io.ReaderFrom   = (*file)(nil)
 	_ io.StringWriter = (*file)(nil)
 )
+
+// ErrFile constructs a file which always returns err on all its method calls.
+func ErrFile(err error, name string) File { return NewFile(errFile{err}, name) }
+
+type errFile struct{ err error }
+
+func (f errFile) Close() error                                    { return nil }
+func (f errFile) Read([]byte) (int, error)                        { return 0, f.err }
+func (f errFile) ReadAt([]byte, int64) (int, error)               { return 0, f.err }
+func (f errFile) Write([]byte) (int, error)                       { return 0, f.err }
+func (f errFile) WriteAt([]byte, int64) (int, error)              { return 0, f.err }
+func (f errFile) Seek(int64, int) (int64, error)                  { return 0, f.err }
+func (f errFile) Readlink() (string, error)                       { return "", f.err }
+func (f errFile) Stat() (fs.FileInfo, error)                      { return nil, f.err }
+func (f errFile) Chmod(fs.FileMode) error                         { return f.err }
+func (f errFile) Chtimes(time.Time, time.Time) error              { return f.err }
+func (f errFile) Truncate(int64) error                            { return f.err }
+func (f errFile) Sync() error                                     { return f.err }
+func (f errFile) Datasync() error                                 { return f.err }
+func (f errFile) Fd() uintptr                                     { return ^uintptr(0) }
+func (f errFile) OpenFile(string, int, fs.FileMode) (File, error) { return nil, f.err }
+func (f errFile) ReadDir(int) ([]fs.DirEntry, error)              { return nil, f.err }
+func (f errFile) Mkdir(string, fs.FileMode) error                 { return f.err }
+func (f errFile) Rmdir(string) error                              { return f.err }
+func (f errFile) Unlink(string) error                             { return f.err }
+func (f errFile) Symlink(string, string) error                    { return f.err }
+func (f errFile) Link(string, Directory, string) error            { return f.err }
+func (f errFile) Rename(string, Directory, string) error          { return f.err }
