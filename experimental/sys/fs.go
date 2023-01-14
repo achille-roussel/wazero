@@ -90,8 +90,14 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 	}
 	f, err := open(open, name, flags, perm)
 	if err != nil {
+		if name == "." {
+			// The root should always be successfully opened; wrap the
+			// error instead of returning it so it does not invalidation
+			// this expectation.
+			return ErrFile(err, name), nil
+		}
 		if _, ok := err.(*fs.PathError); !ok {
-			err = makePathError("open", name, err)
+			err = &fs.PathError{Op: "open", Path: name, Err: err}
 		}
 		return nil, err
 	}
