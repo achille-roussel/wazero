@@ -427,7 +427,7 @@ func (f *errRoot) Unlink(string) error                    { return f.err }
 func (f *errRoot) Symlink(string, string) error           { return f.err }
 func (f *errRoot) Link(string, Directory, string) error   { return f.err }
 func (f *errRoot) Rename(string, Directory, string) error { return f.err }
-func (f *errRoot) ReadDir(int) ([]fs.DirEntry, error)     { return nil, nil }
+func (f *errRoot) ReadDir(int) ([]fs.DirEntry, error)     { return nil, io.EOF }
 func (f *errRoot) Stat() (fs.FileInfo, error)             { return errRootInfo{}, nil }
 func (f *errRoot) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if name == "." {
