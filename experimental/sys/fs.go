@@ -145,7 +145,7 @@ openFile:
 		}
 	}
 
-	return ReadOnlyFile(fsys, f, name), nil
+	return ReadOnlyFile(f, name, fsys), nil
 }
 
 // ErrFS returns a FS which errors with err on all its method calls.
