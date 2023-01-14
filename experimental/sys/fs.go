@@ -167,7 +167,11 @@ func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 
 // FuncFS is an implementation of the FS interface using a function to open
 // new files.
-type FuncFS func(string, int, fs.FileMode) (File, error)
+//
+// The function has a signature similar to OpenFile, but the first argument is
+// the FuncFS itself as a FS value, allowing to be captured in the returned
+// File (e.g. if it is constructed with ReadOnlyFile).
+type FuncFS func(FS, string, int, fs.FileMode) (File, error)
 
 func (open FuncFS) Open(name string) (fs.File, error) {
 	return Open(open, name)
@@ -177,7 +181,7 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 	if !ValidPath(name) {
 		return nil, makePathError("open", name, ErrNotExist)
 	}
-	f, err := open(name, flags, perm)
+	f, err := open(open, name, flags, perm)
 	if err != nil {
 		if _, ok := err.(*fs.PathError); !ok {
 			err = makePathError("open", name, err)
@@ -186,9 +190,17 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 	return f, err
 }
 
+// FileFS constructs a FS instance from a root file f, using f's OpenFile
+// method to navigate the file system.
+func FileFS(f File) FS {
+	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+		return f.OpenFile(name, flags, perm)
+	})
+}
+
 // SubFS constructs a FS from the given base with the root set to path.
 func SubFS(base FS, path string) FS {
-	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
+	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
 		return base.OpenFile(JoinPath(path, name), flags, perm)
 	})
 }

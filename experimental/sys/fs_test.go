@@ -32,7 +32,7 @@ func TestNewFS_Root(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { f.Close() })
-		return sys.FuncFS(f.OpenFile)
+		return sys.FileFS(f)
 	})
 }
 
