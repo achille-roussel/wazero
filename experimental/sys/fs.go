@@ -94,7 +94,7 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 			// The root should always be successfully opened; wrap the
 			// error instead of returning it so it does not invalidation
 			// this expectation.
-			return ErrFile(err, name), nil
+			return NewFile(&errRoot{err}, "."), nil
 		}
 		if _, ok := err.(*fs.PathError); !ok {
 			err = &fs.PathError{Op: "open", Path: name, Err: err}
