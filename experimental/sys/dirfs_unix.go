@@ -21,8 +21,12 @@ func (f dirFile) Datasync() error {
 	return datasync(f.File)
 }
 
+func (f dirFile) Mknod(name string, mode fs.FileMode, dev Device) error {
+	return mknodat(f.fd(), name, makeMode(mode), int(dev))
+}
+
 func (f dirFile) Mkdir(name string, perm fs.FileMode) error {
-	return mkdirat(f.fd(), name, uint32(perm))
+	return mkdirat(f.fd(), name, makeMode(perm))
 }
 
 func (f dirFile) Rmdir(name string) error {

@@ -21,6 +21,7 @@ func TestReadOnlyFS(t *testing.T, makeFS MakeFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", testReadOnlyOpenFile},
 		{"Open", testReadOnlyOpen},
+		{"Mknod", testReadOnlyMknod},
 		{"Mkdir", testReadOnlyMkdir},
 		{"Rmdir", testReadOnlyRmdir},
 		{"Unlink", testReadOnlyUnlink},
@@ -99,6 +100,14 @@ var testReadOnlyOpenFile = append(testDefaultOpenFile,
 )
 
 var testReadOnlyOpen = append(testDefaultOpen)
+
+var testReadOnlyMknod = append(testDefaultMknod,
+	fsTestCase{
+		name: "creating a node fails with ErrReadOnly",
+		err:  sys.ErrReadOnly,
+		test: func(fsys sys.FS) error { return sys.Mknod(fsys, "test", 0600, sys.Dev(0, 0)) },
+	},
+)
 
 var testReadOnlyMkdir = append(testDefaultMkdir,
 	fsTestCase{

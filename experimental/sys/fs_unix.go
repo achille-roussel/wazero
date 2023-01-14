@@ -41,53 +41,32 @@ func chtimes(file *os.File, atime, mtime time.Time) error {
 	return syscall.Futimes(fd, tv)
 }
 
-type fileInfo struct {
-	stat syscall.Stat_t
-	name string
-}
-
-func (info *fileInfo) Name() string {
-	return info.name
-}
-
-func (info *fileInfo) Size() int64 {
-	return info.stat.Size
-}
-
-func (info *fileInfo) Mode() (mode fs.FileMode) {
-	mode = fs.FileMode(info.stat.Mode) & 0777
-	switch info.stat.Mode & syscall.S_IFMT {
-	case syscall.S_IFBLK:
-		mode |= fs.ModeDevice
-	case syscall.S_IFCHR:
-		mode |= fs.ModeDevice | fs.ModeCharDevice
-	case syscall.S_IFDIR:
-		mode |= fs.ModeDir
-	case syscall.S_IFIFO:
-		mode |= fs.ModeNamedPipe
-	case syscall.S_IFLNK:
-		mode |= fs.ModeSymlink
-	case syscall.S_IFREG:
-		// nothing to do
-	case syscall.S_IFSOCK:
-		mode |= fs.ModeSocket
+func makeMode(fileMode fs.FileMode) (mode uint32) {
+	mode = uint32(fileMode.Perm())
+	switch fileMode.Type() {
+	case fs.ModeDevice:
+		mode |= syscall.S_IFBLK
+	case fs.ModeDevice | fs.ModeCharDevice:
+		mode |= syscall.S_IFCHR
+	case fs.ModeDir:
+		mode |= syscall.S_IFDIR
+	case fs.ModeNamedPipe:
+		mode |= syscall.S_IFIFO
+	case fs.ModeSymlink:
+		mode |= syscall.S_IFLNK
+	case fs.ModeSocket:
+		mode |= syscall.S_IFSOCK
+	default:
+		mode |= syscall.S_IFREG
 	}
-	if info.stat.Mode&syscall.S_ISGID != 0 {
-		mode |= fs.ModeSetgid
+	if (fileMode & fs.ModeSetgid) != 0 {
+		mode |= syscall.S_ISGID
 	}
-	if info.stat.Mode&syscall.S_ISUID != 0 {
-		mode |= fs.ModeSetuid
+	if (fileMode & fs.ModeSetuid) != 0 {
+		mode |= syscall.S_ISUID
 	}
-	if info.stat.Mode&syscall.S_ISVTX != 0 {
-		mode |= fs.ModeSticky
+	if (fileMode & fs.ModeSticky) != 0 {
+		mode |= syscall.S_ISVTX
 	}
 	return mode
-}
-
-func (info *fileInfo) Sys() interface{} {
-	return &info.stat
-}
-
-func (info *fileInfo) IsDir() bool {
-	return info.Mode().IsDir()
 }

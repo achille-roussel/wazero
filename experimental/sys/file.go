@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"sync/atomic"
@@ -52,6 +53,8 @@ type Directory interface {
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 	// Reads the list of directory entries (see fs.ReadDirFile).
 	ReadDir(n int) ([]fs.DirEntry, error)
+	// Creates a special or ordinaly file on the file system.
+	Mknod(name string, mode fs.FileMode, dev Device) error
 	// Creates a directory on the file system.
 	Mkdir(name string, perm fs.FileMode) error
 	// Removes a directory from the file system.
@@ -67,6 +70,27 @@ type Directory interface {
 	// the receivers, while newName is expressed relative to newDir.
 	Rename(oldName string, newDir Directory, newName string) error
 }
+
+// Device represents a device number on the file system.
+//
+// Device numbers are composed of a minor and mojor parts.
+type Device dev_t
+
+// Dev constructs a Device from a minor and major numbers.
+func Dev(major, minor int) Device { return Device(makedev(major, minor)) }
+
+// Major returns the device's major number.
+func (dev Device) Major() int { return major(dev_t(dev)) }
+
+// Minor returns the device's minor number.
+func (dev Device) Minor() int { return minor(dev_t(dev)) }
+
+// String returns a string representation of dev as "major/minor".
+func (dev Device) String() string { return fmt.Sprintf("%d/%d", dev.Major(), dev.Minor()) }
+
+// FileDevice returns the device embedded into the given file info.
+// If there were no devices, zero is returned.
+func FileDevice(info fs.FileInfo) Device { return Device(device(info)) }
 
 // NewFile creates a wrapper around the given file which ensures that the
 // resulting file will satisfy a set of base expectations of the File
@@ -310,6 +334,20 @@ func (f *file) OpenFile(name string, flags int, perm fs.FileMode) (file File, er
 	return file, err
 }
 
+func (f *file) Mknod(name string, mode fs.FileMode, dev Device) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		err = f.base.Mknod(name, mode, dev)
+	}
+	if err != nil {
+		err = makePathError("mknod", name, err)
+	}
+	return err
+}
+
 func (f *file) Mkdir(name string, perm fs.FileMode) (err error) {
 	if f.base == nil {
 		err = ErrClosed
@@ -442,27 +480,28 @@ func (ref sharedFileRef) Close() error {
 
 type errRoot struct{ err error }
 
-func (f *errRoot) Close() error                           { return nil }
-func (f *errRoot) Read([]byte) (int, error)               { return 0, ErrNotSupported }
-func (f *errRoot) ReadAt([]byte, int64) (int, error)      { return 0, ErrNotSupported }
-func (f *errRoot) Write([]byte) (int, error)              { return 0, ErrNotSupported }
-func (f *errRoot) WriteAt([]byte, int64) (int, error)     { return 0, ErrNotSupported }
-func (f *errRoot) Seek(int64, int) (int64, error)         { return 0, ErrNotSupported }
-func (f *errRoot) Readlink() (string, error)              { return "", ErrNotSupported }
-func (f *errRoot) Chmod(fs.FileMode) error                { return ErrNotSupported }
-func (f *errRoot) Chtimes(time.Time, time.Time) error     { return ErrNotSupported }
-func (f *errRoot) Truncate(int64) error                   { return ErrNotSupported }
-func (f *errRoot) Sync() error                            { return ErrNotSupported }
-func (f *errRoot) Datasync() error                        { return ErrNotSupported }
-func (f *errRoot) Fd() uintptr                            { return ^uintptr(0) }
-func (f *errRoot) Mkdir(string, fs.FileMode) error        { return f.err }
-func (f *errRoot) Rmdir(string) error                     { return f.err }
-func (f *errRoot) Unlink(string) error                    { return f.err }
-func (f *errRoot) Symlink(string, string) error           { return f.err }
-func (f *errRoot) Link(string, Directory, string) error   { return f.err }
-func (f *errRoot) Rename(string, Directory, string) error { return f.err }
-func (f *errRoot) ReadDir(int) ([]fs.DirEntry, error)     { return nil, io.EOF }
-func (f *errRoot) Stat() (fs.FileInfo, error)             { return errRootInfo{}, nil }
+func (f *errRoot) Close() error                            { return nil }
+func (f *errRoot) Read([]byte) (int, error)                { return 0, ErrNotSupported }
+func (f *errRoot) ReadAt([]byte, int64) (int, error)       { return 0, ErrNotSupported }
+func (f *errRoot) Write([]byte) (int, error)               { return 0, ErrNotSupported }
+func (f *errRoot) WriteAt([]byte, int64) (int, error)      { return 0, ErrNotSupported }
+func (f *errRoot) Seek(int64, int) (int64, error)          { return 0, ErrNotSupported }
+func (f *errRoot) Readlink() (string, error)               { return "", ErrNotSupported }
+func (f *errRoot) Chmod(fs.FileMode) error                 { return ErrNotSupported }
+func (f *errRoot) Chtimes(time.Time, time.Time) error      { return ErrNotSupported }
+func (f *errRoot) Truncate(int64) error                    { return ErrNotSupported }
+func (f *errRoot) Sync() error                             { return ErrNotSupported }
+func (f *errRoot) Datasync() error                         { return ErrNotSupported }
+func (f *errRoot) Fd() uintptr                             { return ^uintptr(0) }
+func (f *errRoot) Mknod(string, fs.FileMode, Device) error { return f.err }
+func (f *errRoot) Mkdir(string, fs.FileMode) error         { return f.err }
+func (f *errRoot) Rmdir(string) error                      { return f.err }
+func (f *errRoot) Unlink(string) error                     { return f.err }
+func (f *errRoot) Symlink(string, string) error            { return f.err }
+func (f *errRoot) Link(string, Directory, string) error    { return f.err }
+func (f *errRoot) Rename(string, Directory, string) error  { return f.err }
+func (f *errRoot) ReadDir(int) ([]fs.DirEntry, error)      { return nil, io.EOF }
+func (f *errRoot) Stat() (fs.FileInfo, error)              { return errRootInfo{}, nil }
 func (f *errRoot) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if name == "." {
 		return f, nil

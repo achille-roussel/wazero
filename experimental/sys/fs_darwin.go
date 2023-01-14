@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -29,13 +28,20 @@ const (
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW
 )
 
-func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
-	f, err := os.OpenFile(path, flags, perm)
+// https://github.com/apple/darwin-xnu/blob/main/bsd/sys/types.h#L151
+type dev_t uint64
+
+func makedev(major, minor int) dev_t { return dev_t(major)<<8 | dev_t(minor)&0xFF }
+func major(dev dev_t) int            { return int(dev >> 8) }
+func minor(dev dev_t) int            { return int(dev & 0xFF) }
+
+func openFile(path string, flags int, mode fs.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(path, flags, mode)
 	if err != nil {
 		if errors.Is(err, syscall.ELOOP) && ((flags & O_NOFOLLOW) != 0) {
 			flags &= ^O_NOFOLLOW
 			flags |= syscall.O_SYMLINK
-			f, err = os.OpenFile(path, flags, perm)
+			f, err = os.OpenFile(path, flags, mode)
 		}
 	}
 	return f, err
@@ -59,7 +65,7 @@ func datasync(file *os.File) error {
 	}
 }
 
-func openat(fd int, path string, flags int, perm uint32) (int, error) {
+func openat(fd int, path string, flags int, mode uint32) (int, error) {
 	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return -1, err
@@ -69,7 +75,7 @@ func openat(fd int, path string, flags int, perm uint32) (int, error) {
 		uintptr(fd),
 		uintptr(unsafe.Pointer(p)),
 		uintptr(flags),
-		uintptr(perm),
+		uintptr(mode),
 		uintptr(0),
 		uintptr(0),
 	)
@@ -192,7 +198,7 @@ func symlinkat(target string, fd int, path string) error {
 	return nil
 }
 
-func mkdirat(fd int, path string, perm uint32) error {
+func mkdirat(fd int, path string, mode uint32) error {
 	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return err
@@ -201,7 +207,7 @@ func mkdirat(fd int, path string, perm uint32) error {
 		uintptr(__SYS_MKDIRAT),
 		uintptr(fd),
 		uintptr(unsafe.Pointer(p)),
-		uintptr(perm),
+		uintptr(mode),
 	)
 	if e != 0 {
 		return e
@@ -224,8 +230,4 @@ func freadlink(fd int) (string, error) {
 		return "", syscall.ENAMETOOLONG
 	}
 	return string(buf[:n]), nil
-}
-
-func (info *fileInfo) ModTime() time.Time {
-	return time.Unix(info.stat.Mtimespec.Unix())
 }

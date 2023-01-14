@@ -175,9 +175,17 @@ var testValidateOpen = fsTestSuite{
 	},
 }
 
-var testValidateMkdir = fsTestSuite{
+var testValidateMknod = fsTestSuite{
 	{
 		name: "creating a directory with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return sys.Mknod(fsys, "/", 0600, sys.Dev(0, 0)) },
+	},
+}
+
+var testValidateMkdir = fsTestSuite{
+	{
+		name: "creating a node with an invalid name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error { return sys.Mkdir(fsys, "/", 0755) },
 	},
@@ -413,6 +421,8 @@ var testDefaultOpen = append(testValidateOpen,
 		},
 	},
 )
+
+var testDefaultMknod = append(testValidateMknod)
 
 var testDefaultMkdir = append(testValidateMkdir)
 

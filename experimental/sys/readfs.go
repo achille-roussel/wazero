@@ -202,6 +202,10 @@ func (f *readOnlyFile) Datasync() error {
 	return f.fail("datasync", ErrReadOnly)
 }
 
+func (f *readOnlyFile) Mknod(string, fs.FileMode, Device) error {
+	return f.fail("mknod", ErrReadOnly)
+}
+
 func (f *readOnlyFile) Mkdir(string, fs.FileMode) error {
 	return f.fail("mkdir", ErrReadOnly)
 }

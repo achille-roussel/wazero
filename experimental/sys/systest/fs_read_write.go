@@ -33,6 +33,7 @@ func TestReadWriteFS(t *testing.T, newFS NewFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", testReadWriteOpenFile},
 		{"Open", testReadWriteOpen},
+		{"Mknod", testReadWriteMknod},
 		{"Mkdir", testReadWriteMkdir},
 		{"Rmdir", testReadWriteRmdir},
 		{"Unlink", testReadWriteUnlink},
@@ -146,6 +147,77 @@ var testReadWriteOpen = append(testDefaultOpen,
 			_, err := fsys.Open(path + "/test")
 			return err
 		}),
+	},
+)
+
+var testReadWriteMknod = append(testDefaultMknod,
+	fsTestCase{
+		name: "creating a node at a path containing a symbolic link loop fails with ErrLoop",
+		err:  sys.ErrLoop,
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Mknod(fsys, path+"/test", 0600, sys.Dev(0, 0)) }),
+	},
+
+	fsTestCase{
+		name: "creating a node at a location where a node exists fails with ErrExist",
+		base: fstest.MapFS{
+			"top": &fstest.MapFile{Mode: 0600 | fs.ModeDir},
+		},
+		err:  sys.ErrExist,
+		test: func(fsys sys.FS) error { return sys.Mknod(fsys, "top", 0600, sys.Dev(0, 0)) },
+	},
+
+	fsTestCase{
+		name: "creating a node at a location where a file exists fails with ErrExist",
+		base: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0644},
+		},
+		err:  sys.ErrExist,
+		test: func(fsys sys.FS) error { return sys.Mknod(fsys, "test", 0600, sys.Dev(0, 0)) },
+	},
+
+	fsTestCase{
+		name: "creating a node at a location which does not exist fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return sys.Mknod(fsys, "top/sub", 0600, sys.Dev(0, 0)) },
+	},
+
+	fsTestCase{
+		name: "character devices can be created for device zero",
+		test: func(fsys sys.FS) error {
+			return sys.Mknod(fsys, "test", 0600|fs.ModeDevice|fs.ModeCharDevice, sys.Dev(0, 0))
+		},
+	},
+
+	fsTestCase{
+		name: "opening a charcter device created for device zero fails with ErrDevice",
+		err:  sys.ErrDevice,
+		test: func(fsys sys.FS) error {
+			name := "test"
+			mode := 0600 | fs.ModeDevice | fs.ModeCharDevice
+			if err := sys.Mknod(fsys, name, mode, sys.Dev(0, 0)); err != nil {
+				return err
+			}
+			_, err := sys.Open(fsys, name)
+			return err
+		},
+	},
+
+	fsTestCase{
+		name: "regular nodes can be created on the same device as their parent directory",
+		base: fstest.MapFS{
+			"dir": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+		},
+		want: fstest.MapFS{
+			"dir":      &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+			"dir/test": &fstest.MapFile{Mode: 0600},
+		},
+		test: func(fsys sys.FS) error {
+			s, err := sys.Lstat(fsys, "dir")
+			if err != nil {
+				return err
+			}
+			return sys.Mknod(fsys, "dir/test", 0600, sys.FileDevice(s))
+		},
 	},
 )
 

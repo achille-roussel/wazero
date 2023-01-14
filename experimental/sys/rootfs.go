@@ -333,6 +333,12 @@ func (f *sandboxedFile) openFile(name string, flags int, perm fs.FileMode) (File
 	return lookup(f.root.File, f.File, f.name, name, flags, perm)
 }
 
+func (f *sandboxedFile) Mknod(name string, mode fs.FileMode, dev Device) error {
+	return lookupDir(f, "mknod", name, func(dir Directory, name string) error {
+		return dir.Mknod(name, mode, dev)
+	})
+}
+
 func (f *sandboxedFile) Mkdir(name string, perm fs.FileMode) error {
 	return lookupDir(f, "mkdir", name, func(dir Directory, name string) error {
 		return dir.Mkdir(name, perm)
