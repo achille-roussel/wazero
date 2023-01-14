@@ -87,23 +87,6 @@ openFile:
 	return ReadOnlyFile(f, name, fsys), nil
 }
 
-// ErrFS returns a FS which errors with err on all its method calls.
-func ErrFS(err error) FS { return &errFS{err: err} }
-
-type errFS struct{ err error }
-
-func (fsys *errFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
-
-func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	var err error
-	if !ValidPath(name) {
-		err = ErrNotExist
-	} else {
-		err = fsys.err
-	}
-	return nil, makePathError("open", name, err)
-}
-
 // FuncFS is an implementation of the FS interface using a function to open
 // new files.
 //
@@ -128,6 +111,13 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 		return nil, err
 	}
 	return NewFile(f, name), nil
+}
+
+// ErrFS returns a FS which errors with err on all its method calls.
+func ErrFS(err error) FS {
+	return FuncFS(func(_ FS, _ string, _ int, _ fs.FileMode) (File, error) {
+		return nil, err
+	})
 }
 
 // FileFS constructs a FS instance from a root file f, using f's OpenFile
