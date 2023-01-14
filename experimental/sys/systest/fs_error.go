@@ -32,6 +32,14 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		},
 	})
 
+	mknod := append(testValidateMknod, fsTestCase{
+		name: "creating a directory errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			return sys.Mknod(fsys, "test", 0600, sys.Dev(0, 0))
+		},
+	})
+
 	mkdir := append(testValidateMkdir, fsTestCase{
 		name: "creating a directory errors",
 		err:  want,
@@ -138,6 +146,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", openFile},
 		{"Open", open},
+		{"Mknod", mknod},
 		{"Mkdir", mkdir},
 		{"Rmdir", rmdir},
 		{"Unlink", unlink},

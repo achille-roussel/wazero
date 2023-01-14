@@ -18,6 +18,7 @@ var (
 	ErrPermission     error = fs.ErrPermission
 	ErrReadOnly       error = syscall.EROFS
 	ErrLoop           error = syscall.ELOOP
+	ErrDevice         error = syscall.ENXIO
 )
 
 func makePathError(op, name string, err error) error {

@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -22,14 +21,42 @@ const (
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_PATH
 )
 
-func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
-	f, err := os.OpenFile(path, flags, perm)
+type dev_t uint64
+
+func makedev(major, minor int) (dev dev_t) {
+	maj := dev_t(major)
+	min := dev_t(minor)
+	// use glibc's encoding, see:
+	// https://stackoverflow.com/questions/9635702/in-posix-how-is-type-dev-t-getting-used
+	dev |= (min & 0x000000FF)
+	dev |= (maj & 0x00000FFF) << 8
+	dev |= (min & 0xFFFFFF00) << 12
+	dev |= (maj & 0xFFFFF000) << 32
+	return dev
+}
+
+func major(dev dev_t) int {
+	maj := dev_t(0)
+	maj |= (dev & 0x00000000000FFF00) >> 8
+	maj |= (dev & 0xFFFFF00000000000) >> 32
+	return int(maj)
+}
+
+func minor(dev dev_t) int {
+	min := dev_t(0)
+	min |= (dev & 0x00000000000000FF) >> 0
+	min |= (dev & 0x00000FFFFFF00000) >> 12
+	return int(min)
+}
+
+func openFile(path string, flags int, mode fs.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(path, flags, mode)
 	if err != nil {
 		// Linux gives ELOOP if attempting to open a symbolic link without
 		// passing the O_PATH flag.
 		if errors.Is(err, syscall.ELOOP) {
 			if (flags & (O_DIRECTORY | O_NOFOLLOW | O_PATH)) == O_NOFOLLOW {
-				f, err = os.OpenFile(path, flags|O_PATH, perm)
+				f, err = os.OpenFile(path, flags|O_PATH, mode)
 			}
 		}
 	}
@@ -56,12 +83,16 @@ func unlink(path string) (err error) {
 	return err
 }
 
-func openat(fd int, path string, flags int, perm uint32) (int, error) {
-	return syscall.Openat(fd, path, flags, perm)
+func openat(fd int, path string, flags int, mode uint32) (int, error) {
+	return syscall.Openat(fd, path, flags, mode)
 }
 
-func mkdirat(fd int, path string, perm uint32) error {
-	return syscall.Mkdirat(fd, path, perm)
+func mknodat(fd int, path string, mode uint32, dev int) error {
+	return syscall.Mknodat(fd, path, mode, dev)
+}
+
+func mkdirat(fd int, path string, mode uint32) error {
+	return syscall.Mkdirat(fd, path, mode)
 }
 
 func unlinkat(fd int, path string, flags int) error {
@@ -174,8 +205,4 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 		}
 	}
 	return err
-}
-
-func (info *fileInfo) ModTime() time.Time {
-	return time.Unix(info.stat.Mtim.Unix())
 }

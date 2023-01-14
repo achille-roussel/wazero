@@ -160,6 +160,8 @@ func copyFS(dst, src File) error {
 				err = copyDir(dst, src, name, stat)
 			case fs.ModeSymlink:
 				err = copySymlink(dst, src, name, stat)
+			case fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice:
+				err = copyDevice(dst, src, name, stat)
 			case 0: // regular file
 				err = copyFile(dst, src, name, stat)
 			}
@@ -219,6 +221,10 @@ func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 	return w.Chtimes(time, time)
 }
 
+func copyDevice(dst, src File, name string, stat fs.FileInfo) error {
+	return dst.Mknod(name, stat.Mode(), Dev(0, 0))
+}
+
 func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
 	if err != nil {
@@ -272,6 +278,8 @@ func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 				err = equalDir(source, target, name, buf)
 			case fs.ModeSymlink:
 				err = equalSymlink(source, target, name)
+			case fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice:
+				err = equalDevice(source, target, name)
 			default:
 				err = equalFile(source, target, name, buf)
 			}
@@ -325,6 +333,21 @@ func equalSymlink(source, target File, name string) error {
 		return equalErrorf(name, "symbolic links mimatch: want=%q got=%q", sourceLink, targetLink)
 	}
 	return nil
+}
+
+func equalDevice(source, target File, name string) error {
+	sourceDev, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer sourceDev.Close()
+	targetDev, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer targetDev.Close()
+	// TODO: compare the device numbers in a portable way
+	return equalStat(sourceDev, targetDev)
 }
 
 func equalFile(source, target File, name string, buf *[equalFSBufsize]byte) error {
@@ -385,9 +408,6 @@ func equalStat(source, target File) error {
 	if sourceMode != targetMode {
 		return fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
 	}
-	if sourceMode.IsDir() {
-		return nil
-	}
 	sourceTime := sourceInfo.ModTime()
 	targetTime := targetInfo.ModTime()
 	// Only compare the modification times if both file systems support it,
@@ -397,10 +417,13 @@ func equalStat(source, target File) error {
 			return fmt.Errorf("file times mismatch: want=%v got=%v", sourceTime, targetTime)
 		}
 	}
-	sourceSize := sourceInfo.Size()
-	targetSize := targetInfo.Size()
-	if sourceSize != targetSize {
-		return fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
+	// Directory sizes are platform-dependent, there is no need to compare.
+	if !sourceInfo.IsDir() {
+		sourceSize := sourceInfo.Size()
+		targetSize := targetInfo.Size()
+		if sourceSize != targetSize {
+			return fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
+		}
 	}
 	return nil
 }
@@ -487,6 +510,14 @@ func Stat(fsys FS, name string) (fs.FileInfo, error) {
 // link, and not its target.
 func Lstat(fsys FS, name string) (fs.FileInfo, error) {
 	return callFile1(fsys, "lstat", name, O_RDONLY|O_NOFOLLOW, File.Stat)
+}
+
+// Mknod creates a special or ordinary file in fsys with the given mode and
+// device number.
+func Mknod(fsys FS, name string, mode fs.FileMode, dev Device) error {
+	return callDir(fsys, "mknod", name, func(dir Directory, name string) error {
+		return dir.Mknod(name, mode, dev)
+	})
 }
 
 // Mkdir creates a directory in fsys with the given name and permissions.

@@ -9,12 +9,13 @@ import (
 
 func (f dirFile) openFile(name string, flags int, perm fs.FileMode) (*os.File, error) {
 	flags |= syscall.O_CLOEXEC
-	fd, err := openat(f.fd(), name, flags, uint32(perm))
+	mode := makeMode(perm)
+	fd, err := openat(f.fd(), name, flags, mode)
 	if err != nil {
 		// see openFile in fs_linux.go
 		if err == syscall.ELOOP {
 			if (flags & (O_DIRECTORY | O_NOFOLLOW | O_PATH)) == O_NOFOLLOW {
-				fd, err = openat(f.fd(), name, flags|O_PATH, uint32(perm))
+				fd, err = openat(f.fd(), name, flags|O_PATH, mode)
 			}
 		}
 	}
