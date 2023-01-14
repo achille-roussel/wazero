@@ -2,32 +2,45 @@ package sys
 
 import (
 	"io/fs"
+	"time"
 )
 
-func (f *dirFile) fd() int {
-	return int(f.base.Fd())
+func (f dirFile) fd() int {
+	return int(f.File.Fd())
 }
 
-func (f *dirFile) mkdir(name string, perm fs.FileMode) error {
+func (f dirFile) Readlink() (string, error) {
+	return readlink(f.File)
+}
+
+func (f dirFile) Chtimes(atime, mtime time.Time) error {
+	return chtimes(f.File, atime, mtime)
+}
+
+func (f dirFile) Datasync() error {
+	return datasync(f.File)
+}
+
+func (f dirFile) Mkdir(name string, perm fs.FileMode) error {
 	return mkdirat(f.fd(), name, uint32(perm))
 }
 
-func (f *dirFile) rmdir(name string) error {
+func (f dirFile) Rmdir(name string) error {
 	return unlinkat(f.fd(), name, __AT_REMOVEDIR)
 }
 
-func (f *dirFile) unlink(name string) error {
+func (f dirFile) Unlink(name string) error {
 	return unlinkat(f.fd(), name, 0)
 }
 
-func (f *dirFile) symlink(oldName, newName string) error {
+func (f dirFile) Symlink(oldName, newName string) error {
 	return symlinkat(oldName, f.fd(), newName)
 }
 
-func (f *dirFile) link(oldName string, newDir uintptr, newName string) error {
-	return linkat(f.fd(), oldName, int(newDir), newName, __AT_SYMLINK_FOLLOW)
+func (f dirFile) Link(oldName string, newDir Directory, newName string) error {
+	return linkat(f.fd(), oldName, int(newDir.Fd()), newName, __AT_SYMLINK_FOLLOW)
 }
 
-func (f *dirFile) rename(oldName string, newDir uintptr, newName string) error {
-	return renameat(f.fd(), oldName, int(newDir), newName)
+func (f dirFile) Rename(oldName string, newDir Directory, newName string) error {
+	return renameat(f.fd(), oldName, int(newDir.Fd()), newName)
 }

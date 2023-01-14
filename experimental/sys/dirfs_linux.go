@@ -3,13 +3,11 @@ package sys
 import (
 	"io/fs"
 	"os"
-	"path"
+	"path/filepath"
 	"syscall"
 )
 
-func (f *dirFile) openFile(name string, flags int, perm fs.FileMode) (*os.File, string, error) {
-	fsPath := path.Join(f.name, name)
-	osPath := path.Join(f.fsys.root, fsPath)
+func (f dirFile) openFile(name string, flags int, perm fs.FileMode) (*os.File, error) {
 	fd, err := openat(f.fd(), name, flags, uint32(perm))
 	if err != nil {
 		// see openFile in fs_linux.go
@@ -20,7 +18,9 @@ func (f *dirFile) openFile(name string, flags int, perm fs.FileMode) (*os.File, 
 		}
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return os.NewFile(uintptr(fd), osPath), fsPath, nil
+	path := filepath.Join(f.Name(), name)
+	file := os.NewFile(uintptr(fd), path)
+	return file, nil
 }
