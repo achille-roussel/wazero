@@ -406,30 +406,41 @@ var (
 	_ io.StringWriter = (*file)(nil)
 )
 
-// ErrFile constructs a file which always returns err on all its method calls.
-func ErrFile(err error, name string) File { return NewFile(errFile{err}, name) }
+type errRoot struct{ err error }
 
-type errFile struct{ err error }
+func (f *errRoot) Close() error                           { return nil }
+func (f *errRoot) Read([]byte) (int, error)               { return 0, ErrNotSupported }
+func (f *errRoot) ReadAt([]byte, int64) (int, error)      { return 0, ErrNotSupported }
+func (f *errRoot) Write([]byte) (int, error)              { return 0, ErrNotSupported }
+func (f *errRoot) WriteAt([]byte, int64) (int, error)     { return 0, ErrNotSupported }
+func (f *errRoot) Seek(int64, int) (int64, error)         { return 0, ErrNotSupported }
+func (f *errRoot) Readlink() (string, error)              { return "", ErrNotSupported }
+func (f *errRoot) Chmod(fs.FileMode) error                { return ErrNotSupported }
+func (f *errRoot) Chtimes(time.Time, time.Time) error     { return ErrNotSupported }
+func (f *errRoot) Truncate(int64) error                   { return ErrNotSupported }
+func (f *errRoot) Sync() error                            { return ErrNotSupported }
+func (f *errRoot) Datasync() error                        { return ErrNotSupported }
+func (f *errRoot) Fd() uintptr                            { return ^uintptr(0) }
+func (f *errRoot) Mkdir(string, fs.FileMode) error        { return f.err }
+func (f *errRoot) Rmdir(string) error                     { return f.err }
+func (f *errRoot) Unlink(string) error                    { return f.err }
+func (f *errRoot) Symlink(string, string) error           { return f.err }
+func (f *errRoot) Link(string, Directory, string) error   { return f.err }
+func (f *errRoot) Rename(string, Directory, string) error { return f.err }
+func (f *errRoot) ReadDir(int) ([]fs.DirEntry, error)     { return nil, nil }
+func (f *errRoot) Stat() (fs.FileInfo, error)             { return errRootInfo{}, nil }
+func (f *errRoot) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	if name == "." {
+		return f, nil
+	}
+	return nil, f.err
+}
 
-func (f errFile) Close() error                                    { return f.err }
-func (f errFile) Read([]byte) (int, error)                        { return 0, f.err }
-func (f errFile) ReadAt([]byte, int64) (int, error)               { return 0, f.err }
-func (f errFile) Write([]byte) (int, error)                       { return 0, f.err }
-func (f errFile) WriteAt([]byte, int64) (int, error)              { return 0, f.err }
-func (f errFile) Seek(int64, int) (int64, error)                  { return 0, f.err }
-func (f errFile) Readlink() (string, error)                       { return "", f.err }
-func (f errFile) Stat() (fs.FileInfo, error)                      { return nil, f.err }
-func (f errFile) Chmod(fs.FileMode) error                         { return f.err }
-func (f errFile) Chtimes(time.Time, time.Time) error              { return f.err }
-func (f errFile) Truncate(int64) error                            { return f.err }
-func (f errFile) Sync() error                                     { return f.err }
-func (f errFile) Datasync() error                                 { return f.err }
-func (f errFile) Fd() uintptr                                     { return ^uintptr(0) }
-func (f errFile) OpenFile(string, int, fs.FileMode) (File, error) { return nil, f.err }
-func (f errFile) ReadDir(int) ([]fs.DirEntry, error)              { return nil, f.err }
-func (f errFile) Mkdir(string, fs.FileMode) error                 { return f.err }
-func (f errFile) Rmdir(string) error                              { return f.err }
-func (f errFile) Unlink(string) error                             { return f.err }
-func (f errFile) Symlink(string, string) error                    { return f.err }
-func (f errFile) Link(string, Directory, string) error            { return f.err }
-func (f errFile) Rename(string, Directory, string) error          { return f.err }
+type errRootInfo struct{}
+
+func (info errRootInfo) Name() string       { return "." }
+func (ifno errRootInfo) Size() int64        { return 0 }
+func (info errRootInfo) Mode() fs.FileMode  { return 0755 | fs.ModeDir }
+func (info errRootInfo) ModTime() time.Time { return time.Time{} }
+func (info errRootInfo) IsDir() bool        { return true }
+func (info errRootInfo) Sys() any           { return nil }
