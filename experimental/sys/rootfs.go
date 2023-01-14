@@ -15,12 +15,20 @@ type rootFS struct{ root FS }
 func (fsys *rootFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
 
 func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	f, err := fsys.openFile(name, flags, perm)
+	if err != nil {
+		return nil, makePathError("open", name, err)
+	}
+	return f, nil
+}
+
+func (fsys *rootFS) openFile(name string, flags int, perm fs.FileMode) (*rootFile, error) {
 	if !ValidPath(name) {
-		return nil, makePathError("open", name, ErrNotExist)
+		return nil, ErrNotExist
 	}
 	d, err := OpenRoot(fsys.root)
 	if err != nil {
-		return nil, makePathError("open", name, err)
+		return nil, err
 	}
 	if name == "." {
 		return fsys.newFile(d, name), nil
@@ -28,15 +36,18 @@ func (fsys *rootFS) OpenFile(name string, flags int, perm fs.FileMode) (File, er
 	defer d.Close()
 	f, err := fsys.openFileAt(d, ".", name, flags, perm)
 	if err != nil {
-		return nil, makePathError("open", name, err)
+		return nil, err
 	}
 	return f, nil
 }
 
 func (fsys *rootFS) openFileAt(dir File, base, path string, flags int, perm fs.FileMode) (*rootFile, error) {
-	name := JoinPath(base, path)
 	dir = nopClose{dir} // don't close the first directory received as argument
 	defer func() { dir.Close() }()
+	// Capture these input values because we need them to compute the file name
+	// if it is successfully opened.
+	openBase := base
+	openPath := path
 
 	setCurrentDirectory := func(d File) {
 		dir.Close()
@@ -157,6 +168,7 @@ resolvePath:
 		goto resolvePath
 	}
 
+	name := JoinPath(openBase, openPath)
 	return fsys.newFile(f, name), nil
 }
 
