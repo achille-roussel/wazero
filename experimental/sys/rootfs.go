@@ -94,7 +94,7 @@ func (nopClose) Close() error { return nil }
 var errResolveSymlink = errors.New("resolve symlink")
 
 func lookup(root, dir File, base, path string, flags int, perm fs.FileMode) (File, error) {
-	dir = nopClose{dir} // don't close the first directories received as arguments
+	dir = nopClose{dir} // don't close the first directory received as arguments
 	defer func() { dir.Close() }()
 
 	setCurrentDirectory := func(d File) {
