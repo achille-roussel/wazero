@@ -227,7 +227,7 @@ func (f *readOnlyFile) Rename(string, Directory, string) error {
 }
 
 func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (file File, err error) {
-	if f.fsys == nil {
+	if f.base == nil {
 		err = ErrClosed
 	} else if !ValidPath(name) {
 		err = ErrNotExist
