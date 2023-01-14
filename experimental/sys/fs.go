@@ -84,18 +84,6 @@ type Directory interface {
 	Rename(oldName string, newDir Directory, newName string) error
 }
 
-// FuncFS is an implementation of the FS interface using a function to open
-// new files.
-type FuncFS func(string, int, fs.FileMode) (File, error)
-
-func (open FuncFS) Open(name string) (fs.File, error) {
-	return Open(open, name)
-}
-
-func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return open(name, flags, perm)
-}
-
 // NewFS constructs a FS from a fs.FS.
 //
 // The returned file system is read-only, all attempts to open files in write
@@ -175,6 +163,28 @@ func (fsys *errFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 		err = fsys.err
 	}
 	return nil, makePathError("open", name, err)
+}
+
+// FuncFS is an implementation of the FS interface using a function to open
+// new files.
+type FuncFS func(string, int, fs.FileMode) (File, error)
+
+func (open FuncFS) Open(name string) (fs.File, error) {
+	return Open(open, name)
+}
+
+func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return open(name, flags, perm)
+}
+
+// SubFS constructs a FS from the given base with the root set to path.
+func SubFS(base FS, path string) FS {
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
+		if !ValidPath(name) {
+			return nil, makePathError("open", name, ErrNotExist)
+		}
+		return base.OpenFile(JoinPath(path, name), flags, perm)
+	})
 }
 
 // CopyFS copies the file system src into dst.
