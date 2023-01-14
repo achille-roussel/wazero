@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"errors"
 	"io/fs"
 	"path"
 	"strings"
@@ -119,4 +120,50 @@ func WalkPath(base, path string, do func(string) error) (newBase, newPath string
 	}
 
 	return CleanPath(path[:i]), path[i:], err
+}
+
+// MkdirAll creates a directory at path, including all the necessary parents.
+func MkdirAll(fsys FS, path string, perm fs.FileMode) error {
+	if !ValidPath(path) {
+		return makePathError("mkdir", path, ErrNotExist)
+	}
+	if path == "." {
+		return nil // nothing to do, the root always exists
+	}
+
+	dir, err := OpenRoot(fsys)
+	if err != nil {
+		return err
+	}
+	defer func() { dir.Close() }()
+
+	_, _, err = WalkPath(".", path, func(name string) error {
+		if name == ".." {
+			parent, err := dir.OpenFile("..", O_DIRECTORY, 0)
+			if err != nil {
+				return err
+			}
+			dir.Close()
+			dir = parent
+			return nil
+		}
+
+		if err := dir.Mkdir(name, perm); err != nil {
+			if !errors.Is(err, ErrExist) {
+				return err
+			}
+		}
+
+		f, err := dir.OpenFile(name, O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		dir.Close()
+		dir = f
+		return err
+	})
+	if err != nil {
+		err = makePathError("mkdir", path, err)
+	}
+	return err
 }
