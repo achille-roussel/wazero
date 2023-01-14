@@ -42,8 +42,8 @@ func (fsys *readOnlyFS) openFile(name string, flags int, perm fs.FileMode) (File
 // The FS is used to open files when the file's OpenFile method is called.
 // The FS might be nil, in which case the file attempts to fallback to its own
 // OpenFile method (if any exists), or fails with ErrNotSupported.
-func ReadOnlyFile(file fs.File, name string, fsys FS) File {
-	return &readOnlyFile{fsys: fsys, base: file, name: name}
+func ReadOnlyFile(base fs.File, name string, fsys FS) File {
+	return &readOnlyFile{fsys, base, name}
 }
 
 type readOnlyFile struct {

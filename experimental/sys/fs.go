@@ -186,8 +186,9 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 		if _, ok := err.(*fs.PathError); !ok {
 			err = makePathError("open", name, err)
 		}
+		return nil, err
 	}
-	return f, err
+	return NewFile(f, name), nil
 }
 
 // FileFS constructs a FS instance from a root file f, using f's OpenFile
