@@ -9,6 +9,10 @@ import (
 // RootFS wraps a file system to ensure that path resolutions are not allowed
 // to escape the root of the file system (e.g. following symbolic links).
 func RootFS(root FS) FS {
+	return sandboxFS(root)
+}
+
+func sandboxFS(root FS) FS {
 	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
 		d, err := OpenRoot(root)
 		if err != nil {
@@ -19,70 +23,70 @@ func RootFS(root FS) FS {
 		defer root.unref()
 		if name == "." {
 			root.ref() // +1 because we keep 2 references to it
-			return newRootFile(root, sharedFileRef{root}, "."), nil
+			return sandboxFile(root, sharedFileRef{root}, "."), nil
 		}
 		f, err := lookup(d, d, ".", name, flags, perm)
 		if err != nil {
 			return nil, err
 		}
-		return newRootFile(root, f, name), nil
+		return sandboxFile(root, f, name), nil
 	})
 }
 
-func newRootFile(root *sharedFile, file File, name string) *rootFile {
+func sandboxFile(root *sharedFile, file File, name string) *sandboxedFile {
 	root.ref()
-	return &rootFile{root: root, name: name, File: file}
+	return &sandboxedFile{root: root, name: name, File: file}
 }
 
-type rootFile struct {
+type sandboxedFile struct {
 	root *sharedFile
 	name string
 	File
 }
 
-func (f *rootFile) Close() error {
+func (f *sandboxedFile) Close() error {
 	f.root.unref()
 	f.root = nil
 	return f.File.Close()
 }
 
-func (f *rootFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+func (f *sandboxedFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	newFile, err := f.openFile(name, flags, perm)
 	if err != nil {
 		return nil, err
 	}
-	return newRootFile(f.root, newFile, JoinPath(f.name, name)), nil
+	return sandboxFile(f.root, newFile, JoinPath(f.name, name)), nil
 }
 
-func (f *rootFile) openFile(name string, flags int, perm fs.FileMode) (File, error) {
+func (f *sandboxedFile) openFile(name string, flags int, perm fs.FileMode) (File, error) {
 	return lookup(f.root.File, f.File, f.name, name, flags, perm)
 }
 
-func (f *rootFile) Mkdir(name string, perm fs.FileMode) error {
+func (f *sandboxedFile) Mkdir(name string, perm fs.FileMode) error {
 	return lookupDir(f, "mkdir", name, func(dir Directory, name string) error {
 		return dir.Mkdir(name, perm)
 	})
 }
 
-func (f *rootFile) Rmdir(name string) error {
+func (f *sandboxedFile) Rmdir(name string) error {
 	return lookupDir(f, "rmdir", name, Directory.Rmdir)
 }
 
-func (f *rootFile) Unlink(name string) error {
+func (f *sandboxedFile) Unlink(name string) error {
 	return lookupDir(f, "unlink", name, Directory.Unlink)
 }
 
-func (f *rootFile) Symlink(oldName, newName string) error {
+func (f *sandboxedFile) Symlink(oldName, newName string) error {
 	return lookupDir(f, "symlink", newName, func(dir Directory, newName string) error {
 		return dir.Symlink(oldName, newName)
 	})
 }
 
-func (f *rootFile) Link(oldName string, newDir Directory, newName string) error {
+func (f *sandboxedFile) Link(oldName string, newDir Directory, newName string) error {
 	return lookupDir2(f, "link", oldName, newName, Directory.Link)
 }
 
-func (f *rootFile) Rename(oldName string, newDir Directory, newName string) error {
+func (f *sandboxedFile) Rename(oldName string, newDir Directory, newName string) error {
 	return lookupDir2(f, "rename", oldName, newName, Directory.Rename)
 }
 
@@ -215,7 +219,7 @@ resolvePath:
 	return f, nil
 }
 
-func lookupDir(f *rootFile, op, name string, do func(Directory, string) error) error {
+func lookupDir(f *sandboxedFile, op, name string, do func(Directory, string) error) error {
 	dir, base := SplitPath(name)
 	if dir == "." {
 		return do(f.File, base)
@@ -228,7 +232,7 @@ func lookupDir(f *rootFile, op, name string, do func(Directory, string) error) e
 	return do(d, base)
 }
 
-func lookupDir2(f *rootFile, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
+func lookupDir2(f *sandboxedFile, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
 	arg1 := Directory(f.File)
 	arg2 := Directory(f.File)
 	dir1, base1 := SplitPath(name1)
