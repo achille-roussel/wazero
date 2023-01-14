@@ -241,6 +241,9 @@ func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (file 
 		OpenFile(string, int, fs.FileMode) (File, error)
 	}); ok {
 		file, err = dir.OpenFile(name, flags, perm)
+		if file != nil {
+			file = ReadOnlyFile(file, JoinPath(f.name, name), nil)
+		}
 	} else {
 		err = ErrNotSupported
 	}
