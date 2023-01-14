@@ -174,15 +174,21 @@ func (open FuncFS) Open(name string) (fs.File, error) {
 }
 
 func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return open(name, flags, perm)
+	if !ValidPath(name) {
+		return nil, makePathError("open", name, ErrNotExist)
+	}
+	f, err := open(name, flags, perm)
+	if err != nil {
+		if _, ok := err.(*fs.PathError); !ok {
+			err = makePathError("open", name, err)
+		}
+	}
+	return f, err
 }
 
 // SubFS constructs a FS from the given base with the root set to path.
 func SubFS(base FS, path string) FS {
 	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
-		if !ValidPath(name) {
-			return nil, makePathError("open", name, ErrNotExist)
-		}
 		return base.OpenFile(JoinPath(path, name), flags, perm)
 	})
 }
