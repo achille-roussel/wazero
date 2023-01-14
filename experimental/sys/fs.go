@@ -27,64 +27,49 @@ type FS interface {
 //
 // The returned file system is read-only, all attempts to open files in write
 // mode, or mutate the state of the file system will error with ErrReadOnly.
-func NewFS(base fs.FS) FS { return &fsFS{base} }
-
-type fsFS struct{ base fs.FS }
-
-func (fsys *fsFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
-
-func (fsys *fsFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	f, err := fsys.openFile(name, flags, perm)
-	if err != nil {
-		return nil, makePathError("open", name, err)
-	}
-	return f, nil
-}
-
-func (fsys *fsFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
-	if !ValidPath(name) {
-		return nil, ErrNotExist
-	}
-	if (flags & ^openFileReadOnlyFlags) != 0 {
-		return nil, ErrReadOnly
-	}
-	link := name
-	loop := 0
-openFile:
-	if loop++; loop == 40 {
-		return nil, ErrLoop
-	}
-	f, err := fsys.base.Open(link)
-	if err != nil {
-		return nil, err
-	}
-
-	if ((flags & O_DIRECTORY) != 0) || ((flags & O_NOFOLLOW) == 0) {
-		s, err := f.Stat()
+func NewFS(base fs.FS) FS {
+	return FuncFS(func(fsys FS, name string, flags int, perm fs.FileMode) (File, error) {
+		if !hasReadOnlyFlags(flags) {
+			return nil, ErrReadOnly
+		}
+		link := name
+		loop := 0
+	openFile:
+		if loop++; loop == 40 {
+			return nil, ErrLoop
+		}
+		f, err := base.Open(link)
 		if err != nil {
-			f.Close()
 			return nil, err
 		}
-		m := s.Mode()
-		t := m.Type()
 
-		if (flags & O_DIRECTORY) != 0 {
-			if t != fs.ModeDir {
-				f.Close()
-				return nil, ErrNotDirectory
-			}
-		} else if t == fs.ModeSymlink {
-			b, err := io.ReadAll(f)
-			f.Close()
+		if ((flags & O_DIRECTORY) != 0) || ((flags & O_NOFOLLOW) == 0) {
+			s, err := f.Stat()
 			if err != nil {
+				f.Close()
 				return nil, err
 			}
-			link = string(b)
-			goto openFile
-		}
-	}
+			m := s.Mode()
+			t := m.Type()
 
-	return ReadOnlyFile(f, name, fsys), nil
+			if (flags & O_DIRECTORY) != 0 {
+				if t != fs.ModeDir {
+					f.Close()
+					return nil, ErrNotDirectory
+				}
+			} else if t == fs.ModeSymlink {
+				b, err := io.ReadAll(f)
+				f.Close()
+				if err != nil {
+					return nil, err
+				}
+				link = string(b)
+				goto openFile
+			}
+		}
+
+		return ReadOnlyFile(f, name, fsys), nil
+	})
 }
 
 // FuncFS is an implementation of the FS interface using a function to open
