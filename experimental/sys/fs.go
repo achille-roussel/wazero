@@ -23,67 +23,6 @@ type FS interface {
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 }
 
-// File is an interface implemented by files opened by FS instsances.
-//
-// The interfance is similar to fs.File, it may represent different types of
-// files, including regular files and directories.
-type File interface {
-	fs.File
-	io.ReaderAt
-	io.Writer
-	io.WriterAt
-	io.Seeker
-	// Returns the target of the symbolic link that file is opened at.
-	Readlink() (string, error)
-	// Sets the file permissions.
-	Chmod(mode fs.FileMode) error
-	// Sets the file access and modification times.
-	Chtimes(atime, mtime time.Time) error
-	// Sets the file size.
-	Truncate(size int64) error
-	// Flushes all buffered changes to persistent storage.
-	Sync() error
-	// Flushes buffered data changes to persistent storage.
-	Datasync() error
-	// A file might be open an a directory of the file system, in which case
-	// the methods provided by the Directory interface allow access to the
-	// file system directory tree relative to the file location.
-	//
-	// If the file is not referencing a directory, calling methods of the
-	// Directory interface will fail returning ErrNotDirectory or ErrPermission.
-	Directory
-}
-
-// Directory is an interface representing an open directory.
-//
-// Methods accepting a file name perform name resolution relative to the
-// location of the directory on the file system.
-//
-// The file names passed to methods of the Directory interface must be valid
-// accoring to ValidPath. For all invalid names, the methods return ErrNotExist.
-type Directory interface {
-	// Returns the file system handle for this directory.
-	Fd() uintptr
-	// Opens a file at the given name, relative to the directory.
-	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
-	// Reads the list of directory entries (see fs.ReadDirFile).
-	ReadDir(n int) ([]fs.DirEntry, error)
-	// Creates a directory on the file system.
-	Mkdir(name string, perm fs.FileMode) error
-	// Removes a directory from the file system.
-	Rmdir(name string) error
-	// Removes a file from the file system.
-	Unlink(name string) error
-	// Creates a symolink link from oldName to newName.
-	Symlink(oldName, newName string) error
-	// Creates a hard link from oldName to newName. oldName is expressed
-	// relative to the receiver, while newName is expressed relative to newDir.
-	Link(oldName string, newDir Directory, newName string) error
-	// Moves a file from oldName to newName. oldName is expressed relative to
-	// the receivers, while newName is expressed relative to newDir.
-	Rename(oldName string, newDir Directory, newName string) error
-}
-
 // NewFS constructs a FS from a fs.FS.
 //
 // The returned file system is read-only, all attempts to open files in write
