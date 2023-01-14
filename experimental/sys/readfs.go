@@ -23,33 +23,136 @@ func (fsys *readOnlyFS) OpenFile(name string, flags int, perm fs.FileMode) (File
 	return f, nil
 }
 
-func (fsys *readOnlyFS) openFile(name string, flags int, perm fs.FileMode) (*readOnlyFile, error) {
+func (fsys *readOnlyFS) openFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if !ValidPath(name) {
 		return nil, ErrNotExist
 	}
-	if (flags & ^openFileReadOnlyFlags) != 0 {
+	if !hasReadOnlyFlags(flags) {
 		return nil, ErrReadOnly
 	}
 	f, err := fsys.base.OpenFile(name, flags, perm)
 	if err != nil {
 		return nil, err
 	}
-	return fsys.newFile(f, name), nil
+	return ReadOnlyFile(fsys, f, name), nil
 }
 
-func (fsys *readOnlyFS) newFile(file File, name string) *readOnlyFile {
-	return &readOnlyFile{fsys: fsys, name: name, File: file}
+// ReadOnlyFile constructs a read-only file.
+func ReadOnlyFile(fsys FS, file fs.File, name string) File {
+	return &readOnlyFile{fsys: fsys, base: file, name: name}
 }
 
 type readOnlyFile struct {
-	fsys *readOnlyFS
+	fsys FS
+	base fs.File
 	name string
-	File
+}
+
+func (f *readOnlyFile) Fd() uintptr {
+	if file, ok := f.base.(interface{ Fd() uintptr }); ok {
+		return file.Fd()
+	}
+	return ^uintptr(0)
 }
 
 func (f *readOnlyFile) Close() (err error) {
-	f.fsys = nil // used as sentinel to know that the file was closed
-	return f.File.Close()
+	if f.base == nil {
+		err = ErrClosed
+	} else {
+		err = f.base.Close()
+		f.fsys = nil
+		f.base = nil
+	}
+	if err != nil {
+		err = f.makePathError("close", err)
+	}
+	return err
+}
+
+func (f *readOnlyFile) Stat() (info fs.FileInfo, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else {
+		info, err = f.base.Stat()
+	}
+	if err != nil {
+		err = f.makePathError("stat", err)
+	}
+	return info, err
+}
+
+func (f *readOnlyFile) Read(b []byte) (n int, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else {
+		n, err = f.base.Read(b)
+	}
+	if err != nil && err != io.EOF {
+		err = f.makePathError("read", err)
+	}
+	return n, err
+}
+
+func (f *readOnlyFile) ReadAt(b []byte, offset int64) (n int, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if r, ok := f.base.(io.ReaderAt); ok {
+		n, err = r.ReadAt(b, offset)
+	} else {
+		err = ErrNotSupported
+	}
+	if err != nil && err != io.EOF {
+		err = f.makePathError("read", err)
+	}
+	return n, err
+}
+
+func (f *readOnlyFile) Seek(offset int64, whence int) (seek int64, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if r, ok := f.base.(io.Seeker); ok {
+		seek, err = r.Seek(offset, whence)
+	} else {
+		err = ErrNotSupported
+	}
+	if err != nil {
+		err = f.makePathError("seek", err)
+	}
+	return seek, err
+}
+
+func (f *readOnlyFile) ReadDir(n int) (files []fs.DirEntry, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if d, ok := f.base.(fs.ReadDirFile); ok {
+		files, err = d.ReadDir(n)
+	} else {
+		err = ErrNotSupported
+	}
+	if err != nil && err != io.EOF {
+		err = f.makePathError("readdir", err)
+	}
+	return files, err
+}
+
+func (f *readOnlyFile) Readlink() (link string, err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if r, ok := f.base.(interface{ Readlink() (string, error) }); ok {
+		link, err = r.Readlink()
+	} else if s, e := f.base.Stat(); e != nil {
+		err = e
+	} else if s.Mode().Type() != fs.ModeSymlink {
+		err = ErrInvalid
+	} else if b, e := io.ReadAll(f.base); e != nil {
+		err = e
+	} else {
+		link = string(b)
+	}
+	if err != nil {
+		err = f.makePathError("readlink", err)
+	}
+	return link, err
 }
 
 func (f *readOnlyFile) Write([]byte) (int, error) {
@@ -77,7 +180,7 @@ func (f *readOnlyFile) Chtimes(time.Time, time.Time) error {
 }
 
 func (f *readOnlyFile) Truncate(size int64) (err error) {
-	if f.fsys == nil {
+	if f.base == nil {
 		err = ErrClosed
 	} else if size < 0 {
 		err = ErrInvalid
@@ -119,22 +222,30 @@ func (f *readOnlyFile) Rename(string, Directory, string) error {
 	return f.fail("rename", ErrReadOnly)
 }
 
-func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (file File, err error) {
 	if f.fsys == nil {
-		return nil, makePathError("open", name, ErrClosed)
+		err = ErrClosed
+	} else if !ValidPath(name) {
+		err = ErrNotExist
+	} else if !hasReadOnlyFlags(flags) {
+		err = ErrReadOnly
+	} else if dir, ok := f.base.(interface {
+		OpenFile(string, int, fs.FileMode) (File, error)
+	}); ok {
+		file, err = dir.OpenFile(name, flags, perm)
+	} else {
+		path := JoinPath(f.name, name)
+		fsys := readOnlyFS{f.fsys}
+		file, err = fsys.OpenFile(path, flags, perm)
 	}
-	if (flags & ^openFileReadOnlyFlags) != 0 {
-		return nil, makePathError("open", name, ErrReadOnly)
-	}
-	newFile, err := f.File.OpenFile(name, flags, perm)
 	if err != nil {
-		return nil, err
+		err = makePathError("open", name, err)
 	}
-	return f.fsys.newFile(newFile, JoinPath(f.name, name)), nil
+	return file, err
 }
 
 func (f *readOnlyFile) fail(op string, err error) error {
-	if f.fsys == nil {
+	if f.base == nil {
 		err = ErrClosed
 	}
 	return f.makePathError(op, err)
@@ -148,3 +259,7 @@ var (
 	_ io.ReaderFrom   = (*readOnlyFile)(nil)
 	_ io.StringWriter = (*readOnlyFile)(nil)
 )
+
+func hasReadOnlyFlags(flags int) bool {
+	return (flags & ^openFileReadOnlyFlags) == 0
+}
