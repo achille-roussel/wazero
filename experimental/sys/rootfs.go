@@ -47,11 +47,43 @@ func (f *rootFile) Close() error {
 }
 
 func (f *rootFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	newFile, err := lookup(f.root.File, f.File, f.name, name, flags, perm)
+	newFile, err := f.openFile(name, flags, perm)
 	if err != nil {
 		return nil, err
 	}
 	return newRootFile(f.root, newFile, JoinPath(f.name, name)), nil
+}
+
+func (f *rootFile) openFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return lookup(f.root.File, f.File, f.name, name, flags, perm)
+}
+
+func (f *rootFile) Mkdir(name string, perm fs.FileMode) error {
+	return lookupDir(f, "mkdir", name, func(dir Directory, name string) error {
+		return dir.Mkdir(name, perm)
+	})
+}
+
+func (f *rootFile) Rmdir(name string) error {
+	return lookupDir(f, "rmdir", name, Directory.Rmdir)
+}
+
+func (f *rootFile) Unlink(name string) error {
+	return lookupDir(f, "unlink", name, Directory.Unlink)
+}
+
+func (f *rootFile) Symlink(oldName, newName string) error {
+	return lookupDir(f, "symlink", newName, func(dir Directory, newName string) error {
+		return dir.Symlink(oldName, newName)
+	})
+}
+
+func (f *rootFile) Link(oldName string, newDir Directory, newName string) error {
+	return lookupDir2(f, "link", oldName, newName, Directory.Link)
+}
+
+func (f *rootFile) Rename(oldName string, newDir Directory, newName string) error {
+	return lookupDir2(f, "rename", oldName, newName, Directory.Rename)
 }
 
 type nopClose struct{ File }
@@ -181,4 +213,41 @@ resolvePath:
 	}
 
 	return f, nil
+}
+
+func lookupDir(f *rootFile, op, name string, do func(Directory, string) error) error {
+	dir, base := SplitPath(name)
+	if dir == "." {
+		return do(f.File, base)
+	}
+	d, err := f.openFile(dir, O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return do(d, base)
+}
+
+func lookupDir2(f *rootFile, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
+	arg1 := Directory(f.File)
+	arg2 := Directory(f.File)
+	dir1, base1 := SplitPath(name1)
+	dir2, base2 := SplitPath(name2)
+	if dir1 != "." {
+		d1, err := f.openFile(dir1, O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		defer d1.Close()
+		arg1 = d1
+	}
+	if dir2 != "." {
+		d2, err := f.openFile(dir2, O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		defer d2.Close()
+		arg2 = d2
+	}
+	return do(arg1, base1, arg2, base2)
 }
