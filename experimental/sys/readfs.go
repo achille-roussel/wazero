@@ -48,7 +48,7 @@ type readOnlyFile struct {
 }
 
 func (f *readOnlyFile) Close() (err error) {
-	f.fsys = nil
+	f.fsys = nil // used as sentinel to know that the file was closed
 	return f.File.Close()
 }
 
