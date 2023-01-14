@@ -27,6 +27,17 @@ func TestRootFS_WrapRootFS(t *testing.T) {
 	})
 }
 
+func TestRootFS_Overlay_ReadOnly(t *testing.T) {
+	systest.TestReadOnlyFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {
+		return sys.RootFS(
+			sys.ErrFS(sys.ErrNotExist),
+			sys.NewFS(baseFS),
+			sys.NewFS(baseFS),
+			sys.ErrFS(sys.ErrNotExist),
+		)
+	})
+}
+
 func TestRootFS_Sandbox(t *testing.T) {
 	rootFS := sys.RootFS(sys.DirFS("testdata"))
 	t.Run("FS", func(t *testing.T) {
