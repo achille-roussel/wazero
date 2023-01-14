@@ -411,7 +411,7 @@ func ErrFile(err error, name string) File { return NewFile(errFile{err}, name) }
 
 type errFile struct{ err error }
 
-func (f errFile) Close() error                                    { return nil }
+func (f errFile) Close() error                                    { return f.err }
 func (f errFile) Read([]byte) (int, error)                        { return 0, f.err }
 func (f errFile) ReadAt([]byte, int64) (int, error)               { return 0, f.err }
 func (f errFile) Write([]byte) (int, error)                       { return 0, f.err }
