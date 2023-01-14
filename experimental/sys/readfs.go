@@ -34,7 +34,7 @@ func (fsys *readOnlyFS) openFile(name string, flags int, perm fs.FileMode) (File
 	if err != nil {
 		return nil, err
 	}
-	return ReadOnlyFile(fsys, f, name), nil
+	return ReadOnlyFile(f, name, fsys), nil
 }
 
 // ReadOnlyFile constructs a read-only file.
@@ -42,7 +42,7 @@ func (fsys *readOnlyFS) openFile(name string, flags int, perm fs.FileMode) (File
 // The FS is used to open files when the file's OpenFile method is called.
 // The FS might be nil, in which case the file attempts to fallback to its own
 // OpenFile method (if any exists), or fails with ErrNotSupported.
-func ReadOnlyFile(fsys FS, file fs.File, name string) File {
+func ReadOnlyFile(file fs.File, name string, fsys FS) File {
 	return &readOnlyFile{fsys: fsys, base: file, name: name}
 }
 
