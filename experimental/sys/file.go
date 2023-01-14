@@ -412,6 +412,12 @@ type sharedFile struct {
 	File
 }
 
+func shareFile(file File) *sharedFile {
+	f := &sharedFile{File: file}
+	f.ref()
+	return f
+}
+
 func (f *sharedFile) Close() error {
 	panic("closed explicitly instead of via reference counting")
 }
