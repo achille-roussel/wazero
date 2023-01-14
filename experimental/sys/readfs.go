@@ -38,6 +38,10 @@ func (fsys *readOnlyFS) openFile(name string, flags int, perm fs.FileMode) (File
 }
 
 // ReadOnlyFile constructs a read-only file.
+//
+// The FS is used to open files when the file's OpenFile method is called.
+// The FS might be nil, in which case the file attempts to fallback to its own
+// OpenFile method (if any exists), or fails with ErrNotSupported.
 func ReadOnlyFile(fsys FS, file fs.File, name string) File {
 	return &readOnlyFile{fsys: fsys, base: file, name: name}
 }
@@ -229,14 +233,16 @@ func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (file 
 		err = ErrNotExist
 	} else if !hasReadOnlyFlags(flags) {
 		err = ErrReadOnly
+	} else if f.fsys != nil {
+		path := JoinPath(f.name, name)
+		fsys := readOnlyFS{f.fsys}
+		file, err = fsys.OpenFile(path, flags, perm)
 	} else if dir, ok := f.base.(interface {
 		OpenFile(string, int, fs.FileMode) (File, error)
 	}); ok {
 		file, err = dir.OpenFile(name, flags, perm)
 	} else {
-		path := JoinPath(f.name, name)
-		fsys := readOnlyFS{f.fsys}
-		file, err = fsys.OpenFile(path, flags, perm)
+		err = ErrNotSupported
 	}
 	if err != nil {
 		err = makePathError("open", name, err)
