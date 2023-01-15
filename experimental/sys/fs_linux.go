@@ -15,6 +15,9 @@ const (
 	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h
 	O_PATH = 010000000
 
+	XATTR_CREATE  = 1
+	XATTR_REPLACE = 2
+
 	__AT_REMOVEDIR      = 0x200
 	__AT_SYMLINK_FOLLOW = 0x400
 

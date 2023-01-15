@@ -432,28 +432,28 @@ func equalErrorf(name, msg string, args ...any) error {
 	return &fs.PathError{Op: "equal", Path: name, Err: fmt.Errorf(msg, args...)}
 }
 
-// Open opens a file at the given name in fsys.
+// Open opens a file at the given path in fsys.
 //
 // The file is open in read-only mode, it might point to a directory.
 //
-// If the file name points to a symbolic link, the function returns a file
+// If the file path points to a symbolic link, the function returns a file
 // opened on the link's target.
 //
 // This function is a valid implementation of the FS.Open methods.
 // Implementations of the interface can define their Open method in terms
 // of this function as:
 //
-//	func (fsys customFS) Open(name string) (File, error) {
-//		return sys.Open(fsys, name)
+//	func (fsys customFS) Open(path string) (File, error) {
+//		return sys.Open(fsys, path)
 //	}
 //
-func Open(fsys FS, name string) (File, error) {
-	return fsys.OpenFile(name, O_RDONLY, 0)
+func Open(fsys FS, path string) (File, error) {
+	return fsys.OpenFile(path, O_RDONLY, 0)
 }
 
-// OpenDir opens a directory at the given name in fsys.
-func OpenDir(fsys FS, name string) (File, error) {
-	return fsys.OpenFile(name, O_DIRECTORY, 0)
+// OpenDir opens a directory at the given path in fsys.
+func OpenDir(fsys FS, path string) (File, error) {
+	return fsys.OpenFile(path, O_DIRECTORY, 0)
 }
 
 // OpenRoot opens the root directory of fsys.
@@ -461,113 +461,143 @@ func OpenRoot(fsys FS) (File, error) {
 	return OpenDir(fsys, ".")
 }
 
-// Readlink returns the value of the symbolic link at the given name in fsys.
-func Readlink(fsys FS, name string) (string, error) {
-	return callFile1(fsys, "readlink", name, O_RDONLY|O_NOFOLLOW, File.Readlink)
+// Readlink returns the value of the symbolic link at the given path in fsys.
+func Readlink(fsys FS, path string) (string, error) {
+	return callFile1(fsys, "readlink", path, O_RDONLY|O_NOFOLLOW, File.Readlink)
 }
 
-// Chmod changes permissions of a file at the given name in fsys.
+// Chmod changes permissions of a file at the given path in fsys.
 //
-// If the name refers to a symbolic link, Chmod dereferences it and modifies the
+// If the path refers to a symbolic link, Chmod dereferences it and modifies the
 // permissions of the link's target.
-func Chmod(fsys FS, name string, mode fs.FileMode) error {
-	return callFile(fsys, "chmod", name, O_RDONLY, func(file File) error {
+func Chmod(fsys FS, path string, mode fs.FileMode) error {
+	return callFile(fsys, "chmod", path, O_RDONLY, func(file File) error {
 		return file.Chmod(mode)
 	})
 }
 
-// Chtimes changes times of a file at the given name in fsys.
+// Chtimes changes times of a file at the given path in fsys.
 //
-// If the name refers to a symbolic link, Chtimes dereferences it and modifies the
+// If the path refers to a symbolic link, Chtimes dereferences it and modifies the
 // times of the link's target.
-func Chtimes(fsys FS, name string, atime, mtime time.Time) error {
-	return callFile(fsys, "chtimes", name, O_RDONLY, func(file File) error {
+func Chtimes(fsys FS, path string, atime, mtime time.Time) error {
+	return callFile(fsys, "chtimes", path, O_RDONLY, func(file File) error {
 		return file.Chtimes(atime, mtime)
 	})
 }
 
-// Truncate truncates to a specified size the file at the given name in fsys.
+// Truncate truncates to a specified size the file at the given path in fsys.
 //
-// If the name refers to a symbolic link, Truncate dereferences it and modifies
+// If the path refers to a symbolic link, Truncate dereferences it and modifies
 // the size of the link's target.
-func Truncate(fsys FS, name string, size int64) error {
-	return callFile(fsys, "truncate", name, O_WRONLY, func(file File) error {
+func Truncate(fsys FS, path string, size int64) error {
+	return callFile(fsys, "truncate", path, O_WRONLY, func(file File) error {
 		return file.Truncate(size)
 	})
 }
 
-// Stat returns file information for the file with the given name in fsys.
+// Stat returns file information for the file with the given path in fsys.
 //
-// If the name refers to a symbolic link, Stat dereferences it returns
+// If the path refers to a symbolic link, Stat dereferences it returns
 // information about the link's target.
-func Stat(fsys FS, name string) (fs.FileInfo, error) {
-	return callFile1(fsys, "stat", name, O_RDONLY, File.Stat)
+func Stat(fsys FS, path string) (fs.FileInfo, error) {
+	return callFile1(fsys, "stat", path, O_RDONLY, File.Stat)
 }
 
-// Lstat returns file information for the file with the given name in fsys.
+// Lstat returns file information for the file with the given path in fsys.
 //
-// If the name refers to a symbolic link, Lstat returns information about the
+// If the path refers to a symbolic link, Lstat returns information about the
 // link, and not its target.
-func Lstat(fsys FS, name string) (fs.FileInfo, error) {
-	return callFile1(fsys, "lstat", name, O_RDONLY|O_NOFOLLOW, File.Stat)
+func Lstat(fsys FS, path string) (fs.FileInfo, error) {
+	return callFile1(fsys, "lstat", path, O_RDONLY|O_NOFOLLOW, File.Stat)
 }
 
 // Mknod creates a special or ordinary file in fsys with the given mode and
 // device number.
-func Mknod(fsys FS, name string, mode fs.FileMode, dev Device) error {
-	return callDir(fsys, "mknod", name, func(dir Directory, name string) error {
-		return dir.Mknod(name, mode, dev)
+func Mknod(fsys FS, path string, mode fs.FileMode, dev Device) error {
+	return callDir(fsys, "mknod", path, func(dir Directory, path string) error {
+		return dir.Mknod(path, mode, dev)
 	})
 }
 
-// Mkdir creates a directory in fsys with the given name and permissions.
-func Mkdir(fsys FS, name string, perm fs.FileMode) error {
-	return callDir(fsys, "mkdir", name, func(dir Directory, name string) error {
-		return dir.Mkdir(name, perm)
+// Mkdir creates a directory in fsys with the given path and permissions.
+func Mkdir(fsys FS, path string, perm fs.FileMode) error {
+	return callDir(fsys, "mkdir", path, func(dir Directory, path string) error {
+		return dir.Mkdir(path, perm)
 	})
 }
 
-// Rmdir removes a directory with the given name from fsys.
-func Rmdir(fsys FS, name string) error {
-	return callDir(fsys, "rmdir", name, Directory.Rmdir)
+// Rmdir removes a directory with the given path from fsys.
+func Rmdir(fsys FS, path string) error {
+	return callDir(fsys, "rmdir", path, Directory.Rmdir)
 }
 
-// Unlink removes a file with the given name from fsys.
-func Unlink(fsys FS, name string) error {
-	return callDir(fsys, "unlink", name, Directory.Unlink)
+// Unlink removes a file with the given path from fsys.
+func Unlink(fsys FS, path string) error {
+	return callDir(fsys, "unlink", path, Directory.Unlink)
 }
 
-// Symlink creates a symbolic like to oldName at newName in fsys.
-func Symlink(fsys FS, oldName, newName string) error {
-	return callDir(fsys, "symlink", newName, func(dir Directory, newName string) error {
-		return dir.Symlink(oldName, newName)
+// Symlink creates a symbolic like to oldPath at newPath in fsys.
+func Symlink(fsys FS, oldPath, newPath string) error {
+	return callDir(fsys, "symlink", newPath, func(dir Directory, newPath string) error {
+		return dir.Symlink(oldPath, newPath)
 	})
 }
 
-// Link creates a link from oldName to newName in fsys.
-func Link(fsys FS, oldName, newName string) error {
-	return callDir2(fsys, "link", oldName, newName, Directory.Link)
+// Link creates a link from oldPath to newPath in fsys.
+func Link(fsys FS, oldPath, newPath string) error {
+	return callDir2(fsys, "link", oldPath, newPath, Directory.Link)
 }
 
-// Rename renames a file from oldName to newName in fsys.
-func Rename(fsys FS, oldName, newName string) error {
-	return callDir2(fsys, "rename", oldName, newName, Directory.Rename)
+// Rename renames a file from oldPath to newPath in fsys.
+func Rename(fsys FS, oldPath, newPath string) error {
+	return callDir2(fsys, "rename", oldPath, newPath, Directory.Rename)
 }
 
-func callFile(fsys FS, op, name string, flags int, do func(File) error) error {
-	_, err := callFile1(fsys, op, name, flags, func(file File) (struct{}, error) {
+// GetXAttr retrieves the value of the named extended attribute for the file at
+// the given path.
+func GetXAttr(fsys FS, path, name string) (string, bool, error) {
+	return callFile2(fsys, "getxattr", path, O_RDONLY, func(file File) (string, bool, error) {
+		return file.GetXAttr(name)
+	})
+}
+
+// SetXAttr sets the value of the named extended attribute for the file at the
+// given path.
+func SetXAttr(fsys FS, path, name, value string, flags int) error {
+	return callFile(fsys, "setxattr", path, O_RDONLY, func(file File) error {
+		return file.SetXAttr(name, value, flags)
+	})
+}
+
+// ListXAttr returns the names of the named extended attribute for the file at
+// the given path.
+func ListXAttr(fsys FS, path string) ([]string, error) {
+	return callFile1(fsys, "listxattr", path, O_RDONLY, File.ListXAttr)
+}
+
+func callFile(fsys FS, op, name string, flags int, do func(File) error) (err error) {
+	_, err = callFile1(fsys, op, name, flags, func(file File) (struct{}, error) {
 		return struct{}{}, do(file)
 	})
-	return err
+	return
 }
 
-func callFile1[Func func(File) (Ret, error), Ret any](fsys FS, op, name string, flags int, do Func) (ret Ret, err error) {
+func callFile1[Func func(File) (R, error), R any](fsys FS, op, name string, flags int, do Func) (ret R, err error) {
+	_, ret, err = callFile2(fsys, op, name, flags, func(file File) (struct{}, R, error) {
+		r, e := do(file)
+		return struct{}{}, r, e
+	})
+	return
+}
+
+func callFile2[Func func(File) (R1, R2, error), R1, R2 any](fsys FS, op, name string, flags int, do Func) (r1 R1, r2 R2, err error) {
 	if !ValidPath(name) {
-		return ret, makePathError(op, name, ErrNotExist)
+		return r1, r2, makePathError(op, name, ErrNotExist)
 	}
 	f, err := fsys.OpenFile(name, flags, 0)
 	if err != nil {
-		return ret, makePathError(op, name, err)
+		return r1, r2, makePathError(op, name, err)
 	}
 	defer f.Close()
 	return do(f)

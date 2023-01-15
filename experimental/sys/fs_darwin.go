@@ -13,6 +13,9 @@ const (
 	O_DSYNC = syscall.O_SYNC
 	O_RSYNC = syscall.O_SYNC
 
+	XATTR_CREATE  = 1
+	XATTR_REPLACE = 2
+
 	__AT_SYMLINK_FOLLOW = 0x0040
 	__AT_REMOVEDIR      = 0x0080
 
