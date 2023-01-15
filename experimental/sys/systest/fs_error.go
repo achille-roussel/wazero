@@ -41,7 +41,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 	})
 
 	mkdir := append(testValidateMkdir, fsTestCase{
-		name: "creating a directory errors",
+		name: "creating a node errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
 			return sys.Mkdir(fsys, "test", 0755)
