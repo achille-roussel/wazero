@@ -33,7 +33,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 	})
 
 	mknod := append(testValidateMknod, fsTestCase{
-		name: "creating a directory errors",
+		name: "creating a node errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
 			return sys.Mknod(fsys, "test", 0600, sys.Dev(0, 0))
@@ -139,6 +139,32 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		},
 	})
 
+	getxattr := append(testValidateStat, fsTestCase{
+		name: "getting extended attributes errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			_, _, err := sys.GetXAttr(fsys, "test", "key")
+			return err
+		},
+	})
+
+	setxattr := append(testValidateStat, fsTestCase{
+		name: "setting extended attributes errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			return sys.SetXAttr(fsys, "test", "key", "value", 0)
+		},
+	})
+
+	listxattr := append(testValidateStat, fsTestCase{
+		name: "listing extended attributes errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			_, err := sys.ListXAttr(fsys, "test")
+			return err
+		},
+	})
+
 	makeFS := func(t *testing.T, _ fs.FS) sys.FS {
 		return newFS(t)
 	}
@@ -159,5 +185,8 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		{"Truncate", truncate},
 		{"Stat", stat},
 		{"Lstat", lstat},
+		{"GetXAttr", getxattr},
+		{"SetXAttr", setxattr},
+		{"ListXAttr", listxattr},
 	})
 }

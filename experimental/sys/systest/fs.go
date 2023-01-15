@@ -121,7 +121,11 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 			}
 			fsys := makeFS(t, base)
 			if err := test.test(fsys); !errors.Is(err, test.err) {
-				t.Errorf("error mismatch: want=%v got=%v", test.err, err)
+				if errors.Is(err, sys.ErrNotSupported) {
+					t.Skip("operation not supported on this file system")
+				} else {
+					t.Errorf("error mismatch: want=%v got=%v", test.err, err)
+				}
 			} else if test.want != nil {
 				if err := sys.EqualFS(fsys, sys.NewFS(test.want)); err != nil {
 					t.Error(err)
@@ -293,6 +297,38 @@ var testValidateLstat = fsTestSuite{
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error {
 			_, err := sys.Lstat(fsys, "/")
+			return err
+		},
+	},
+}
+
+var testValidateGetXAttr = fsTestSuite{
+	{
+		name: "getting extended attributes of a file with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error {
+			_, _, err := sys.GetXAttr(fsys, "/", "key")
+			return err
+		},
+	},
+}
+
+var testValidateSetXAttr = fsTestSuite{
+	{
+		name: "setting extended attributes of a file with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error {
+			return sys.SetXAttr(fsys, "/", "key", "value", 0)
+		},
+	},
+}
+
+var testValidateListXAttr = fsTestSuite{
+	{
+		name: "listing extended attributes of a file with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error {
+			_, err := sys.ListXAttr(fsys, "/")
 			return err
 		},
 	},
@@ -502,6 +538,42 @@ var testDefaultChmod = append(testValidateChmod)
 var testDefaultChtimes = append(testValidateChtimes)
 
 var testDefaultTruncate = append(testValidateTruncate)
+
+var testDefaultGetXAttr = append(testValidateGetXAttr,
+	fsTestCase{
+		name: "getting extended attributes for files that have none return no values",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		test: func(fsys sys.FS) error {
+			value, exist, err := sys.GetXAttr(fsys, "test", "nope")
+			if err != nil {
+				return err
+			}
+			if value != "" || exist {
+				return fmt.Errorf("unexpected attribute: value=%q exist=%t", value, exist)
+			}
+			return nil
+		},
+	},
+)
+
+var testDefaultSetXAttr = append(testValidateSetXAttr)
+
+var testDefaultListXAttr = append(testValidateListXAttr,
+	fsTestCase{
+		name: "listing extended attributes for files that have none return no values",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		test: func(fsys sys.FS) error {
+			names, err := sys.ListXAttr(fsys, "test")
+			if err != nil {
+				return err
+			}
+			if len(names) != 0 {
+				return fmt.Errorf("unexpected attribute names: %q", names)
+			}
+			return nil
+		},
+	},
+)
 
 func testOpen(name string, test func(fs.File) error) func(sys.FS) error {
 	return func(fsys sys.FS) error {
