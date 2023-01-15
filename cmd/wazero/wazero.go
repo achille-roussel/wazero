@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -162,38 +163,11 @@ func doRun(args []string, stdOut io.Writer, stdErr logging.Writer, exit func(cod
 		env = append(env, fields[0], fields[1])
 	}
 
-	validatedMounts := validateMounts(mounts, stdErr, exit)
-
-	var rootFS experimentalsys.FS
-	// switch len(validatedMounts) {
-	// case 0: // nofs
-	// case 1:
-	// 	mount := validatedMounts[0]
-	// 	host := mount[0]
-	// 	guest := mount[1]
-	// 	if guest == "" { // guest is root
-	// 		var err error
-	// 		rootFS, err = writefs.NewDirFS(host)
-	// 		if err != nil {
-	// 			fmt.Fprintf(stdErr, "invalid root mount %s: %v\n", host, err)
-	// 			exit(1)
-	// 		}
-	// 	} else { // TODO: subfs
-	// 		rootFS = &compositeFS{
-	// 			paths: map[string]fs.FS{guest: os.DirFS(host)},
-	// 		}
-	// 	}
-	// default:
-	// 	cfs := &compositeFS{paths: map[string]fs.FS{}}
-	// 	for _, mount := range validatedMounts {
-	// 		host := mount[0]
-	// 		guest := mount[1]
-	// 		cfs.paths[guest] = os.DirFS(host)
-	// 	}
-	// 	rootFS = cfs
-	// }
-	if len(validatedMounts) != 0 {
-		rootFS = experimentalsys.RootFS(experimentalsys.DirFS(validatedMounts[0][0]))
+	//rootFS := validateMounts(mounts, stdErr, exit)
+	rootFS, err := mountRootFS(mounts)
+	if err != nil {
+		fmt.Fprintf(stdErr, "failed to open file system: %s\n", err)
+		exit(1)
 	}
 
 	wasm, err := os.ReadFile(wasmPath)
@@ -258,6 +232,54 @@ func doRun(args []string, stdOut io.Writer, stdErr logging.Writer, exit func(cod
 
 	// We're done, _start was called as part of instantiating the module.
 	exit(0)
+}
+
+func mountRootFS(mounts sliceFlag) (experimentalsys.FS, error) {
+	var mountPoints []experimentalsys.MountPoint
+	var base = experimentalsys.ReadOnlyFS(experimentalsys.ErrFS(experimentalsys.ErrNotExist))
+
+	for _, mount := range mounts {
+		if len(mount) == 0 {
+			return nil, fmt.Errorf("invalid mount: %q", mount)
+		}
+
+		readOnly := strings.HasSuffix(mount, ":ro")
+		if readOnly {
+			mount = mount[:len(mount)-3]
+		}
+
+		// TODO(anuraaga): Support wasm paths with colon in them.
+		var host, guest string
+		if clnIdx := strings.LastIndexByte(mount, ':'); clnIdx != -1 {
+			host, guest = mount[:clnIdx], mount[clnIdx+1:]
+			guest = experimentalsys.CleanPath(strings.TrimPrefix(path.Clean(guest), "/"))
+		} else {
+			host = mount
+			guest = "."
+		}
+
+		// Provide a better experience if duplicates are found later.
+		if abs, err := filepath.Abs(host); err != nil {
+			return nil, fmt.Errorf("invalid mount: host path %q invalid: %v\n", host, err)
+		} else {
+			host = abs
+		}
+
+		fsys := experimentalsys.DirFS(host)
+		if readOnly {
+			fsys = experimentalsys.ReadOnlyFS(fsys)
+		}
+		if guest == "." {
+			base = fsys
+		} else {
+			mountPoints = append(mountPoints, experimentalsys.MountPoint{
+				Path: guest,
+				Fsys: fsys,
+			})
+		}
+	}
+
+	return experimentalsys.RootFS(base, mountPoints...), nil
 }
 
 func validateMounts(mounts sliceFlag, stdErr logging.Writer, exit func(code int)) syscallfs.FS {

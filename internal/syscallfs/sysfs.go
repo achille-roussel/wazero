@@ -15,7 +15,7 @@ func SysFS(base sys.FS) FS { return sysFS{base} }
 
 type sysFS struct{ root sys.FS }
 
-func (fsys sysFS) Path() string { return "/" }
+func (fsys sysFS) GuestDir() string { return "/" }
 
 func (fsys sysFS) Open(path string) (fs.File, error) {
 	f, err := fsys.root.Open(sysFSPath(path))
@@ -28,25 +28,25 @@ func (fsys sysFS) OpenFile(path string, flags int, perm fs.FileMode) (fs.File, e
 }
 
 func (fsys sysFS) Mkdir(path string, perm fs.FileMode) error {
-	return syscallError(fsys.root.Mkdir(sysFSPath(path), perm))
+	return syscallError(sys.Mkdir(fsys.root, sysFSPath(path), perm))
 }
 
 func (fsys sysFS) Rename(from, to string) error {
-	return syscallError(fsys.root.Rename(sysFSPath(from), sysFSPath(to), fsys.root))
+	return syscallError(sys.Rename(fsys.root, sysFSPath(from), sysFSPath(to)))
 }
 
 func (fsys sysFS) Rmdir(path string) error {
-	return syscallError(fsys.root.Rmdir(sysFSPath(path)))
+	return syscallError(sys.Rmdir(fsys.root, sysFSPath(path)))
 }
 
 func (fsys sysFS) Unlink(path string) error {
-	return syscallError(fsys.root.Unlink(sysFSPath(path)))
+	return syscallError(sys.Unlink(fsys.root, sysFSPath(path)))
 }
 
 func (fsys sysFS) Utimes(path string, atimeNsec, mtimeNsec int64) error {
 	atime := time.Unix(0, atimeNsec)
 	mtime := time.Unix(0, mtimeNsec)
-	return syscallError(fsys.root.Chtimes(sysFSPath(path), atime, mtime))
+	return syscallError(sys.Chtimes(fsys.root, sysFSPath(path), atime, mtime))
 }
 
 func sysFSPath(name string) string {
