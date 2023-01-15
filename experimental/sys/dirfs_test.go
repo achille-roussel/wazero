@@ -1,5 +1,16 @@
 package sys_test
 
+// These test suites exercise the support for extended attributes on the local
+// file system. If the error "operation not supported" (ENOTSUP) shows up during
+// a run, it might be because the underlying file system was not mounted with
+// extended attributes enabled, so try doing this and running again:
+//
+//	$ sudo mount -o remount,user_xattr rw /
+//
+// See:
+// - https://manpages.ubuntu.com/manpages/bionic/en/man5/attr.5.html
+// - https://askubuntu.com/questions/175739/how-do-i-remount-a-filesystem-as-read-write
+
 import (
 	"io/fs"
 	"testing"

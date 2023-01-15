@@ -264,8 +264,6 @@ func (f *readOnlyFile) GetXAttr(name string) (value string, exist bool, err erro
 		GetXAttr(string) (string, bool, error)
 	}); ok {
 		value, exist, err = x.GetXAttr(name)
-	} else {
-		err = ErrNotSupported
 	}
 	if err != nil {
 		err = f.makePathError("getxattr", err)
@@ -282,8 +280,6 @@ func (f *readOnlyFile) ListXAttr() (names []string, err error) {
 		err = ErrClosed
 	} else if x, ok := f.base.(interface{ ListXAttr() ([]string, error) }); ok {
 		names, err = x.ListXAttr()
-	} else {
-		err = ErrNotSupported
 	}
 	if err != nil {
 		err = f.makePathError("listxattr", err)

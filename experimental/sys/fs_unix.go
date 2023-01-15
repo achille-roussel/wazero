@@ -94,8 +94,6 @@ func fgetxattr(fd int, name string) (string, bool, error) {
 			return string(buf[:r]), true, nil
 		case syscall.ENODATA:
 			return "", false, nil
-		case syscall.ENOTSUP:
-			return "", false, syscall.EBADF
 		case syscall.ERANGE:
 			buf = make([]byte, 2*len(buf))
 		default:
