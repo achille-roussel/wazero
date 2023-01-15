@@ -6,11 +6,142 @@ import (
 	"strings"
 )
 
-// RootFS constructs a root file system.
+// MountPoint represents the mount point of a file system at a specified path.
+type MountPoint struct {
+	Path string
+	Fsys FS
+}
+
+func (mp MountPoint) String() string { return mp.Path }
+
+// RootFS constructs a root file system from base and list of mount points.
+//
+// The mount points that appears after in the list take precedence, and might
+// mask the lower mount points or paths on the base file system if they overlap.
 //
 // The returned file system sandboxes all path lookups so none escape the root,
 // even in the presence of symbolic links containing absolute or relative paths.
-func RootFS(root FS) FS { return sandboxFS(root) }
+//
+// The function panics if any of the file systems is nil, or if some of the
+// mount paths are invalid. Validation of the mount paths is done using
+// fs.ValidPath and checking that none of the mount paths are the root (".").
+func RootFS(base FS, mounts ...MountPoint) FS { return sandboxFS(mountFS(base, mounts)) }
+
+// mountFS creates a file system from stacking the mount points on top of a base
+// file system.
+//
+// The implementation expects to be wrapped by sandboxFS as it relies on the
+// relative path resolution.
+func mountFS(base FS, mounts []MountPoint) FS {
+	mounts = append([]MountPoint{}, mounts...)
+
+	for _, mount := range mounts {
+		if mount.Path == "." || !fs.ValidPath(mount.Path) {
+			panic("invalid mount path: " + mount.Path)
+		}
+		if mount.Fsys == nil {
+			panic("invalid mount of nil file system")
+		}
+	}
+
+	// Reverse so we can use a range loop to iterate over the list of mount
+	// points in the right priority order.
+	for i, j := 0, len(mounts)-1; i < j; {
+		mounts[i], mounts[j] = mounts[j], mounts[i]
+		i++
+		j--
+	}
+
+	fsys := &mountPoints{
+		base:   MountPoint{Path: ".", Fsys: base},
+		mounts: mounts,
+	}
+
+	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+		m := fsys.findMountPoint(name)
+		f, err := m.Fsys.OpenFile(name, flags, perm)
+		if err != nil {
+			return nil, err
+		}
+		return fsys.newFile(f, nil, m, name), nil
+	})
+}
+
+type mountPoints struct {
+	base   MountPoint
+	mounts []MountPoint
+}
+
+func (fsys *mountPoints) findMountPoint(path string) *MountPoint {
+	for i := range fsys.mounts {
+		m := &fsys.mounts[i]
+
+		if PathContains(m.Path, path) {
+			return m
+		}
+	}
+	return &fsys.base
+}
+
+func (fsys *mountPoints) newFile(file File, dir *mountedFile, mount *MountPoint, path string) *mountedFile {
+	f := &mountedFile{
+		dir:        dir,
+		fsys:       fsys,
+		mount:      mount,
+		path:       path,
+		sharedFile: sharedFile{File: file},
+	}
+	if dir != nil {
+		dir.ref()
+	}
+	f.ref()
+	return f
+}
+
+type mountedFile struct {
+	dir   *mountedFile
+	fsys  *mountPoints
+	mount *MountPoint
+	path  string
+	sharedFile
+}
+
+func (f *mountedFile) Close() error {
+	if f.dir != nil { // the root has no parent directory
+		f.dir.unref()
+		f.dir = nil
+	}
+	f.unref()
+	return nil
+}
+
+func (f *mountedFile) OpenFile(name string, flags int, perm fs.FileMode) (file File, err error) {
+	// When accessing the parent directory, simply return a reference to it.
+	//
+	// Reusing this reference to the parent directory is important because we
+	// might be entering a different mount point and if we do, we cannot resolve
+	// path the absolute path from the file system root or we might follow
+	// symbolic links which may not place us at the actual parent directory.
+	if name == ".." {
+		f.dir.ref()
+		return f.dir, nil
+	}
+
+	// We now know that we are opening an entry in the current directory, which
+	// may also cause entering a new mount point.
+	path := JoinPath(f.path, name)
+	mount := f.fsys.findMountPoint(path)
+
+	if mount == f.mount {
+		file, err = f.sharedFile.OpenFile(name, flags, perm)
+	} else {
+		file, err = mount.Fsys.OpenFile(".", flags, perm)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return f.fsys.newFile(file, f, mount, path), nil
+}
 
 // sandboxFS creates a sandbox of a file system preventing escape from the root.
 //

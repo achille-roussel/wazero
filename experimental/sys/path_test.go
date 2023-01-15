@@ -7,6 +7,85 @@ import (
 	"github.com/tetratelabs/wazero/experimental/sys"
 )
 
+func TestPathContains(t *testing.T) {
+	for _, test := range [...]struct {
+		base string
+		path string
+		want bool
+	}{
+
+		{
+			base: ".",
+			path: ".",
+			want: true,
+		},
+
+		{
+			base: ".",
+			path: "whatever",
+			want: true,
+		},
+
+		{
+			base: "a",
+			path: "a",
+			want: true,
+		},
+
+		{
+			base: "a",
+			path: "a/b",
+			want: true,
+		},
+
+		{
+			base: "a/b",
+			path: "a/b",
+			want: true,
+		},
+
+		{
+			base: "a/b",
+			path: "a/b/c",
+			want: true,
+		},
+
+		{
+			base: "..",
+			path: "../a",
+			want: true,
+		},
+
+		{
+			base: "a",
+			path: "b",
+			want: false,
+		},
+
+		{
+			base: "a/b",
+			path: "a/c",
+			want: false,
+		},
+
+		{
+			base: "a/b",
+			path: "a",
+			want: false,
+		},
+
+		{
+			base: "a/b",
+			path: ".",
+			want: false,
+		},
+	} {
+		if sys.PathContains(test.base, test.path) != test.want {
+			t.Errorf("sys.PathContains(%q, %q) => %t, but want %t", test.base, test.path, !test.want, test.want)
+		}
+	}
+}
+
 func TestJoinPath(t *testing.T) {
 	for _, test := range [...]struct {
 		base string

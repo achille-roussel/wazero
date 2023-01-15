@@ -2,12 +2,22 @@ package sys_test
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"testing"
 
 	"github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/experimental/sys/systest"
 )
+
+func shallowFS(base sys.FS) sys.FS {
+	return sys.MaskFS(base, func(path string, info fs.FileInfo) error {
+		if info.IsDir() {
+			return sys.ErrNotExist
+		}
+		return nil
+	})
+}
 
 func TestRootFS_ReadOnly(t *testing.T) {
 	systest.TestReadOnlyFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {
@@ -27,13 +37,45 @@ func TestRootFS_WrapRootFS(t *testing.T) {
 	})
 }
 
+func TestRootFS_MountPoints(t *testing.T) {
+	testdata := sys.RootFS(
+		// The shallow file system masks all directories so we can test
+		// that "sub" is accessed through the mount point.
+		shallowFS(sys.DirFS("testdata")),
+		sys.MountPoint{"sub", sys.DirFS("testdata/sub")},
+	)
+
+	// this directory is opened to the mount point
+	d, err := sys.OpenDir(testdata, "sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	// relative file lookup from the mount point return in the base file system
+	f, err := d.OpenFile("../answer", sys.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	// then make sure we actually opened the right file
+	b, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "42\n" {
+		t.Errorf("wrong file content: %q", b)
+	}
+}
+
 func TestRootFS_Sandbox(t *testing.T) {
-	rootFS := sys.RootFS(sys.DirFS("testdata"))
+	testdata := sys.DirFS("testdata")
 	t.Run("FS", func(t *testing.T) {
-		testSandbox(t, rootFS)
+		testSandbox(t, sys.RootFS(testdata))
 	})
 	t.Run("File", func(t *testing.T) {
-		f, err := sys.OpenRoot(rootFS)
+		f, err := sys.OpenRoot(sys.RootFS(testdata))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -41,7 +83,15 @@ func TestRootFS_Sandbox(t *testing.T) {
 		testSandbox(t, sys.FileFS(f))
 	})
 	t.Run("Wrap", func(t *testing.T) {
-		testSandbox(t, sys.RootFS(rootFS))
+		testSandbox(t, sys.RootFS(sys.RootFS(testdata)))
+	})
+	t.Run("Mount", func(t *testing.T) {
+		testSandbox(t,
+			sys.RootFS(
+				shallowFS(testdata),
+				sys.MountPoint{"sub", sys.SubFS(testdata, "sub")},
+			),
+		)
 	})
 }
 

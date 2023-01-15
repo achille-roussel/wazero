@@ -111,11 +111,11 @@ func ErrFS(err error) FS {
 	})
 }
 
-// FileFS constructs a FS instance from a root file f, using f's OpenFile
+// FileFS constructs a FS instance from a base file, using the file's OpenFile
 // method to navigate the file system.
-func FileFS(f File) FS {
+func FileFS(base File) FS {
 	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
-		return f.OpenFile(name, flags, perm)
+		return base.OpenFile(name, flags, perm)
 	})
 }
 
@@ -124,6 +124,48 @@ func SubFS(base FS, path string) FS {
 	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
 		return base.OpenFile(JoinPath(path, name), flags, perm)
 	})
+}
+
+// MaskFS contructs a file system which only exposes files for which a mask
+// function returns no errors.
+func MaskFS(base FS, mask func(path string, info fs.FileInfo) error) FS {
+	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+		return openMaskedFile(base.OpenFile, mask, ".", name, flags, perm)
+	})
+}
+
+type maskedFile struct {
+	mask maskFileFunc
+	path string
+	File
+}
+
+func (f *maskedFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return openMaskedFile(f.File.OpenFile, f.mask, f.path, name, flags, perm)
+}
+
+type openFileFunc func(string, int, fs.FileMode) (File, error)
+
+type maskFileFunc func(string, fs.FileInfo) error
+
+func openMaskedFile(open openFileFunc, mask maskFileFunc, path, name string, flags int, perm fs.FileMode) (File, error) {
+	path = JoinPath(path, name)
+	file, err := open(name, flags, perm)
+	if err != nil {
+		return nil, err
+	}
+	if name != "." { // it's always OK to open the root
+		info, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, err
+		}
+		if err := mask(name, info); err != nil {
+			file.Close()
+			return nil, err
+		}
+	}
+	return &maskedFile{mask: mask, path: name, File: file}, nil
 }
 
 // CopyFS copies the file system src into dst.

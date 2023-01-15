@@ -7,6 +7,17 @@ import (
 	"strings"
 )
 
+// PathContains tests if path is contained in base.
+func PathContains(base, path string) bool {
+	if base == "." {
+		return true // the root contains all paths
+	}
+	if len(base) > len(path) {
+		return false
+	}
+	return path[:len(base)] == base && (len(base) == len(path) || path[len(base)] == '/')
+}
+
 // CleanPath cleans the given file system name. The returned value is always
 // a valid input to ValidPath, which might contain leading parent directory
 // lookups (".." or "../"). If the input is empty, the function returns ".".
