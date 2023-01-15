@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"reflect"
 	"sort"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -121,7 +122,11 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 			}
 			fsys := makeFS(t, base)
 			if err := test.test(fsys); !errors.Is(err, test.err) {
-				t.Errorf("error mismatch: want=%v got=%v", test.err, err)
+				if errors.Is(err, syscall.ENOTSUP) {
+					t.Skip(err)
+				} else {
+					t.Errorf("error mismatch: want=%v got=%v", test.err, err)
+				}
 			} else if test.want != nil {
 				if err := sys.EqualFS(fsys, sys.NewFS(test.want)); err != nil {
 					t.Error(err)
