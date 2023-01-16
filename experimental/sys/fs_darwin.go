@@ -49,13 +49,13 @@ const (
 	openFlagsDirectory = O_DIRECTORY
 	openFlagsNode      = O_NONBLOCK | O_NOFOLLOW
 	openFlagsSymlink   = O_SYMLINK | O_NOFOLLOW
+	openFlagsReadlink  = O_SYMLINK | O_NOFOLLOW
 	openFlagsFile      = O_NONBLOCK | O_NOFOLLOW
 	openFlagsChmod     = O_RDONLY | O_NONBLOCK
 	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
 	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 	openFlagsStat      = O_RDONLY | O_NONBLOCK
-	openFlagsReadlink  = O_SYMLINK | O_NOFOLLOW
-	openFlagsTruncate  = O_WRONLY
+	openFlagsTruncate  = O_WRONLY | O_NONBLOCK
 	openFlagsNoFollow  = O_NOFOLLOW
 	openFlagsPath      = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 

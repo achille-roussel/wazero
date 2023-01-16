@@ -43,17 +43,17 @@ const (
 	openFlagsWriteOnly = O_WRONLY
 	openFlagsReadOnly  = O_RDONLY
 	openFlagsDirectory = O_DIRECTORY
-	openFlagsNode      = O_NONBLOCK | O_NOFOLLOW
-	openFlagsSymlink   = O_NONBLOCK | O_NOFOLLOW | O_PATH
-	openFlagsFile      = O_NONBLOCK | O_NOFOLLOW
-	openFlagsReadlink  = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
+	openFlagsNode      = O_NOFOLLOW | O_NONBLOCK
+	openFlagsSymlink   = O_NOFOLLOW | O_PATH
+	openFlagsReadlink  = O_NOFOLLOW | O_PATH
+	openFlagsFile      = O_NOFOLLOW | O_NONBLOCK
 	openFlagsChmod     = O_RDONLY | O_NONBLOCK
 	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
 	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 	openFlagsStat      = O_RDONLY | O_NONBLOCK
-	openFlagsTruncate  = O_WRONLY
+	openFlagsTruncate  = O_WRONLY | O_NONBLOCK
 	openFlagsNoFollow  = O_NOFOLLOW
-	openFlagsPath      = O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_PATH
+	openFlagsPath      = O_NOFOLLOW | O_PATH
 
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_DIRECT | O_LARGEFILE | O_NOATIME | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK | O_PATH
 )
@@ -136,17 +136,6 @@ func chtimes(file *os.File, atime, mtime time.Time) error {
 	// a syscall with a closed or invalid file descriptor.
 	if err == syscall.ENOENT {
 		err = syscall.EBADF
-	}
-	return err
-}
-
-func unlink(path string) (err error) {
-	if err = syscall.Unlink(path); err != nil {
-		// Linux is not complient with POSIX and gives EISDIR instead of EPERM
-		// when attenting to unlink a directory.
-		if err == syscall.EISDIR {
-			err = syscall.EPERM
-		}
 	}
 	return err
 }

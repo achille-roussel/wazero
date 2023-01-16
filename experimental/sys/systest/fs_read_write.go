@@ -733,7 +733,7 @@ var testReadWriteChmod = append(testDefaultChmod,
 	},
 
 	fsTestCase{
-		name: "chaging file permissions of an existing file",
+		name: "changing file permissions of an existing file",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0600}},
 		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "test", 0600) },
@@ -760,7 +760,7 @@ var testReadWriteChtimes = append(testDefaultChtimes,
 	},
 
 	fsTestCase{
-		name: "chaging file times of an existing file",
+		name: "changing file times of an existing file",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, ModTime: epoch}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, ModTime: epoch.Add(-time.Second)}},
 		test: func(fsys sys.FS) error {
