@@ -568,7 +568,7 @@ func Lstat(fsys FS, path string) (fs.FileInfo, error) {
 
 // Mkfifo creates a named pipe at path in fsys.
 func Mkfifo(fsys FS, path string) error {
-	return Mknod(fsys, path, fs.ModeFifo, 0)
+	return Mknod(fsys, path, fs.ModeNamedPipe, 0)
 }
 
 // Mknod creates a special or ordinary file in fsys with the given mode and

@@ -14,9 +14,9 @@ func FileMode(mode fs.FileMode) uint32 { return makeMode(mode) }
 // If there is none, it is computed by FileMode(info.Mode()).
 func Mode(info fs.FileInfo) uint32 { return mode(info) }
 
-// Inode returns the file inode number.
+// Ino returns the file inode number.
 // If there is none, zero is returned.
-func Inode(info fs.FileInfo) uint64 { return inode(info) }
+func Ino(info fs.FileInfo) uint64 { return ino(info) }
 
 // NLink returns the number of hard links.
 // If the information is unknown, the function returns 1.

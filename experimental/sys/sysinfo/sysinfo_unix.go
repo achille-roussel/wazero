@@ -43,7 +43,7 @@ func mode(info fs.FileInfo) uint32 {
 	return makeMode(info.Mode())
 }
 
-func inode(info fs.FileInfo) uint64 {
+func ino(info fs.FileInfo) uint64 {
 	if stat := stat(info); stat != nil {
 		return statIno(stat)
 	}
