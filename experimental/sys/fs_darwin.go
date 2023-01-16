@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
@@ -68,6 +69,10 @@ func makedev(major, minor int) dev_t { return dev_t(major)<<8 | dev_t(minor)&0xF
 func major(dev dev_t) int            { return int(dev >> 8) }
 func minor(dev dev_t) int            { return int(dev & 0xFF) }
 
+func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
+	return openFileAt(__AT_FDCWD, "", path, flags, perm)
+}
+
 func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.File, error) {
 	// The combination of O_SYMLINNK and O_NOFOLLOW is invalid on Darwin,
 	// but it helps to be flexible so we handle this here by removing the
@@ -112,6 +117,13 @@ func datasync(file *os.File) error {
 			return err
 		}
 	}
+}
+
+func chtimes(file *os.File, atime, mtime time.Time) error {
+	return syscall.Futimes(int(file.Fd()), []syscall.Timeval{
+		syscall.NsecToTimeval(atime.UnixNano()),
+		syscall.NsecToTimeval(mtime.UnixNano()),
+	})
 }
 
 func mknodat(fd int, path string, mode uint32, dev int) error {

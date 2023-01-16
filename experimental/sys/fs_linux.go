@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
@@ -85,6 +86,10 @@ func minor(dev dev_t) int {
 	return int(min)
 }
 
+func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
+	return openFileAt(__AT_FDCWD, "", path, flags, perm)
+}
+
 func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.File, error) {
 	flags |= syscall.O_CLOEXEC
 	mode := sysinfo.FileMode(perm)
@@ -118,6 +123,21 @@ func datasync(file *os.File) error {
 			return err
 		}
 	}
+}
+
+func chtimes(file *os.File, atime, mtime time.Time) error {
+	err := syscall.Futimes(int(file.Fd()), []syscall.Timeval{
+		syscall.NsecToTimeval(atime.UnixNano()),
+		syscall.NsecToTimeval(mtime.UnixNano()),
+	})
+	// This error may occur on Linux due to having futimes implemented as
+	// chtimes on "/proc/fd/*". We normalize it back to EBADF since this
+	// is the error that is returned on other unix platforms when making
+	// a syscall with a closed or invalid file descriptor.
+	if err == syscall.ENOENT {
+		err = syscall.EBADF
+	}
+	return err
 }
 
 func unlink(path string) (err error) {
