@@ -80,8 +80,7 @@ type Directory interface {
 }
 
 // Device represents a device number on the file system.
-//
-// Device numbers are composed of a minor and mojor parts.
+// Device numbers are composed of a minor and major parts.
 type Device dev_t
 
 // Dev constructs a Device from a minor and major numbers.
