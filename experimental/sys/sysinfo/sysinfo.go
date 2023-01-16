@@ -18,9 +18,9 @@ func Mode(info fs.FileInfo) uint32 { return mode(info) }
 // If there is none, zero is returned.
 func Ino(info fs.FileInfo) uint64 { return ino(info) }
 
-// NLink returns the number of hard links.
+// Nlink returns the number of hard links.
 // If the information is unknown, the function returns 1.
-func NLink(info fs.FileInfo) uint64 { return nlink(info) }
+func Nlink(info fs.FileInfo) uint64 { return nlink(info) }
 
 // Device returns the device embedded into the given file info.
 // If there were no devices, zero is returned.
