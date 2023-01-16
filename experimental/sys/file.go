@@ -51,8 +51,6 @@ type File interface {
 // The file names passed to methods of the Directory interface must be valid
 // accoring to ValidPath. For all invalid names, the methods return ErrNotExist.
 type Directory interface {
-	// Returns the file system handle for this directory.
-	Fd() uintptr
 	// Opens a file at the given name, relative to the directory.
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 	// Reads the list of directory entries (see fs.ReadDirFile).
@@ -73,6 +71,8 @@ type Directory interface {
 	// Moves a file from oldName to newName. oldName is expressed relative to
 	// the receivers, while newName is expressed relative to newDir.
 	Rename(oldName string, newDir Directory, newName string) error
+	// Returns the underlying system file.
+	Sys() any
 }
 
 // Device represents a device number on the file system.
@@ -121,11 +121,11 @@ type file struct {
 	name string
 }
 
-func (f *file) Fd() uintptr {
+func (f *file) Sys() any {
 	if f.base != nil {
-		return f.base.Fd()
+		return f.base.Sys()
 	}
-	return ^uintptr(0)
+	return nil
 }
 
 func (f *file) Close() (err error) {
@@ -478,6 +478,7 @@ func (ref sharedFileRef) Close() error {
 
 type errRoot struct{ err error }
 
+func (f *errRoot) Sys() any                                { return nil }
 func (f *errRoot) Close() error                            { return nil }
 func (f *errRoot) Read([]byte) (int, error)                { return 0, ErrNotSupported }
 func (f *errRoot) ReadAt([]byte, int64) (int, error)       { return 0, ErrNotSupported }

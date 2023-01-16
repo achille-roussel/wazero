@@ -52,9 +52,9 @@ type readOnlyFile struct {
 	name string
 }
 
-func (f *readOnlyFile) Fd() uintptr {
-	if file, ok := f.base.(interface{ Fd() uintptr }); ok {
-		return file.Fd()
+func (f *readOnlyFile) Sys() any {
+	if file, ok := f.base.(interface{ Sys() any }); ok {
+		return file.Sys()
 	}
 	return ^uintptr(0)
 }

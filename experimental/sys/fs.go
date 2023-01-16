@@ -289,7 +289,7 @@ func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 	defer w.Close()
-	if _, err := io.Copy(w, r); err != nil {
+	if _, err := w.ReadFrom(r); err != nil {
 		return err
 	}
 	return copyTimes(w, stat)

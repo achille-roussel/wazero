@@ -2,6 +2,7 @@ package sys
 
 import (
 	"io/fs"
+	"os"
 	"time"
 
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
@@ -44,9 +45,16 @@ func (f dirFile) Symlink(oldName, newName string) error {
 }
 
 func (f dirFile) Link(oldName string, newDir Directory, newName string) error {
-	return linkat(f.fd(), oldName, int(newDir.Fd()), newName, __AT_SYMLINK_FOLLOW)
+	return linkat(f.fd(), oldName, dirfd(newDir), newName, __AT_SYMLINK_FOLLOW)
 }
 
 func (f dirFile) Rename(oldName string, newDir Directory, newName string) error {
-	return renameat(f.fd(), oldName, int(newDir.Fd()), newName)
+	return renameat(f.fd(), oldName, dirfd(newDir), newName)
+}
+
+func dirfd(d Directory) int {
+	if f, _ := d.Sys().(*os.File); f != nil {
+		return int(f.Fd())
+	}
+	return -1
 }
