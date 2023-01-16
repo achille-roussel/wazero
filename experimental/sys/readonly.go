@@ -160,19 +160,19 @@ func (f *readOnlyFile) Readlink() (link string, err error) {
 }
 
 func (f *readOnlyFile) Write([]byte) (int, error) {
-	return 0, f.fail("write", ErrNotSupported)
+	return 0, f.fail("write", ErrPermission)
 }
 
 func (f *readOnlyFile) WriteAt([]byte, int64) (int, error) {
-	return 0, f.fail("write", ErrNotSupported)
+	return 0, f.fail("write", ErrPermission)
 }
 
 func (f *readOnlyFile) WriteString(string) (int, error) {
-	return 0, f.fail("write", ErrNotSupported)
+	return 0, f.fail("write", ErrPermission)
 }
 
 func (f *readOnlyFile) ReadFrom(io.Reader) (int64, error) {
-	return 0, f.fail("write", ErrNotSupported)
+	return 0, f.fail("write", ErrPermission)
 }
 
 func (f *readOnlyFile) Chmod(fs.FileMode) error {

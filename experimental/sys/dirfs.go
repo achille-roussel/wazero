@@ -1,7 +1,6 @@
 package sys
 
 import (
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -50,18 +49,6 @@ func (path dirFS) openFile(name string, flags int, perm fs.FileMode) (File, erro
 type dirFile struct{ *os.File }
 
 func (f dirFile) Sys() any { return f.File }
-
-func (f dirFile) ReadFrom(r io.Reader) (int64, error) {
-	// Do our best to try to retrieve the underlying *os.File if one exists
-	// because the copy between files is optimized by os.(*File).ReadFrom to
-	// use copy_file_range on linux.
-	if f2, ok := r.(interface{ Sys() any }); ok {
-		if rr, ok := f2.Sys().(io.Reader); ok {
-			return f.File.ReadFrom(rr)
-		}
-	}
-	return io.Copy(f.File, r)
-}
 
 func (f dirFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	osFile, err := f.openFile(name, flags, perm)

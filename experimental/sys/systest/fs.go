@@ -657,10 +657,10 @@ var testDefaultFileRead = fsTestSuite{
 
 var testDefaultFileWrite = fsTestSuite{
 	{
-		name: "writing bytes to a file open with O_RDONLY fails with ErrNotSupported",
+		name: "writing bytes to a file open with O_RDONLY fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrPermission,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			_, err := f.Write(make([]byte, 1))
 			return err
@@ -668,10 +668,10 @@ var testDefaultFileWrite = fsTestSuite{
 	},
 
 	{
-		name: "writing a string to a file open with O_RDONLY fails with ErrNotSupported",
+		name: "writing a string to a file open with O_RDONLY fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrPermission,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			_, err := io.WriteString(f, "hello")
 			return err

@@ -838,10 +838,10 @@ var testReadWriteFileOpenFile = append(testDefaultFileOpenFile)
 
 var testReadWriteFileRead = append(testDefaultFileRead,
 	fsTestCase{
-		name: "reading from a file open with O_WRONLY fails with ErrNotSupported",
+		name: "reading from a file open with O_WRONLY fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrPermission,
 		test: testOpenFile("test", sys.O_WRONLY, 0, func(f sys.File) error {
 			_, err := f.Read(make([]byte, 1))
 			return err

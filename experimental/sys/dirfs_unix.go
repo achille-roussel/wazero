@@ -1,15 +1,63 @@
 package sys
 
 import (
+	"errors"
+	"io"
 	"io/fs"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
-func (f dirFile) fd() int {
-	return int(f.File.Fd())
+func handleEBADF(err error) error {
+	if err != nil && errors.Is(err, syscall.EBADF) {
+		err = ErrPermission
+	}
+	return err
+}
+
+func (f dirFile) Read(b []byte) (int, error) {
+	n, err := f.File.Read(b)
+	return n, handleEBADF(err)
+}
+
+func (f dirFile) ReadAt(b []byte, off int64) (int, error) {
+	n, err := f.File.ReadAt(b, off)
+	return n, handleEBADF(err)
+}
+
+func (f dirFile) ReadFrom(r io.Reader) (int64, error) {
+	n, err := f.readFrom(r)
+	return n, handleEBADF(err)
+}
+
+func (f dirFile) readFrom(r io.Reader) (int64, error) {
+	// Do our best to try to retrieve the underlying *os.File if one exists
+	// because the copy between files is optimized by os.(*File).ReadFrom to
+	// use copy_file_range on linux.
+	if f2, ok := r.(interface{ Sys() any }); ok {
+		if rr, ok := f2.Sys().(io.Reader); ok {
+			return f.File.ReadFrom(rr)
+		}
+	}
+	return io.Copy(f.File, r)
+}
+
+func (f dirFile) Write(b []byte) (int, error) {
+	n, err := f.File.Write(b)
+	return n, handleEBADF(err)
+}
+
+func (f dirFile) WriteAt(b []byte, off int64) (int, error) {
+	n, err := f.File.WriteAt(b, off)
+	return n, handleEBADF(err)
+}
+
+func (f dirFile) WriteString(s string) (int, error) {
+	n, err := f.File.WriteString(s)
+	return n, handleEBADF(err)
 }
 
 func (f dirFile) Readlink() (string, error) {
@@ -50,6 +98,10 @@ func (f dirFile) Link(oldName string, newDir Directory, newName string) error {
 
 func (f dirFile) Rename(oldName string, newDir Directory, newName string) error {
 	return renameat(f.fd(), oldName, dirfd(newDir), newName)
+}
+
+func (f dirFile) fd() int {
+	return int(f.File.Fd())
 }
 
 func dirfd(d Directory) int {

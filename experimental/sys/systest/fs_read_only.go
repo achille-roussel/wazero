@@ -277,9 +277,9 @@ var testReadOnlyFileCopy = append(testDefaultFileCopy,
 	},
 
 	fsTestCase{
-		name: "copying to a file files with ErrNotSupported",
+		name: "copying to a file fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
-		err:  sys.ErrNotSupported,
+		err:  sys.ErrPermission,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
 			r := strings.NewReader("nope")
 			_, err := io.Copy(f, struct{ io.Reader }{r})

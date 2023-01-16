@@ -14,7 +14,7 @@ var (
 	ErrNotEmpty       error = syscall.ENOTEMPTY
 	ErrNotDirectory   error = syscall.ENOTDIR
 	ErrNotImplemented error = syscall.ENOSYS
-	ErrNotSupported   error = syscall.EBADF
+	ErrNotSupported   error = syscall.ENOTSUP
 	ErrPermission     error = fs.ErrPermission
 	ErrReadOnly       error = syscall.EROFS
 	ErrLoop           error = syscall.ELOOP
