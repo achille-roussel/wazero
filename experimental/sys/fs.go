@@ -301,7 +301,7 @@ func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 	defer r.Close()
-	w, err := dst.OpenFile(name, openFlagsWriteOnly|openFlagsCreate, stat.Mode())
+	w, err := dst.OpenFile(name, openFlagsWriteOnly|openFlagsCopy, stat.Mode())
 	if err != nil {
 		return err
 	}
@@ -525,6 +525,12 @@ func equalErrorf(name, msg string, args ...any) error {
 	return &fs.PathError{Op: "equal", Path: name, Err: fmt.Errorf(msg, args...)}
 }
 
+// Create truncates and open a file in read-write mode at a path in fsys.
+// If the file does not exist, it is created with mode 0666 (before umask).
+func Create(fsys FS, path string) (File, error) {
+	return fsys.OpenFile(path, openFlagsCreate, 0666)
+}
+
 // Open opens a file at the given path in fsys.
 //
 // The file is open in read-only mode, it might point to a directory.
@@ -614,15 +620,13 @@ func ReadDir(fsys FS, path string) ([]fs.DirEntry, error) {
 
 // WriteFile writes data to a path in fsys.
 func WriteFile(fsys FS, path string, data []byte, perm fs.FileMode) error {
-	return callDir(fsys, "write", path, func(dir Directory, name string) error {
-		f, err := dir.OpenFile(name, openFlagsWriteFile, perm)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = f.Write(data)
+	f, err := fsys.OpenFile(path, openFlagsWriteFile, perm)
+	if err != nil {
 		return err
-	})
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
 }
 
 // Mkfifo creates a named pipe at path in fsys.
