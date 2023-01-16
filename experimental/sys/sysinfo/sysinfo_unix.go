@@ -43,6 +43,20 @@ func mode(info fs.FileInfo) uint32 {
 	return makeMode(info.Mode())
 }
 
+func uid(info fs.FileInfo) uint32 {
+	if stat := stat(info); stat != nil {
+		return statUid(stat)
+	}
+	return 0
+}
+
+func gid(info fs.FileInfo) uint32 {
+	if stat := stat(info); stat != nil {
+		return statGid(stat)
+	}
+	return 0
+}
+
 func ino(info fs.FileInfo) uint64 {
 	if stat := stat(info); stat != nil {
 		return statIno(stat)

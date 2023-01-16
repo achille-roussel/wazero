@@ -6,6 +6,14 @@ func statMode(stat *syscall.Stat_t) uint32 {
 	return stat.Mode
 }
 
+func statUid(stat *syscall.Stat_t) uint32 {
+	return stat.Uid
+}
+
+func statGid(stat *syscall.Stat_t) uint32 {
+	return stat.Gid
+}
+
 func statIno(stat *syscall.Stat_t) uint64 {
 	return stat.Ino
 }

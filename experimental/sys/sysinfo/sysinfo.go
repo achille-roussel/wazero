@@ -14,6 +14,12 @@ func FileMode(mode fs.FileMode) uint32 { return makeMode(mode) }
 // If there is none, it is computed by FileMode(info.Mode()).
 func Mode(info fs.FileInfo) uint32 { return mode(info) }
 
+// Uid returns the file user id, or zero if it is unknown.
+func Uid(info fs.FileInfo) uint32 { return uid(info) }
+
+// Gid returns the file group id, or zero if it is unknown.
+func Gid(info fs.FileInfo) uint32 { return gid(info) }
+
 // Ino returns the file inode number.
 // If there is none, zero is returned.
 func Ino(info fs.FileInfo) uint64 { return ino(info) }
