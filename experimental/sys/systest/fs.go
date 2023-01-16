@@ -121,11 +121,7 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 			}
 			fsys := makeFS(t, base)
 			if err := test.test(fsys); !errors.Is(err, test.err) {
-				if errors.Is(err, sys.ErrNotSupported) {
-					t.Skip("operation not supported on this file system")
-				} else {
-					t.Errorf("error mismatch: want=%v got=%v", test.err, err)
-				}
+				t.Errorf("error mismatch: want=%v got=%v", test.err, err)
 			} else if test.want != nil {
 				if err := sys.EqualFS(fsys, sys.NewFS(test.want)); err != nil {
 					t.Error(err)
