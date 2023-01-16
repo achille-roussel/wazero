@@ -43,7 +43,7 @@ const (
 
 	// We add O_NONBLOCK to prevent open from blocking if it is called on a named
 	// pipe which has no writer.
-	openFlagsCcopy     = O_CREATE | O_EXCL | O_NOFOLLOW
+	openFlagsCopy      = O_CREATE | O_EXCL | O_NOFOLLOW
 	openFlagsCreate    = O_CREATE | O_RDWR | O_TRUNC
 	openFlagsWriteOnly = O_WRONLY
 	openFlagsReadOnly  = O_RDONLY
