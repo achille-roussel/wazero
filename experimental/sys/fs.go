@@ -45,7 +45,7 @@ func NewFS(base fs.FS) FS {
 			return nil, err
 		}
 
-		if ((flags & O_DIRECTORY) != 0) || ((flags & O_NOFOLLOW) == 0) {
+		if hasDirectoryFlags(flags) || !hasNoFollowFlags(flags) {
 			s, err := f.Stat()
 			if err != nil {
 				f.Close()
@@ -54,7 +54,7 @@ func NewFS(base fs.FS) FS {
 			m := s.Mode()
 			t := m.Type()
 
-			if (flags & O_DIRECTORY) != 0 {
+			if hasDirectoryFlags(flags) {
 				if t != fs.ModeDir {
 					f.Close()
 					return nil, ErrNotDirectory
@@ -72,6 +72,22 @@ func NewFS(base fs.FS) FS {
 
 		return ReadOnlyFile(f, name, fsys), nil
 	})
+}
+
+func hasReadOnlyFlags(flags int) bool {
+	return (flags & ^openFileReadOnlyFlags) == 0
+}
+
+func hasDirectoryFlags(flags int) bool {
+	return hasFlags(flags, openFlagsDirectory)
+}
+
+func hasNoFollowFlags(flags int) bool {
+	return hasFlags(flags, openFlagsNoFollow)
+}
+
+func hasFlags(flags, check int) bool {
+	return (flags & check) == check
 }
 
 // FuncFS is an implementation of the FS interface using a function to open
@@ -194,20 +210,21 @@ func copyFS(dst, src File) error {
 	for {
 		entries, err := src.ReadDir(100)
 		for _, entry := range entries {
-			stat, err := entry.Info()
+			fileInfo, err := entry.Info()
 			if err != nil {
 				return err
 			}
-			name := entry.Name()
-			switch entry.Type() {
+			fileName := entry.Name()
+			fileType := entry.Type()
+			switch fileType {
 			case fs.ModeDir:
-				err = copyDir(dst, src, name, stat)
+				err = copyDir(dst, src, fileName, fileInfo)
 			case fs.ModeSymlink:
-				err = copySymlink(dst, src, name, stat)
+				err = copySymlink(dst, src, fileName, fileInfo)
 			case 0: // regular file
-				err = copyFile(dst, src, name, stat)
+				err = copyFile(dst, src, fileName, fileInfo)
 			default:
-				err = copyNode(dst, src, name, stat)
+				err = copyNode(dst, src, fileName, fileInfo)
 			}
 			if err != nil {
 				return err
@@ -270,7 +287,7 @@ func copyNode(dst, src File, name string, stat fs.FileInfo) error {
 	if (stat.Mode() & fs.ModeDevice) != 0 {
 		return copyFile(dst, src, name, stat)
 	}
-	w, err := dst.OpenFile(name, openFlagsSymlink, 0)
+	w, err := dst.OpenFile(name, openFlagsNoFollow, 0)
 	if err != nil {
 		return err
 	}

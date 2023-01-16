@@ -1,7 +1,6 @@
 package sys
 
 import (
-	"errors"
 	"io/fs"
 	"syscall"
 )
@@ -21,11 +20,13 @@ var (
 	ErrDevice         error = syscall.ENXIO
 )
 
-func makePathError(op, name string, err error) error {
-	if e := errors.Unwrap(err); e != nil {
-		err = e
+func makePathError(op, path string, err error) error {
+	pe, _ := err.(*fs.PathError)
+	if pe == nil {
+		pe = new(fs.PathError)
+	} else {
+		err = pe.Err
 	}
-
 	switch e := err.(type) {
 	case syscall.Errno:
 		switch e {
@@ -39,6 +40,6 @@ func makePathError(op, name string, err error) error {
 			err = ErrNotExist
 		}
 	}
-
-	return &fs.PathError{Op: op, Path: name, Err: err}
+	pe.Op, pe.Path, pe.Err = op, path, err
+	return pe
 }

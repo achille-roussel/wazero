@@ -11,26 +11,22 @@ import (
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
-func handleEBADF(err error) error {
-	if err != nil && errors.Is(err, syscall.EBADF) {
-		err = ErrPermission
-	}
-	return err
-}
-
 func (f dirFile) Read(b []byte) (int, error) {
 	n, err := f.File.Read(b)
-	return n, handleEBADF(err)
+	return n, f.handleEBADF(err)
 }
 
 func (f dirFile) ReadAt(b []byte, off int64) (int, error) {
+	if len(b) == 0 && int(f.Fd()) < 0 {
+		return 0, f.wrap("read", ErrClosed)
+	}
 	n, err := f.File.ReadAt(b, off)
-	return n, handleEBADF(err)
+	return n, f.handleEBADF(err)
 }
 
 func (f dirFile) ReadFrom(r io.Reader) (int64, error) {
 	n, err := f.readFrom(r)
-	return n, handleEBADF(err)
+	return n, f.handleEBADF(err)
 }
 
 func (f dirFile) readFrom(r io.Reader) (int64, error) {
@@ -47,61 +43,88 @@ func (f dirFile) readFrom(r io.Reader) (int64, error) {
 
 func (f dirFile) Write(b []byte) (int, error) {
 	n, err := f.File.Write(b)
-	return n, handleEBADF(err)
+	return n, f.handleEBADF(err)
 }
 
 func (f dirFile) WriteAt(b []byte, off int64) (int, error) {
+	if len(b) == 0 && int(f.Fd()) < 0 {
+		return 0, f.wrap("write", ErrClosed)
+	}
 	n, err := f.File.WriteAt(b, off)
-	return n, handleEBADF(err)
+	return n, f.handleEBADF(err)
 }
 
 func (f dirFile) WriteString(s string) (int, error) {
 	n, err := f.File.WriteString(s)
-	return n, handleEBADF(err)
+	return n, f.handleEBADF(err)
 }
 
 func (f dirFile) Readlink() (string, error) {
-	return readlink(f.File)
+	link, err := readlink(f.File)
+	return link, f.wrap("readlink", err)
 }
 
 func (f dirFile) Chtimes(atime, mtime time.Time) error {
-	return chtimes(f.File, atime, mtime)
+	return f.wrap("chtimes", chtimes(f.File, atime, mtime))
 }
 
 func (f dirFile) Datasync() error {
-	return datasync(f.File)
+	return f.wrap("datasync", datasync(f.File))
 }
 
 func (f dirFile) Mknod(name string, mode fs.FileMode, dev Device) error {
-	return mknodat(f.fd(), name, sysinfo.FileMode(mode), int(dev))
+	return f.wrap("mknod", mknodat(f.fd(), name, sysinfo.FileMode(mode), int(dev)))
 }
 
 func (f dirFile) Mkdir(name string, perm fs.FileMode) error {
-	return mkdirat(f.fd(), name, sysinfo.FileMode(perm))
+	return f.wrap("mkdir", mkdirat(f.fd(), name, sysinfo.FileMode(perm)))
 }
 
 func (f dirFile) Rmdir(name string) error {
-	return unlinkat(f.fd(), name, __AT_REMOVEDIR)
+	return f.wrap("rmdir", unlinkat(f.fd(), name, __AT_REMOVEDIR))
 }
 
 func (f dirFile) Unlink(name string) error {
-	return unlinkat(f.fd(), name, 0)
+	return f.wrap("unlink", unlinkat(f.fd(), name, 0))
 }
 
 func (f dirFile) Symlink(oldName, newName string) error {
-	return symlinkat(oldName, f.fd(), newName)
+	return f.wrap("symlink", symlinkat(oldName, f.fd(), newName))
 }
 
 func (f dirFile) Link(oldName string, newDir Directory, newName string) error {
-	return linkat(f.fd(), oldName, dirfd(newDir), newName, __AT_SYMLINK_FOLLOW)
+	return f.wrap("link", linkat(f.fd(), oldName, dirfd(newDir), newName, __AT_SYMLINK_FOLLOW))
 }
 
 func (f dirFile) Rename(oldName string, newDir Directory, newName string) error {
-	return renameat(f.fd(), oldName, dirfd(newDir), newName)
+	return f.wrap("rename", renameat(f.fd(), oldName, dirfd(newDir), newName))
+}
+
+func (f dirFile) openFile(name string, flags int, perm fs.FileMode) (*os.File, error) {
+	file, err := openFileAt(int(f.fd()), f.Name(), name, flags, perm)
+	return file, f.wrap("open", err)
 }
 
 func (f dirFile) fd() int {
 	return int(f.File.Fd())
+}
+
+func (f dirFile) wrap(op string, err error) error {
+	if err != nil {
+		err = makePathError(op, f.Name(), f.handleEBADF(err))
+	}
+	return err
+}
+
+func (f dirFile) handleEBADF(err error) error {
+	if err != nil && errors.Is(err, syscall.EBADF) {
+		if int(f.Fd()) < 0 {
+			err = ErrClosed
+		} else {
+			err = ErrPermission
+		}
+	}
+	return err
 }
 
 func dirfd(d Directory) int {

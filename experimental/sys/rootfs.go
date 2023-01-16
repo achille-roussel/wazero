@@ -287,7 +287,7 @@ resolvePath:
 	}
 
 	base, path, err = WalkPath(base, path, func(dirname string) error {
-		f, err := dir.OpenFile(dirname, rootfsOpenFileFlags, 0)
+		f, err := dir.OpenFile(dirname, openFlagsPath, 0)
 		if err != nil {
 			return err
 		}
@@ -337,8 +337,8 @@ resolvePath:
 	// link. In every other case, we add O_NOFOLLOW so we can perform the
 	// symbolic link resolution (if any).
 	openFlags := flags
-	if (openFlags & O_DIRECTORY) == 0 {
-		openFlags |= O_NOFOLLOW
+	if !hasDirectoryFlags(openFlags) {
+		openFlags |= openFlagsNoFollow
 	}
 
 	f, err := dir.OpenFile(path, openFlags, perm)
@@ -352,7 +352,7 @@ resolvePath:
 		return nil, err
 	}
 
-	if ((flags & O_NOFOLLOW) == 0) && s.Mode().Type() == fs.ModeSymlink {
+	if !hasNoFollowFlags(flags) && s.Mode().Type() == fs.ModeSymlink {
 		s, err := f.Readlink()
 		f.Close()
 		if err != nil {

@@ -36,14 +36,12 @@ func (path dirFS) openFile(name string, flags int, perm fs.FileMode) (File, erro
 	if !ValidPath(name) {
 		return nil, ErrNotExist
 	}
-	osPath := name
-	osPath = filepath.FromSlash(osPath)
-	osPath = filepath.Join(string(path), osPath)
+	osPath := filepath.Join(string(path), filepath.FromSlash(name))
 	osFile, err := openFile(osPath, flags, perm)
 	if err != nil {
 		return nil, err
 	}
-	return NewFile(dirFile{osFile}, name), nil
+	return dirFile{osFile}, nil
 }
 
 type dirFile struct{ *os.File }
@@ -55,5 +53,31 @@ func (f dirFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error
 	if err != nil {
 		return nil, err
 	}
-	return NewFile(dirFile{osFile}, name), nil
+	return dirFile{osFile}, nil
+}
+
+func (f dirFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	dirents, err := f.File.ReadDir(n)
+	normalizePathError(err, "use of closed file", ErrClosed)
+	return dirents, err
+}
+
+func (f dirFile) Stat() (fs.FileInfo, error) {
+	stat, err := f.File.Stat()
+	normalizePathError(err, "use of closed file", ErrClosed)
+	return stat, err
+}
+
+func (f dirFile) Truncate(size int64) error {
+	err := f.File.Truncate(size)
+	normalizePathError(err, "invalid argument", ErrInvalid)
+	return err
+}
+
+func normalizePathError(err error, msg string, repl error) {
+	if e, _ := err.(*fs.PathError); e != nil {
+		if e.Err.Error() == msg {
+			e.Err = repl
+		}
+	}
 }

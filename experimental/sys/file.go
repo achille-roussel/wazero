@@ -106,11 +106,11 @@ func FileDevice(info fs.FileInfo) Device { return Device(sysinfo.Device(info)) }
 // methods of the underlying file will only be called with valid inputs.
 func NewFile(base File, name string) File {
 	switch base.(type) {
-	case *file, *readOnlyFile:
-		// These are the two internal wrapper types we use, there is no need
-		// to wrap them multiple times so if we detect them here we can simply
-		// return the input. The name might differ but it's only used to carry
-		// context in errors, it doe not alter the file behavior.
+	case *file, *readOnlyFile, *mountedFile, dirFile:
+		// These are the few internal types we use, there is no need to wrap
+		// them multiple times so if we detect them here we can simply return
+		// the input. The name might differ but it's only used to carry context
+		// in errors, it doe not alter the file behavior.
 		return base
 	}
 	return &file{base, name}

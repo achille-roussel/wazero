@@ -267,7 +267,3 @@ func (f *readOnlyFile) fail(op string, err error) error {
 func (f *readOnlyFile) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
 }
-
-func hasReadOnlyFlags(flags int) bool {
-	return (flags & ^openFileReadOnlyFlags) == 0
-}

@@ -48,6 +48,8 @@ const (
 	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 	openFlagsStat      = O_RDONLY | O_NONBLOCK
 	openFlagsTruncate  = O_WRONLY
+	openFlagsNoFollow  = O_NOFOLLOW
+	openFlagsPath      = O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_PATH
 
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_DIRECT | O_LARGEFILE | O_NOATIME | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK | O_PATH
 )

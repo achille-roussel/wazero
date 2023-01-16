@@ -27,13 +27,13 @@ func statDev(stat *syscall.Stat_t) uint64 {
 }
 
 func statMtime(stat *syscall.Stat_t) (int64, int64) {
-	return stat.Mtimspec.Unix()
+	return stat.Mtimespec.Unix()
 }
 
 func statAtime(stat *syscall.Stat_t) (int64, int64) {
-	return stat.Atimspec.Unix()
+	return stat.Atimespec.Unix()
 }
 
 func statCtime(stat *syscall.Stat_t) (int64, int64) {
-	return stat.Ctimspec.Unix()
+	return stat.Ctimespec.Unix()
 }

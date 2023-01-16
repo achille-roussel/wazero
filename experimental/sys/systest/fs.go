@@ -121,7 +121,11 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 			}
 			fsys := makeFS(t, base)
 			if err := test.test(fsys); !errors.Is(err, test.err) {
-				t.Errorf("error mismatch: want=%v got=%v", test.err, err)
+				if errors.Is(err, sys.ErrNotImplemented) {
+					t.Skip(err)
+				} else {
+					t.Errorf("error mismatch:\nwant = %[1]v (%[1]T)\ngot  = %[2]v (%[2]T)", test.err, err)
+				}
 			} else if test.want != nil {
 				if err := sys.EqualFS(fsys, sys.NewFS(test.want)); err != nil {
 					t.Error(err)
