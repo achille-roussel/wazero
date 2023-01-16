@@ -204,10 +204,10 @@ func copyFS(dst, src File) error {
 				err = copyDir(dst, src, name, stat)
 			case fs.ModeSymlink:
 				err = copySymlink(dst, src, name, stat)
-			case fs.ModeNamedPipe, fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice:
-				err = copyNode(dst, src, name, stat)
 			case 0: // regular file
 				err = copyFile(dst, src, name, stat)
+			default:
+				err = copyNode(dst, src, name, stat)
 			}
 			if err != nil {
 				return err
@@ -239,8 +239,7 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	if err := copyFS(w, r); err != nil {
 		return err
 	}
-	time := stat.ModTime()
-	return w.Chtimes(time, time)
+	return copyTimes(w, stat)
 }
 
 func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
@@ -261,12 +260,22 @@ func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 	defer w.Close()
-	time := stat.ModTime()
-	return w.Chtimes(time, time)
+	return copyTimes(w, stat)
 }
 
 func copyNode(dst, src File, name string, stat fs.FileInfo) error {
-	return dst.Mknod(name, stat.Mode(), 0)
+	if err := dst.Mknod(name, stat.Mode(), 0); err != nil {
+		return err
+	}
+	if (stat.Mode() & fs.ModeDevice) != 0 {
+		return copyFile(dst, src, name, stat)
+	}
+	w, err := dst.OpenFile(name, openFlagsSymlink, 0)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	return copyTimes(w, stat)
 }
 
 func copyFile(dst, src File, name string, stat fs.FileInfo) error {
@@ -283,11 +292,16 @@ func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 	if _, err := io.Copy(w, r); err != nil {
 		return err
 	}
-	time := stat.ModTime()
-	return w.Chtimes(time, time)
+	return copyTimes(w, stat)
 }
 
-const equalFSBufsize = 8192
+func copyTimes(f File, stat fs.FileInfo) error {
+	atime := sysinfo.ModTime(stat)
+	mtime := sysinfo.AccessTime(stat)
+	return f.Chtimes(atime, mtime)
+}
+
+const equalFSBufsize = 32768
 
 // EqualFS compares two file systems, returning nil if they are equal, or an
 // error describing their difference when they are not.
@@ -316,16 +330,17 @@ func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 	for {
 		entries, err := source.ReadDir(100)
 		for _, entry := range entries {
-			name := entry.Name()
-			switch entry.Type() {
+			fileName := entry.Name()
+			fileType := entry.Type()
+			switch fileType {
 			case fs.ModeDir:
-				err = equalDir(source, target, name, buf)
+				err = equalDir(source, target, fileName, buf)
 			case fs.ModeSymlink:
-				err = equalSymlink(source, target, name)
-			case fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice:
-				err = equalDevice(source, target, name)
+				err = equalSymlink(source, target, fileName)
+			case 0: // regular
+				err = equalFile(source, target, fileName, buf)
 			default:
-				err = equalFile(source, target, name, buf)
+				err = equalNode(source, target, fileName, fileType, buf)
 			}
 		}
 		if err != nil {
@@ -355,12 +370,12 @@ func equalDir(source, target File, name string, buf *[equalFSBufsize]byte) error
 }
 
 func equalSymlink(source, target File, name string) error {
-	sourceFile, err := source.OpenFile(name, openFlagsReadOnly|openFlagsSymlink, 0)
+	sourceFile, err := source.OpenFile(name, openFlagsSymlink, 0)
 	if err != nil {
 		return err
 	}
 	defer sourceFile.Close()
-	targetFile, err := target.OpenFile(name, openFlagsReadOnly|openFlagsSymlink, 0)
+	targetFile, err := target.OpenFile(name, openFlagsSymlink, 0)
 	if err != nil {
 		return err
 	}
@@ -379,19 +394,26 @@ func equalSymlink(source, target File, name string) error {
 	return nil
 }
 
-func equalDevice(source, target File, name string) error {
-	sourceDev, err := source.OpenFile(name, openFlagsReadOnly|openFlagsDevice, 0)
+func equalNode(source, target File, name string, typ fs.FileMode, buf *[equalFSBufsize]byte) error {
+	sourceNode, err := source.OpenFile(name, openFlagsReadOnly|openFlagsNode, 0)
 	if err != nil {
 		return err
 	}
-	defer sourceDev.Close()
-	targetDev, err := target.OpenFile(name, openFlagsReadOnly|openFlagsDevice, 0)
+	defer sourceNode.Close()
+	targetNode, err := target.OpenFile(name, openFlagsReadOnly|openFlagsNode, 0)
 	if err != nil {
 		return err
 	}
-	defer targetDev.Close()
-	// TODO: compare the device numbers in a portable way
-	return equalStat(sourceDev, targetDev)
+	defer targetNode.Close()
+	if err := equalStat(sourceNode, targetNode); err != nil {
+		return equalErrorf(name, "%w", err)
+	}
+	if (typ & fs.ModeDevice) != 0 {
+		if err := equalData(sourceNode, targetNode, buf); err != nil {
+			return equalErrorf(name, "%w", err)
+		}
+	}
+	return nil
 }
 
 func equalFile(source, target File, name string, buf *[equalFSBufsize]byte) error {

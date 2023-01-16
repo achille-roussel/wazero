@@ -35,11 +35,11 @@ const (
 
 	// We add O_NONBLOCK to prevent open from blocking if it is called on a named
 	// pipe which has no writer.
-	openFlagsCreate    = O_CREATE | O_NOFOLLOW
+	openFlagsCreate    = O_CREATE | O_EXCL | O_NOFOLLOW
 	openFlagsWriteOnly = O_WRONLY
 	openFlagsReadOnly  = O_RDONLY
 	openFlagsDirectory = O_DIRECTORY
-	openFlagsDevice    = O_NONBLOCK | O_NOFOLLOW
+	openFlagsNode      = O_NONBLOCK | O_NOFOLLOW
 	openFlagsSymlink   = O_NONBLOCK | O_NOFOLLOW | O_PATH
 	openFlagsFile      = O_NONBLOCK | O_NOFOLLOW
 	openFlagsReadlink  = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
