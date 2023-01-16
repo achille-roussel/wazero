@@ -76,7 +76,7 @@ func (f dirFile) Truncate(size int64) error {
 
 func normalizePathError(err error, msg string, repl error) {
 	if e, _ := err.(*fs.PathError); e != nil {
-		if e.Err.Error() == msg {
+		if unwrap(e.Err).Error() == msg {
 			e.Err = repl
 		}
 	}

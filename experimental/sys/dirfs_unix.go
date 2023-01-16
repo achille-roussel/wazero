@@ -26,6 +26,9 @@ func (f dirFile) ReadAt(b []byte, off int64) (int, error) {
 
 func (f dirFile) ReadFrom(r io.Reader) (int64, error) {
 	n, err := f.readFrom(r)
+	// On Linux the copy_file_range optimization may return a *os.SyscallError
+	// wrapping an unexported error value when called on a closed file.
+	normalizePathError(err, "use of closed file", ErrClosed)
 	return n, f.handleEBADF(err)
 }
 

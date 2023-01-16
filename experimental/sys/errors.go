@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"errors"
 	"io/fs"
 	"syscall"
 )
@@ -19,6 +20,16 @@ var (
 	ErrLoop           error = syscall.ELOOP
 	ErrDevice         error = syscall.ENXIO
 )
+
+func unwrap(err error) error {
+	for {
+		if cause := errors.Unwrap(err); cause != nil {
+			err = cause
+		} else {
+			return err
+		}
+	}
+}
 
 func makePathError(op, path string, err error) error {
 	pe, _ := err.(*fs.PathError)

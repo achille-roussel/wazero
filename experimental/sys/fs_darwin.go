@@ -68,10 +68,6 @@ func makedev(major, minor int) dev_t { return dev_t(major)<<8 | dev_t(minor)&0xF
 func major(dev dev_t) int            { return int(dev >> 8) }
 func minor(dev dev_t) int            { return int(dev & 0xFF) }
 
-func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
-	return openFileAt(__AT_FDCWD, "", path, flags, perm)
-}
-
 func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.File, error) {
 	if (flags & O_SYMLINK) != 0 {
 		flags &= ^O_NOFOLLOW
@@ -80,10 +76,12 @@ func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.F
 	mode := sysinfo.FileMode(perm)
 	newfd, err := openat(dirfd, path, flags, mode)
 	if err != nil {
-		if err == syscall.ELOOP && ((flags & (O_DIRECTORY | O_SYMLINK | O_NOFOLLOW)) == O_NOFOLLOW) {
-			flags &= ^O_NOFOLLOW
-			flags |= syscall.O_SYMLINK
-			newfd, err = openat(dirfd, path, flags, mode)
+		if err == syscall.ELOOP {
+			if (flags & (O_DIRECTORY | O_SYMLINK | O_NOFOLLOW)) == O_NOFOLLOW {
+				flags &= ^O_NOFOLLOW
+				flags |= syscall.O_SYMLINK
+				newfd, err = openat(dirfd, path, flags, mode)
+			}
 		}
 	}
 	if err != nil {

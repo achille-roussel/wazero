@@ -1,11 +1,13 @@
 package sys
 
 import (
-	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 	"unsafe"
+
+	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
 const (
@@ -30,6 +32,7 @@ const (
 	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h
 	O_PATH = 010000000
 
+	__AT_FDCWD          = -100
 	__AT_REMOVEDIR      = 0x200
 	__AT_SYMLINK_FOLLOW = 0x400
 
@@ -82,18 +85,26 @@ func minor(dev dev_t) int {
 	return int(min)
 }
 
-func openFile(path string, flags int, mode fs.FileMode) (*os.File, error) {
-	f, err := os.OpenFile(path, flags, mode)
+func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.File, error) {
+	flags |= syscall.O_CLOEXEC
+	mode := sysinfo.FileMode(perm)
+	newfd, err := openat(dirfd, path, flags, mode)
 	if err != nil {
 		// Linux gives ELOOP if attempting to open a symbolic link without
 		// passing the O_PATH flag.
-		if errors.Is(err, syscall.ELOOP) {
+		if err == syscall.ELOOP {
 			if (flags & (O_DIRECTORY | O_NOFOLLOW | O_PATH)) == O_NOFOLLOW {
-				f, err = os.OpenFile(path, flags|O_PATH, mode)
+				newfd, err = openat(dirfd, path, flags|O_PATH, mode)
 			}
 		}
 	}
-	return f, err
+	if err != nil {
+		return nil, err
+	}
+	if dir != "" {
+		path = filepath.Join(dir, path)
+	}
+	return os.NewFile(uintptr(newfd), path), nil
 }
 
 func readlink(file *os.File) (string, error) {
