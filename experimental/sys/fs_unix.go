@@ -11,18 +11,6 @@ func openFile(path string, flags int, perm fs.FileMode) (*os.File, error) {
 	return openFileAt(__AT_FDCWD, "", path, flags, perm)
 }
 
-func rmdir(path string) error {
-	return syscall.Rmdir(path)
-}
-
-func ignoringEINTR(do func() error) error {
-	for {
-		if err := do(); err != syscall.EINTR {
-			return err
-		}
-	}
-}
-
 func chtimes(file *os.File, atime, mtime time.Time) error {
 	err := syscall.Futimes(int(file.Fd()), []syscall.Timeval{
 		syscall.NsecToTimeval(atime.UnixNano()),

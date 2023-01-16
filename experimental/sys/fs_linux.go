@@ -113,7 +113,11 @@ func readlink(file *os.File) (string, error) {
 
 func datasync(file *os.File) error {
 	fd := int(file.Fd())
-	return ignoringEINTR(func() error { return syscall.Fdatasync(fd) })
+	for {
+		if err := syscall.Fdatasync(fd); err != syscall.EINTR {
+			return err
+		}
+	}
 }
 
 func unlink(path string) (err error) {
