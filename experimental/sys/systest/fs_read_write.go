@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tetratelabs/wazero/experimental/sys"
+	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
 // TestReadWriteFS is a test suite used to test the capabilities of file systems
@@ -219,7 +220,7 @@ var testReadWriteMknod = append(testDefaultMknod,
 			if err != nil {
 				return err
 			}
-			return sys.Mknod(fsys, "dir/test", 0600, sys.FileDevice(s))
+			return sys.Mknod(fsys, "dir/test", 0600, sysinfo.Device(s))
 		},
 	},
 )

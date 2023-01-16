@@ -32,7 +32,7 @@ const (
 )
 
 // https://github.com/apple/darwin-xnu/blob/main/bsd/sys/types.h#L151
-type dev_t uint64
+type dev_t int32
 
 func makedev(major, minor int) dev_t { return dev_t(major)<<8 | dev_t(minor)&0xFF }
 func major(dev dev_t) int            { return int(dev >> 8) }
