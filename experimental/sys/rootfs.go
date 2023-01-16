@@ -25,7 +25,12 @@ func (mp MountPoint) String() string { return mp.Path }
 // The function panics if any of the file systems is nil, or if some of the
 // mount paths are invalid. Validation of the mount paths is done using
 // fs.ValidPath and checking that none of the mount paths are the root (".").
-func RootFS(base FS, mounts ...MountPoint) FS { return sandboxFS(mountFS(base, mounts)) }
+func RootFS(base FS, mounts ...MountPoint) FS {
+	if len(mounts) > 0 {
+		base = mountFS(base, mounts)
+	}
+	return sandboxFS(base)
+}
 
 // mountFS creates a file system from stacking the mount points on top of a base
 // file system.
