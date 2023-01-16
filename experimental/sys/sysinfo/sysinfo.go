@@ -5,13 +5,31 @@ package sysinfo
 import (
 	"io/fs"
 	"time"
-
-	"github.com/tetratelabs/wazero/experimental/sys"
 )
+
+// FileMode converts the given fs.FileMode to the system representation.
+func FileMode(mode fs.FileMode) uint32 { return makeMode(mode) }
+
+// Mode returns the system dependent bits composing the file mode.
+// If there is none, it is computed by FileMode(info.Mode()).
+func Mode(info fs.FileInfo) uint32 { return mode(info) }
+
+// Inode returns the file inode number.
+// If there is none, zero is returned.
+func Inode(info fs.FileInfo) uint64 { return inode(info) }
+
+// NLink returns the number of hard links.
+// If the information is unknown, the function returns 1.
+func NLink(info fs.FileInfo) uint64 { return nlink(info) }
 
 // Device returns the device embedded into the given file info.
 // If there were no devices, zero is returned.
-func Device(info fs.FileInfo) sys.Device { return sys.Device(device(info)) }
+func Device(info fs.FileInfo) uint64 { return device(info) }
+
+// ModTime returns the file modification time.
+// If it not available on the embedded system information, the function falls
+// back to calling info.ModTime().
+func ModTime(info fs.FileInfo) time.Time { return mtime(info) }
 
 // AccessTime returns the file access time.
 // If access time is not supported, the zero value of time.Time is returned.

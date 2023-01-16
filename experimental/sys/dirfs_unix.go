@@ -3,6 +3,8 @@ package sys
 import (
 	"io/fs"
 	"time"
+
+	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
 func (f dirFile) fd() int {
@@ -22,11 +24,11 @@ func (f dirFile) Datasync() error {
 }
 
 func (f dirFile) Mknod(name string, mode fs.FileMode, dev Device) error {
-	return mknodat(f.fd(), name, makeMode(mode), int(dev))
+	return mknodat(f.fd(), name, sysinfo.FileMode(mode), int(dev))
 }
 
 func (f dirFile) Mkdir(name string, perm fs.FileMode) error {
-	return mkdirat(f.fd(), name, makeMode(perm))
+	return mkdirat(f.fd(), name, sysinfo.FileMode(perm))
 }
 
 func (f dirFile) Rmdir(name string) error {

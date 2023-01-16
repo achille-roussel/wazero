@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"sync/atomic"
 	"time"
+
+	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
 // File is an interface implemented by files opened by FS instsances.
@@ -93,6 +95,10 @@ func (dev Device) Minor() int { return minor(dev_t(dev)) }
 
 // String returns a string representation of dev as "major/minor".
 func (dev Device) String() string { return fmt.Sprintf("%d/%d", dev.Major(), dev.Minor()) }
+
+// FileDevice returns the device embedded into the given file info.
+// If there were no devices, zero is returned.
+func FileDevice(info fs.FileInfo) Device { return Device(sysinfo.Device(info)) }
 
 // NewFile creates a wrapper around the given file which ensures that the
 // resulting file will satisfy a set of base expectations of the File

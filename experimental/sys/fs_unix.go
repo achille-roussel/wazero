@@ -1,7 +1,6 @@
 package sys
 
 import (
-	"io/fs"
 	"os"
 	"strings"
 	"syscall"
@@ -41,36 +40,6 @@ func chtimes(file *os.File, atime, mtime time.Time) error {
 		syscall.NsecToTimeval(mtime.UnixNano()),
 	}
 	return syscall.Futimes(fd, tv)
-}
-
-func makeMode(fileMode fs.FileMode) (mode uint32) {
-	mode = uint32(fileMode.Perm())
-	switch fileMode.Type() {
-	case fs.ModeDevice:
-		mode |= syscall.S_IFBLK
-	case fs.ModeDevice | fs.ModeCharDevice:
-		mode |= syscall.S_IFCHR
-	case fs.ModeDir:
-		mode |= syscall.S_IFDIR
-	case fs.ModeNamedPipe:
-		mode |= syscall.S_IFIFO
-	case fs.ModeSymlink:
-		mode |= syscall.S_IFLNK
-	case fs.ModeSocket:
-		mode |= syscall.S_IFSOCK
-	default:
-		mode |= syscall.S_IFREG
-	}
-	if (fileMode & fs.ModeSetgid) != 0 {
-		mode |= syscall.S_ISGID
-	}
-	if (fileMode & fs.ModeSetuid) != 0 {
-		mode |= syscall.S_ISUID
-	}
-	if (fileMode & fs.ModeSticky) != 0 {
-		mode |= syscall.S_ISVTX
-	}
-	return mode
 }
 
 func fgetxattr(fd int, name string) (string, bool, error) {

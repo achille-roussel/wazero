@@ -6,6 +6,8 @@ import (
 	"io"
 	"io/fs"
 	"time"
+
+	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
 // FS is an interface representing file systems.
@@ -450,14 +452,15 @@ func equalStat(source, target File) error {
 	if sourceMode != targetMode {
 		return fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
 	}
-	sourceTime := sourceInfo.ModTime()
-	targetTime := targetInfo.ModTime()
-	// Only compare the modification times if both file systems support it,
-	// assuming a zero time means it's not supported.
-	if !sourceTime.IsZero() && !targetTime.IsZero() {
-		if !sourceTime.Equal(targetTime) {
-			return fmt.Errorf("file times mismatch: want=%v got=%v", sourceTime, targetTime)
-		}
+	sourceModTime := sysinfo.ModTime(sourceInfo)
+	targetModTime := sysinfo.ModTime(targetInfo)
+	if err := equalTime("modification", sourceModTime, targetModTime); err != nil {
+		return err
+	}
+	sourceAccessTime := sysinfo.AccessTime(sourceInfo)
+	targetAccessTime := sysinfo.AccessTime(targetInfo)
+	if err := equalTime("access", sourceAccessTime, targetAccessTime); err != nil {
+		return err
 	}
 	// Directory sizes are platform-dependent, there is no need to compare.
 	if !sourceInfo.IsDir() {
@@ -466,6 +469,15 @@ func equalStat(source, target File) error {
 		if sourceSize != targetSize {
 			return fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
 		}
+	}
+	return nil
+}
+
+func equalTime(typ string, source, target time.Time) error {
+	// Only compare the modification times if both file systems support it,
+	// assuming a zero time means it's not supported.
+	if !source.IsZero() && !target.IsZero() && !source.Equal(target) {
+		return fmt.Errorf("file %s times mismatch: want=%v got=%v", typ, source, target)
 	}
 	return nil
 }
