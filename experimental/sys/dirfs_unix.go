@@ -50,15 +50,3 @@ func (f dirFile) Link(oldName string, newDir Directory, newName string) error {
 func (f dirFile) Rename(oldName string, newDir Directory, newName string) error {
 	return renameat(f.fd(), oldName, int(newDir.Fd()), newName)
 }
-
-func (f dirFile) GetXAttr(name string) (string, bool, error) {
-	return fgetxattr(f.fd(), name)
-}
-
-func (f dirFile) SetXAttr(name, value string, flags int) error {
-	return fsetxattr(f.fd(), name, value, flags)
-}
-
-func (f dirFile) ListXAttr() ([]string, error) {
-	return flistxattr(f.fd())
-}

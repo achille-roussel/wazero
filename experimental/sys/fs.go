@@ -204,8 +204,8 @@ func copyFS(dst, src File) error {
 				err = copyDir(dst, src, name, stat)
 			case fs.ModeSymlink:
 				err = copySymlink(dst, src, name, stat)
-			case fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice:
-				err = copyDevice(dst, src, name, stat)
+			case fs.ModeNamedPipe, fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice:
+				err = copyNode(dst, src, name, stat)
 			case 0: // regular file
 				err = copyFile(dst, src, name, stat)
 			}
@@ -226,12 +226,12 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	if err := dst.Mkdir(name, stat.Mode()); err != nil {
 		return err
 	}
-	r, err := src.OpenFile(name, O_DIRECTORY, 0)
+	r, err := src.OpenFile(name, openFlagsDirectory, 0)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
-	w, err := dst.OpenFile(name, O_DIRECTORY, 0)
+	w, err := dst.OpenFile(name, openFlagsDirectory, 0)
 	if err != nil {
 		return err
 	}
@@ -244,7 +244,7 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 }
 
 func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
-	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	r, err := src.OpenFile(name, openFlagsSymlink, 0)
 	if err != nil {
 		return err
 	}
@@ -256,7 +256,7 @@ func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 	if err := dst.Symlink(s, name); err != nil {
 		return err
 	}
-	w, err := dst.OpenFile(name, O_RDWR|O_NOFOLLOW, 0)
+	w, err := dst.OpenFile(name, openFlagsSymlink, 0)
 	if err != nil {
 		return err
 	}
@@ -265,17 +265,17 @@ func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 	return w.Chtimes(time, time)
 }
 
-func copyDevice(dst, src File, name string, stat fs.FileInfo) error {
-	return dst.Mknod(name, stat.Mode(), Dev(0, 0))
+func copyNode(dst, src File, name string, stat fs.FileInfo) error {
+	return dst.Mknod(name, stat.Mode(), 0)
 }
 
 func copyFile(dst, src File, name string, stat fs.FileInfo) error {
-	r, err := src.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	r, err := src.OpenFile(name, openFlagsReadOnly|openFlagsFile, 0)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
-	w, err := dst.OpenFile(name, O_WRONLY|O_NOFOLLOW|O_CREATE|O_TRUNC, stat.Mode())
+	w, err := dst.OpenFile(name, openFlagsWriteOnly|openFlagsCreate, stat.Mode())
 	if err != nil {
 		return err
 	}
@@ -338,12 +338,12 @@ func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
 }
 
 func equalDir(source, target File, name string, buf *[equalFSBufsize]byte) error {
-	sourceDir, err := source.OpenFile(name, O_DIRECTORY, 0)
+	sourceDir, err := source.OpenFile(name, openFlagsDirectory, 0)
 	if err != nil {
 		return err
 	}
 	defer sourceDir.Close()
-	targetDir, err := target.OpenFile(name, O_DIRECTORY, 0)
+	targetDir, err := target.OpenFile(name, openFlagsDirectory, 0)
 	if err != nil {
 		return err
 	}
@@ -355,12 +355,12 @@ func equalDir(source, target File, name string, buf *[equalFSBufsize]byte) error
 }
 
 func equalSymlink(source, target File, name string) error {
-	sourceFile, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	sourceFile, err := source.OpenFile(name, openFlagsReadOnly|openFlagsSymlink, 0)
 	if err != nil {
 		return err
 	}
 	defer sourceFile.Close()
-	targetFile, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	targetFile, err := target.OpenFile(name, openFlagsReadOnly|openFlagsSymlink, 0)
 	if err != nil {
 		return err
 	}
@@ -380,12 +380,12 @@ func equalSymlink(source, target File, name string) error {
 }
 
 func equalDevice(source, target File, name string) error {
-	sourceDev, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	sourceDev, err := source.OpenFile(name, openFlagsReadOnly|openFlagsDevice, 0)
 	if err != nil {
 		return err
 	}
 	defer sourceDev.Close()
-	targetDev, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	targetDev, err := target.OpenFile(name, openFlagsReadOnly|openFlagsDevice, 0)
 	if err != nil {
 		return err
 	}
@@ -395,12 +395,12 @@ func equalDevice(source, target File, name string) error {
 }
 
 func equalFile(source, target File, name string, buf *[equalFSBufsize]byte) error {
-	sourceFile, err := source.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	sourceFile, err := source.OpenFile(name, openFlagsReadOnly|openFlagsFile, 0)
 	if err != nil {
 		return err
 	}
 	defer sourceFile.Close()
-	targetFile, err := target.OpenFile(name, O_RDONLY|O_NOFOLLOW, 0)
+	targetFile, err := target.OpenFile(name, openFlagsReadOnly|openFlagsFile, 0)
 	if err != nil {
 		return err
 	}
@@ -502,12 +502,12 @@ func equalErrorf(name, msg string, args ...any) error {
 //	}
 //
 func Open(fsys FS, path string) (File, error) {
-	return fsys.OpenFile(path, O_RDONLY, 0)
+	return fsys.OpenFile(path, openFlagsReadOnly, 0)
 }
 
 // OpenDir opens a directory at the given path in fsys.
 func OpenDir(fsys FS, path string) (File, error) {
-	return fsys.OpenFile(path, O_DIRECTORY, 0)
+	return fsys.OpenFile(path, openFlagsDirectory, 0)
 }
 
 // OpenRoot opens the root directory of fsys.
@@ -517,7 +517,7 @@ func OpenRoot(fsys FS) (File, error) {
 
 // Readlink returns the value of the symbolic link at the given path in fsys.
 func Readlink(fsys FS, path string) (string, error) {
-	return callFile1(fsys, "readlink", path, O_RDONLY|O_NOFOLLOW, File.Readlink)
+	return callFile1(fsys, "readlink", path, openFlagsReadlink, File.Readlink)
 }
 
 // Chmod changes permissions of a file at the given path in fsys.
@@ -525,7 +525,7 @@ func Readlink(fsys FS, path string) (string, error) {
 // If the path refers to a symbolic link, Chmod dereferences it and modifies the
 // permissions of the link's target.
 func Chmod(fsys FS, path string, mode fs.FileMode) error {
-	return callFile(fsys, "chmod", path, O_RDONLY, func(file File) error {
+	return callFile(fsys, "chmod", path, openFlagsChmod, func(file File) error {
 		return file.Chmod(mode)
 	})
 }
@@ -535,7 +535,7 @@ func Chmod(fsys FS, path string, mode fs.FileMode) error {
 // If the path refers to a symbolic link, Chtimes dereferences it and modifies the
 // times of the link's target.
 func Chtimes(fsys FS, path string, atime, mtime time.Time) error {
-	return callFile(fsys, "chtimes", path, O_RDONLY, func(file File) error {
+	return callFile(fsys, "chtimes", path, openFlagsChtimes, func(file File) error {
 		return file.Chtimes(atime, mtime)
 	})
 }
@@ -545,7 +545,7 @@ func Chtimes(fsys FS, path string, atime, mtime time.Time) error {
 // If the path refers to a symbolic link, Truncate dereferences it and modifies
 // the size of the link's target.
 func Truncate(fsys FS, path string, size int64) error {
-	return callFile(fsys, "truncate", path, O_WRONLY, func(file File) error {
+	return callFile(fsys, "truncate", path, openFlagsTruncate, func(file File) error {
 		return file.Truncate(size)
 	})
 }
@@ -555,7 +555,7 @@ func Truncate(fsys FS, path string, size int64) error {
 // If the path refers to a symbolic link, Stat dereferences it returns
 // information about the link's target.
 func Stat(fsys FS, path string) (fs.FileInfo, error) {
-	return callFile1(fsys, "stat", path, O_RDONLY, File.Stat)
+	return callFile1(fsys, "stat", path, openFlagsStat, File.Stat)
 }
 
 // Lstat returns file information for the file with the given path in fsys.
@@ -563,7 +563,7 @@ func Stat(fsys FS, path string) (fs.FileInfo, error) {
 // If the path refers to a symbolic link, Lstat returns information about the
 // link, and not its target.
 func Lstat(fsys FS, path string) (fs.FileInfo, error) {
-	return callFile1(fsys, "lstat", path, O_RDONLY|O_NOFOLLOW, File.Stat)
+	return callFile1(fsys, "lstat", path, openFlagsLstat, File.Stat)
 }
 
 // Mkfifo creates a named pipe at path in fsys.
@@ -611,28 +611,6 @@ func Link(fsys FS, oldPath, newPath string) error {
 // Rename renames a file from oldPath to newPath in fsys.
 func Rename(fsys FS, oldPath, newPath string) error {
 	return callDir2(fsys, "rename", oldPath, newPath, Directory.Rename)
-}
-
-// GetXAttr retrieves the value of the named extended attribute for the file at
-// the given path.
-func GetXAttr(fsys FS, path, name string) (string, bool, error) {
-	return callFile2(fsys, "getxattr", path, O_RDONLY, func(file File) (string, bool, error) {
-		return file.GetXAttr(name)
-	})
-}
-
-// SetXAttr sets the value of the named extended attribute for the file at the
-// given path.
-func SetXAttr(fsys FS, path, name, value string, flags int) error {
-	return callFile(fsys, "setxattr", path, O_RDONLY, func(file File) error {
-		return file.SetXAttr(name, value, flags)
-	})
-}
-
-// ListXAttr returns the names of the named extended attribute for the file at
-// the given path.
-func ListXAttr(fsys FS, path string) ([]string, error) {
-	return callFile1(fsys, "listxattr", path, O_RDONLY, File.ListXAttr)
 }
 
 func callFile(fsys FS, op, name string, flags int, do func(File) error) (err error) {

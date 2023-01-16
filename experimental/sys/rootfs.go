@@ -373,7 +373,7 @@ func lookupDir(f *sandboxedFile, op, name string, do func(Directory, string) err
 	if dir == "." {
 		return do(f.File, base)
 	}
-	d, err := f.openFile(dir, O_DIRECTORY, 0)
+	d, err := f.openFile(dir, openFlagsDirectory, 0)
 	if err != nil {
 		return err
 	}
@@ -387,7 +387,7 @@ func lookupDir2(f *sandboxedFile, op, name1, name2 string, do func(Directory, st
 	dir1, base1 := SplitPath(name1)
 	dir2, base2 := SplitPath(name2)
 	if dir1 != "." {
-		d1, err := f.openFile(dir1, O_DIRECTORY, 0)
+		d1, err := f.openFile(dir1, openFlagsDirectory, 0)
 		if err != nil {
 			return err
 		}
@@ -395,7 +395,7 @@ func lookupDir2(f *sandboxedFile, op, name1, name2 string, do func(Directory, st
 		arg1 = d1
 	}
 	if dir2 != "." {
-		d2, err := f.openFile(dir2, O_DIRECTORY, 0)
+		d2, err := f.openFile(dir2, openFlagsDirectory, 0)
 		if err != nil {
 			return err
 		}

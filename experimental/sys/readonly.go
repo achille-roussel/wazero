@@ -257,40 +257,6 @@ func (f *readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (file 
 	return file, err
 }
 
-func (f *readOnlyFile) GetXAttr(name string) (value string, exist bool, err error) {
-	if f.base == nil {
-		err = ErrClosed
-	} else if x, ok := f.base.(interface {
-		GetXAttr(string) (string, bool, error)
-	}); ok {
-		value, exist, err = x.GetXAttr(name)
-	} else {
-		err = ErrNotSupported
-	}
-	if err != nil {
-		err = f.makePathError("getxattr", err)
-	}
-	return value, exist, err
-}
-
-func (f *readOnlyFile) SetXAttr(name, value string, flags int) (err error) {
-	return f.fail("setxattr", ErrReadOnly)
-}
-
-func (f *readOnlyFile) ListXAttr() (names []string, err error) {
-	if f.base == nil {
-		err = ErrClosed
-	} else if x, ok := f.base.(interface{ ListXAttr() ([]string, error) }); ok {
-		names, err = x.ListXAttr()
-	} else {
-		err = ErrNotSupported
-	}
-	if err != nil {
-		err = f.makePathError("listxattr", err)
-	}
-	return names, err
-}
-
 func (f *readOnlyFile) fail(op string, err error) error {
 	if f.base == nil {
 		err = ErrClosed

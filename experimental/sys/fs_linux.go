@@ -9,19 +9,47 @@ import (
 )
 
 const (
-	O_DSYNC = syscall.O_DSYNC
-	O_RSYNC = syscall.O_RSYNC
+	O_RDONLY    = syscall.O_RDONLY
+	O_WRONLY    = syscall.O_WRONLY
+	O_RDWR      = syscall.O_RDWR
+	O_APPEND    = syscall.O_APPEND
+	O_CREATE    = syscall.O_CREAT
+	O_EXCL      = syscall.O_EXCL
+	O_SYNC      = syscall.O_SYNC
+	O_TRUNC     = syscall.O_TRUNC
+	O_DIRECTORY = syscall.O_DIRECTORY
+	O_DSYNC     = syscall.O_DSYNC
+	O_RSYNC     = syscall.O_RSYNC
+	O_DIRECT    = syscall.O_DIRECT
+	O_LARGEFILE = syscall.O_LARGEFILE
+	O_NOATIME   = syscall.O_NOATIME
+	O_NOCTTY    = syscall.O_NOCTTY
+	O_NOFOLLOW  = syscall.O_NOFOLLOW
+	O_NONBLOCK  = syscall.O_NONBLOCK
 
 	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h
 	O_PATH = 010000000
 
-	XATTR_CREATE  = 1
-	XATTR_REPLACE = 2
-
 	__AT_REMOVEDIR      = 0x200
 	__AT_SYMLINK_FOLLOW = 0x400
 
-	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_PATH
+	// We add O_NONBLOCK to prevent open from blocking if it is called on a named
+	// pipe which has no writer.
+	openFlagsCreate    = O_CREATE | O_NOFOLLOW
+	openFlagsWriteOnly = O_WRONLY
+	openFlagsReadOnly  = O_RDONLY
+	openFlagsDirectory = O_DIRECTORY
+	openFlagsDevice    = O_NONBLOCK | O_NOFOLLOW
+	openFlagsSymlink   = O_NONBLOCK | O_NOFOLLOW | O_PATH
+	openFlagsFile      = O_NONBLOCK | O_NOFOLLOW
+	openFlagsReadlink  = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
+	openFlagsChmod     = O_RDONLY | O_NONBLOCK
+	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
+	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
+	openFlagsStat      = O_RDONLY | O_NONBLOCK
+	openFlagsTruncate  = O_WRONLY
+
+	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_DIRECT | O_LARGEFILE | O_NOATIME | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK | O_PATH
 )
 
 type dev_t uint64

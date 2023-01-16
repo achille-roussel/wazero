@@ -34,9 +34,6 @@ func TestReadOnlyFS(t *testing.T, makeFS MakeFS) {
 		{"Truncate", testReadOnlyTruncate},
 		{"Stat", testReadOnlyStat},
 		{"Lstat", testReadOnlyLstat},
-		{"GetXAttr", testReadOnlyGetXAttr},
-		{"SetXAttr", testReadOnlySetXAttr},
-		{"ListXAttr", testReadOnlyListXAttr},
 	})
 
 	t.Run("File", func(t *testing.T) {
@@ -197,19 +194,6 @@ var testReadOnlyTruncate = append(testDefaultTruncate,
 var testReadOnlyStat = append(testDefaultStat)
 
 var testReadOnlyLstat = append(testDefaultLstat)
-
-var testReadOnlyGetXAttr = append(testDefaultGetXAttr)
-
-var testReadOnlySetXAttr = append(testDefaultSetXAttr,
-	fsTestCase{
-		name: "setting extended attributes fails with ErrReadOnly",
-		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
-		test: func(fsys sys.FS) error { return sys.SetXAttr(fsys, "test", "key", "value", 0) },
-	},
-)
-
-var testReadOnlyListXAttr = append(testDefaultListXAttr)
 
 var testReadOnlyFileOpen = append(testDefaultFileOpen)
 

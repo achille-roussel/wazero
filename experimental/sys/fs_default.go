@@ -20,5 +20,8 @@ const (
 	O_DSYNC = os.O_SYNC
 	O_RSYNC = os.O_SYNC
 
+	// no-op
+	O_NONBLOCK = 0
+
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW
 )

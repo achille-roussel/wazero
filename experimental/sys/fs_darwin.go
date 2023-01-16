@@ -9,12 +9,23 @@ import (
 )
 
 const (
+	O_RDONLY    = syscall.O_RDONLY
+	O_WRONLY    = syscall.O_WRONLY
+	O_RDWR      = syscall.O_RDWR
+	O_APPEND    = syscall.O_APPEND
+	O_CREATE    = syscall.O_CREAT
+	O_EXCL      = syscall.O_EXCL
+	O_SYNC      = syscall.O_SYNC
+	O_TRUNC     = syscall.O_TRUNC
+	O_NOFOLLOW  = syscall.O_NOFOLLOW
+	O_DIRECTORY = syscall.O_DIRECTORY
+	O_NONBLOCK  = syscall.O_NONBLOCK
+	O_DIRECT    = syscall.O_DIRECT
+	O_SYMLINK   = syscall.O_SYMLINK
+
 	// Darwin does not have O_DSYNC/O_RSYNC, so fallback to O_SYNC.
 	O_DSYNC = syscall.O_SYNC
 	O_RSYNC = syscall.O_SYNC
-
-	XATTR_CREATE  = 1
-	XATTR_REPLACE = 2
 
 	__AT_SYMLINK_FOLLOW = 0x0040
 	__AT_REMOVEDIR      = 0x0080
@@ -28,7 +39,23 @@ const (
 	__SYS_MKDIRAT    = 475
 	__SYS_FREADLINK  = 551
 
-	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW
+	// We add O_NONBLOCK to prevent open from blocking if it is called on a named
+	// pipe which has no writer.
+	openFlagsCreate    = O_CREATE | O_NOFOLLOW
+	openFlagsWriteOnly = O_WRONLY
+	openFlagsReadOnly  = O_RDONLY
+	openFlagsDirectory = O_DIRECTORY
+	openFlagsDevice    = O_NONBLOCK | O_NOFOLLOW
+	openFlagsSymlink   = O_SYMLINK
+	openFlagsFile      = O_NONBLOCK | O_NOFOLLOW
+	openFlagsChmod     = O_RDONLY | O_NONBLOCK
+	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
+	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
+	openFlagsStat      = O_RDONLY | O_NONBLOCK
+	openFlagsReadlink  = O_RDONLY | O_SYMLINK
+	openFlagsTruncate  = O_WRONLY
+
+	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_DIRECT
 )
 
 // https://github.com/apple/darwin-xnu/blob/main/bsd/sys/types.h#L151

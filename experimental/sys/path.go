@@ -150,7 +150,7 @@ func MkdirAll(fsys FS, path string, perm fs.FileMode) error {
 
 	_, _, err = WalkPath(".", path, func(name string) error {
 		if name == ".." {
-			parent, err := dir.OpenFile("..", O_DIRECTORY, 0)
+			parent, err := dir.OpenFile("..", openFlagsDirectory, 0)
 			if err != nil {
 				return err
 			}
@@ -165,7 +165,7 @@ func MkdirAll(fsys FS, path string, perm fs.FileMode) error {
 			}
 		}
 
-		f, err := dir.OpenFile(name, O_DIRECTORY, 0)
+		f, err := dir.OpenFile(name, openFlagsDirectory, 0)
 		if err != nil {
 			return err
 		}

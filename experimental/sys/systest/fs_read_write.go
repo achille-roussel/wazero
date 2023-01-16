@@ -46,9 +46,6 @@ func TestReadWriteFS(t *testing.T, newFS NewFS) {
 		{"Truncate", testReadWriteTruncate},
 		{"Stat", testReadWriteStat},
 		{"Lstat", testReadWriteLstat},
-		{"GetXAttr", testReadWriteGetXAttr},
-		{"SetXAttr", testReadWriteSetXAttr},
-		{"ListXAttr", testReadWriteListXAttr},
 	})
 
 	t.Run("File", func(t *testing.T) {
@@ -834,12 +831,6 @@ var testReadWriteLstat = append(testDefaultLstat,
 		}),
 	},
 )
-
-var testReadWriteGetXAttr = append(testDefaultGetXAttr)
-
-var testReadWriteSetXAttr = append(testDefaultSetXAttr)
-
-var testReadWriteListXAttr = append(testDefaultListXAttr)
 
 var testReadWriteFileOpen = append(testDefaultFileOpen)
 

@@ -39,12 +39,6 @@ type File interface {
 	// If the file is not referencing a directory, calling methods of the
 	// Directory interface will fail returning ErrNotDirectory or ErrPermission.
 	Directory
-	// Gets the value of the named extended attribute on the file.
-	GetXAttr(name string) (string, bool, error)
-	// Sets the value of the named extended attribute on the file.
-	SetXAttr(name, value string, flags int) error
-	// Returns the list of extended attribute names set on the file.
-	ListXAttr() ([]string, error)
 }
 
 // Directory is an interface representing an open directory.
@@ -443,42 +437,6 @@ func (f *file) Rename(oldName string, newDir Directory, newName string) (err err
 	return err
 }
 
-func (f *file) GetXAttr(name string) (value string, exist bool, err error) {
-	if f.base == nil {
-		err = ErrClosed
-	} else {
-		value, exist, err = f.base.GetXAttr(name)
-	}
-	if err != nil {
-		err = f.makePathError("getxattr", err)
-	}
-	return value, exist, err
-}
-
-func (f *file) SetXAttr(name, value string, flags int) (err error) {
-	if f.base == nil {
-		err = ErrClosed
-	} else {
-		err = f.base.SetXAttr(name, value, flags)
-	}
-	if err != nil {
-		err = f.makePathError("setxattr", err)
-	}
-	return err
-}
-
-func (f *file) ListXAttr() (names []string, err error) {
-	if f.base == nil {
-		err = ErrClosed
-	} else {
-		names, err = f.base.ListXAttr()
-	}
-	if err != nil {
-		err = f.makePathError("listxattr", err)
-	}
-	return names, err
-}
-
 func (f *file) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
 }
@@ -551,9 +509,6 @@ func (f *errRoot) OpenFile(name string, flags int, perm fs.FileMode) (File, erro
 	}
 	return nil, f.err
 }
-func (f *errRoot) GetXAttr(string) (string, bool, error) { return "", false, f.err }
-func (f *errRoot) SetXAttr(string, string, int) error    { return f.err }
-func (f *errRoot) ListXAttr() ([]string, error)          { return nil, f.err }
 
 type errRootInfo struct{}
 
