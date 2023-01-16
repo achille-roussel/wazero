@@ -69,6 +69,9 @@ func major(dev dev_t) int            { return int(dev >> 8) }
 func minor(dev dev_t) int            { return int(dev & 0xFF) }
 
 func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.File, error) {
+	// The combination of O_SYMLINNK and O_NOFOLLOW is invalid on Darwin,
+	// but it helps to be flexible so we handle this here by removing the
+	// O_NOFOLLOW flag if the code asked to open a symbolic link.
 	if (flags & O_SYMLINK) != 0 {
 		flags &= ^O_NOFOLLOW
 	}
@@ -79,7 +82,7 @@ func openFileAt(dirfd int, dir, path string, flags int, perm fs.FileMode) (*os.F
 		if err == syscall.ELOOP {
 			if (flags & (O_DIRECTORY | O_SYMLINK | O_NOFOLLOW)) == O_NOFOLLOW {
 				flags &= ^O_NOFOLLOW
-				flags |= syscall.O_SYMLINK
+				flags |= O_SYMLINK
 				newfd, err = openat(dirfd, path, flags, mode)
 			}
 		}
