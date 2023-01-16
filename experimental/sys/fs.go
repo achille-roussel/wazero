@@ -605,6 +605,26 @@ func Lstat(fsys FS, path string) (fs.FileInfo, error) {
 	return callFile1(fsys, "lstat", path, openFlagsLstat, File.Stat)
 }
 
+// ReadDir reads the list of diretory entries at a path in fsys.
+func ReadDir(fsys FS, path string) ([]fs.DirEntry, error) {
+	return callFile1(fsys, "readdir", path, openFlagsReadDir, func(file File) ([]fs.DirEntry, error) {
+		return file.ReadDir(0)
+	})
+}
+
+// WriteFile writes data to a path in fsys.
+func WriteFile(fsys FS, path string, data []byte, perm fs.FileMode) error {
+	return callDir(fsys, "write", path, func(dir Directory, name string) error {
+		f, err := dir.OpenFile(name, openFlagsWriteFile, perm)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = f.Write(data)
+		return err
+	})
+}
+
 // Mkfifo creates a named pipe at path in fsys.
 func Mkfifo(fsys FS, path string) error {
 	return Mknod(fsys, path, fs.ModeNamedPipe, 0)

@@ -49,9 +49,11 @@ const (
 	openFlagsFile      = O_NOFOLLOW | O_NONBLOCK
 	openFlagsChmod     = O_RDONLY | O_NONBLOCK
 	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
+	openFlagsTruncate  = O_WRONLY | O_NONBLOCK
 	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 	openFlagsStat      = O_RDONLY | O_NONBLOCK
-	openFlagsTruncate  = O_WRONLY | O_NONBLOCK
+	openFlagsReadDir   = O_DIRECTORY
+	openFlagsWriteFile = O_CREATE | O_NOFOLLOW | O_TRUNC | O_WRONLY
 	openFlagsNoFollow  = O_NOFOLLOW
 	openFlagsPath      = O_NOFOLLOW | O_PATH
 
