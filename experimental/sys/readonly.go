@@ -268,11 +268,6 @@ func (f *readOnlyFile) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
 }
 
-var (
-	_ io.ReaderFrom   = (*readOnlyFile)(nil)
-	_ io.StringWriter = (*readOnlyFile)(nil)
-)
-
 func hasReadOnlyFlags(flags int) bool {
 	return (flags & ^openFileReadOnlyFlags) == 0
 }

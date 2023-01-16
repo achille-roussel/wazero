@@ -17,9 +17,11 @@ import (
 type File interface {
 	fs.File
 	io.ReaderAt
+	io.ReaderFrom
 	io.Writer
 	io.WriterAt
 	io.Seeker
+	io.StringWriter
 	// Returns the target of the symbolic link that file is opened at.
 	Readlink() (string, error)
 	// Sets the file permissions.
@@ -179,7 +181,7 @@ func (f *file) ReadFrom(r io.Reader) (n int64, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		n, err = io.Copy(f.base, r)
+		n, err = f.base.ReadFrom(r)
 	}
 	if err != nil {
 		err = f.makePathError("write", err)
@@ -215,7 +217,7 @@ func (f *file) WriteString(s string) (n int, err error) {
 	if f.base == nil {
 		err = ErrClosed
 	} else {
-		n, err = io.WriteString(f.base, s)
+		n, err = f.base.WriteString(s)
 	}
 	if err != nil {
 		err = f.makePathError("write", err)
@@ -441,11 +443,6 @@ func (f *file) makePathError(op string, err error) error {
 	return makePathError(op, f.name, err)
 }
 
-var (
-	_ io.ReaderFrom   = (*file)(nil)
-	_ io.StringWriter = (*file)(nil)
-)
-
 type sharedFile struct {
 	refc atomic.Uintptr
 	File
@@ -484,8 +481,10 @@ type errRoot struct{ err error }
 func (f *errRoot) Close() error                            { return nil }
 func (f *errRoot) Read([]byte) (int, error)                { return 0, ErrNotSupported }
 func (f *errRoot) ReadAt([]byte, int64) (int, error)       { return 0, ErrNotSupported }
+func (f *errRoot) ReadFrom(io.Reader) (int64, error)       { return 0, ErrNotSupported }
 func (f *errRoot) Write([]byte) (int, error)               { return 0, ErrNotSupported }
 func (f *errRoot) WriteAt([]byte, int64) (int, error)      { return 0, ErrNotSupported }
+func (f *errRoot) WriteString(string) (int, error)         { return 0, ErrNotSupported }
 func (f *errRoot) Seek(int64, int) (int64, error)          { return 0, ErrNotSupported }
 func (f *errRoot) Readlink() (string, error)               { return "", ErrNotSupported }
 func (f *errRoot) Chmod(fs.FileMode) error                 { return ErrNotSupported }
