@@ -70,7 +70,7 @@ const (
 
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_SYMLINK
 
-	openFlagsCount = 16
+	openFlagsCount = 32
 )
 
 func init() {
