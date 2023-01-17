@@ -21,6 +21,7 @@ func TestReadOnlyFS(t *testing.T, makeFS MakeFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", testReadOnlyOpenFile},
 		{"Open", testReadOnlyOpen},
+		{"Access", testReadOnlyAccess},
 		{"Mknod", testReadOnlyMknod},
 		{"Mkdir", testReadOnlyMkdir},
 		{"Rmdir", testReadOnlyRmdir},
@@ -100,6 +101,22 @@ var testReadOnlyOpenFile = append(testDefaultOpenFile,
 )
 
 var testReadOnlyOpen = append(testDefaultOpen)
+
+var testReadOnlyAccess = append(testDefaultAccess,
+	fsTestCase{
+		name: "accessing a file in write-only mode fails with ErrPermission",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", sys.O_WRONLY) },
+	},
+
+	fsTestCase{
+		name: "accessing a file in read-write mode fails with ErrPermission",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", sys.O_RDWR) },
+	},
+)
 
 var testReadOnlyMknod = append(testDefaultMknod,
 	fsTestCase{

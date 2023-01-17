@@ -266,3 +266,7 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 	}
 	return err
 }
+
+func faccessat(dirfd int, path string, mode uint32, flags int) error {
+	return syscall.Faccessat(dirfd, path, mode, flags)
+}

@@ -33,6 +33,7 @@ func TestReadWriteFS(t *testing.T, newFS NewFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", testReadWriteOpenFile},
 		{"Open", testReadWriteOpen},
+		{"Access", testReadWriteAccess},
 		{"Mknod", testReadWriteMknod},
 		{"Mkdir", testReadWriteMkdir},
 		{"Rmdir", testReadWriteRmdir},
@@ -147,6 +148,20 @@ var testReadWriteOpen = append(testDefaultOpen,
 			_, err := fsys.Open(path + "/test")
 			return err
 		}),
+	},
+)
+
+var testReadWriteAccess = append(testDefaultAccess,
+	fsTestCase{
+		name: "accessing a file at a path containing a symbolic link loop fails with ErrLoop",
+		err:  sys.ErrLoop,
+		test: testLoop(func(fsys sys.FS, path string) error { return sys.Access(fsys, path+"/test", 0) }),
+	},
+
+	fsTestCase{
+		name: "existing files can be accessed in write mode",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", 0b010) },
 	},
 )
 

@@ -179,6 +179,14 @@ var testValidateOpen = fsTestSuite{
 	},
 }
 
+var testValidateAccess = fsTestSuite{
+	{
+		name: "accessing a file with an invalid name fails with ErrNotExist",
+		err:  sys.ErrNotExist,
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "/", sys.O_RDONLY) },
+	},
+}
+
 var testValidateMknod = fsTestSuite{
 	{
 		name: "creating a directory with an invalid name fails with ErrNotExist",
@@ -423,6 +431,20 @@ var testDefaultOpen = append(testValidateOpen,
 			}
 			return nil
 		},
+	},
+)
+
+var testDefaultAccess = append(testValidateAccess,
+	fsTestCase{
+		name: "existing files can be tested for existance",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", 0) },
+	},
+
+	fsTestCase{
+		name: "existing files can be accessed in read mode",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", 0b100) },
 	},
 )
 

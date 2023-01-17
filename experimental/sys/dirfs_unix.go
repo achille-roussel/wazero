@@ -75,6 +75,10 @@ func (f dirFile) Datasync() error {
 	return f.wrap("datasync", datasync(f.File))
 }
 
+func (f dirFile) Access(name string, mode fs.FileMode) error {
+	return f.wrap("access", faccessat(f.fd(), name, sysinfo.FileMode(mode)&7, 0))
+}
+
 func (f dirFile) Mknod(name string, mode fs.FileMode, dev Device) error {
 	return f.wrap("mknod", mknodat(f.fd(), name, sysinfo.FileMode(mode), int(dev)))
 }

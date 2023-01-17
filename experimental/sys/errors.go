@@ -41,6 +41,8 @@ func makePathError(op, path string, err error) error {
 	switch e := err.(type) {
 	case syscall.Errno:
 		switch e {
+		case syscall.EACCES:
+			err = ErrPermission
 		case syscall.EINVAL:
 			err = ErrInvalid
 		case syscall.EPERM:

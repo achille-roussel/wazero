@@ -55,6 +55,8 @@ type Directory interface {
 	OpenFile(name string, flags int, perm fs.FileMode) (File, error)
 	// Reads the list of directory entries (see fs.ReadDirFile).
 	ReadDir(n int) ([]fs.DirEntry, error)
+	// Checks if a file can be accessed with the given mode.
+	Access(name string, mode fs.FileMode) error
 	// Creates a special or ordinaly file on the file system.
 	Mknod(name string, mode fs.FileMode, dev Device) error
 	// Creates a directory on the file system.
@@ -337,6 +339,20 @@ func (f *file) OpenFile(name string, flags int, perm fs.FileMode) (file File, er
 	return file, err
 }
 
+func (f *file) Access(name string, mode fs.FileMode) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		err = f.base.Access(name, mode)
+	}
+	if err != nil {
+		err = makePathError("access", name, err)
+	}
+	return err
+}
+
 func (f *file) Mknod(name string, mode fs.FileMode, dev Device) (err error) {
 	if f.base == nil {
 		err = ErrClosed
@@ -494,6 +510,7 @@ func (f *errRoot) Truncate(int64) error                    { return ErrNotSuppor
 func (f *errRoot) Sync() error                             { return ErrNotSupported }
 func (f *errRoot) Datasync() error                         { return ErrNotSupported }
 func (f *errRoot) Fd() uintptr                             { return ^uintptr(0) }
+func (f *errRoot) Access(string, fs.FileMode) error        { return f.err }
 func (f *errRoot) Mknod(string, fs.FileMode, Device) error { return f.err }
 func (f *errRoot) Mkdir(string, fs.FileMode) error         { return f.err }
 func (f *errRoot) Rmdir(string) error                      { return f.err }

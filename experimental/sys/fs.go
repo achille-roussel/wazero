@@ -629,6 +629,13 @@ func WriteFile(fsys FS, path string, data []byte, perm fs.FileMode) error {
 	return err
 }
 
+// Access tests whether a file at the given path can be accessed.
+func Access(fsys FS, path string, mode fs.FileMode) error {
+	return callDir(fsys, "access", path, func(dir Directory, path string) error {
+		return dir.Access(path, mode)
+	})
+}
+
 // Mkfifo creates a named pipe at path in fsys.
 func Mkfifo(fsys FS, path string) error {
 	return Mknod(fsys, path, fs.ModeNamedPipe, 0)

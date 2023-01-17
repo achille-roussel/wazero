@@ -202,6 +202,25 @@ func (f *readOnlyFile) Datasync() error {
 	return f.fail("datasync", ErrReadOnly)
 }
 
+func (f *readOnlyFile) Access(name string, mode fs.FileMode) (err error) {
+	if f.base == nil {
+		err = ErrClosed
+	} else if f2, e := f.OpenFile(name, O_RDONLY, 0); e != nil {
+		err = e
+	} else {
+		defer f2.Close()
+		if s, e := f2.Stat(); e != nil {
+			err = e
+		} else if perm := mode.Perm(); (perm & s.Mode().Perm()) != perm {
+			err = ErrPermission
+		}
+	}
+	if err != nil {
+		err = f.makePathError("access", err)
+	}
+	return err
+}
+
 func (f *readOnlyFile) Mknod(string, fs.FileMode, Device) error {
 	return f.fail("mknod", ErrReadOnly)
 }

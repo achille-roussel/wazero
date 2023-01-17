@@ -27,8 +27,16 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 		name: "opening a file errors",
 		err:  want,
 		test: func(fsys sys.FS) error {
-			_, err := fsys.Open("test")
+			_, err := sys.Open(fsys, "test")
 			return err
+		},
+	})
+
+	access := append(testValidateOpen, fsTestCase{
+		name: "accessing a file errors",
+		err:  want,
+		test: func(fsys sys.FS) error {
+			return sys.Access(fsys, "test", 0)
 		},
 	})
 
@@ -146,6 +154,7 @@ func TestErrorFS(t *testing.T, want error, newFS NewFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", openFile},
 		{"Open", open},
+		{"Access", access},
 		{"Mknod", mknod},
 		{"Mkdir", mkdir},
 		{"Rmdir", rmdir},
