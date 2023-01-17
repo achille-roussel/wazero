@@ -29,9 +29,12 @@ const (
 	O_NOCTTY    = syscall.O_NOCTTY
 	O_NOFOLLOW  = syscall.O_NOFOLLOW
 	O_NONBLOCK  = syscall.O_NONBLOCK
+	O_ASYNC     = syscall.O_ASYNC
+	O_CLOEXEC   = syscall.O_CLOEXEC
 
 	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h
-	O_PATH = 010000000
+	O_PATH    = 010000000
+	O_TMPFILE = 020000000
 
 	__AT_FDCWD          = -100
 	__AT_REMOVEDIR      = 0x200
@@ -59,7 +62,33 @@ const (
 	openFlagsPath      = O_NOFOLLOW | O_PATH
 
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_DIRECT | O_LARGEFILE | O_NOATIME | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK | O_PATH
+
+	openFlagsCount = 16
 )
+
+func init() {
+	setOpenFlag(O_RDONLY, "O_RDONLY")
+	setOpenFlag(O_WRONLY, "O_WRONLY")
+	setOpenFlag(O_RDWR, "O_RDWR")
+	setOpenFlag(O_APPEND, "O_APPEND")
+	setOpenFlag(O_CREATE, "O_CREATE")
+	setOpenFlag(O_EXCL, "O_EXCL")
+	setOpenFlag(O_SYNC, "O_SYNC")
+	setOpenFlag(O_TRUNC, "O_TRUNC")
+	setOpenFlag(O_DIRECTORY, "O_DIRECTORY")
+	setOpenFlag(O_DSYNC, "O_DSYNC")
+	setOpenFlag(O_RSYNC, "O_RSYNC")
+	setOpenFlag(O_DIRECT, "O_DIRECT")
+	setOpenFlag(O_LARGEFILE, "O_LARGEFILE")
+	setOpenFlag(O_NOATIME, "O_NOATIME")
+	setOpenFlag(O_NOCTTY, "O_NOCTTY")
+	setOpenFlag(O_NOFOLLOW, "O_NOFOLLOW")
+	setOpenFlag(O_NONBLOCK, "O_NONBLOCK")
+	setOpenFlag(O_ASYNC, "O_PATH")
+	setOpenFlag(O_CLOEXEC, "O_CLOEXEC")
+	setOpenFlag(O_TMPFILE, "O_TMPFILE")
+	setOpenFlag(O_PATH, "O_PATH")
+}
 
 type dev_t uint64
 

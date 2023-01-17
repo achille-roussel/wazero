@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/bits"
+	"strings"
 	"time"
 
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
@@ -853,3 +855,29 @@ func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Direc
 	defer d2.Close()
 	return do(d1, base1, d2, base2)
 }
+
+// OpenFlags is a bitset representing the system-dependent combination of flags
+// which can be passed to the OpenFile methods of the FS interface.
+type OpenFlags int
+
+// String returns a human-readble view of the combination of flags.
+func (flags OpenFlags) String() string {
+	names := make([]string, 0, len(openFlagNames))
+	for i := 0; i < len(openFlagNames); i++ {
+		if (uint(flags) & (1 << uint(i))) != 0 {
+			openFlagName := openFlagNames[i]
+			if openFlagName == "" {
+				openFlagName = fmt.Sprintf("1<<%d", i)
+			}
+			names = append(names, openFlagName)
+		}
+	}
+	return strings.Join(names, "|")
+}
+
+func setOpenFlag(flag int, name string) {
+	index := bits.TrailingZeros(uint(flag)) % openFlagsCount
+	openFlagNames[index] = name
+}
+
+var openFlagNames [openFlagsCount]string

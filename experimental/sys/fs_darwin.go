@@ -12,18 +12,25 @@ import (
 )
 
 const (
-	O_RDONLY    = syscall.O_RDONLY
-	O_WRONLY    = syscall.O_WRONLY
-	O_RDWR      = syscall.O_RDWR
-	O_APPEND    = syscall.O_APPEND
-	O_CREATE    = syscall.O_CREAT
-	O_EXCL      = syscall.O_EXCL
-	O_SYNC      = syscall.O_SYNC
-	O_TRUNC     = syscall.O_TRUNC
-	O_NOFOLLOW  = syscall.O_NOFOLLOW
-	O_DIRECTORY = syscall.O_DIRECTORY
-	O_NONBLOCK  = syscall.O_NONBLOCK
-	O_SYMLINK   = syscall.O_SYMLINK
+	O_RDONLY       = syscall.O_RDONLY
+	O_WRONLY       = syscall.O_WRONLY
+	O_RDWR         = syscall.O_RDWR
+	O_APPEND       = syscall.O_APPEND
+	O_CREATE       = syscall.O_CREAT
+	O_EXCL         = syscall.O_EXCL
+	O_SYNC         = syscall.O_SYNC
+	O_TRUNC        = syscall.O_TRUNC
+	O_NOFOLLOW     = syscall.O_NOFOLLOW
+	O_DIRECTORY    = syscall.O_DIRECTORY
+	O_NONBLOCK     = syscall.O_NONBLOCK
+	O_SYMLINK      = syscall.O_SYMLINK
+	O_SEARCH       = sycall.O_SEARCH
+	O_EXEC         = syscall.O_EXEC
+	O_SHLOCK       = syscall.O_SHLOCK
+	O_EXLOCK       = syscall.O_EXLOCK
+	O_EVTONLY      = syscall.O_EVTONLY
+	O_CLOEXEC      = syscall.O_CLOEXEC
+	O_NOFOLLOW_ANY = sycall.O_NOFOLLOW_ANY
 
 	// Darwin does not have O_DSYNC/O_RSYNC, so fallback to O_SYNC.
 	O_DSYNC = syscall.O_SYNC
@@ -65,7 +72,31 @@ const (
 	openFlagsPath      = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 
 	openFileReadOnlyFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_SYMLINK
+
+	openFlagsCount = 16
 )
+
+func init() {
+	setOpenFlag(O_RDONLY, "O_RDONLY")
+	setOpenFlag(O_WRONLY, "O_WRONLY")
+	setOpenFlag(O_RDWR, "O_RDWR")
+	setOpenFlag(O_APPEND, "O_APPEND")
+	setOpenFlag(O_CREATE, "O_CREATE")
+	setOpenFlag(O_EXCL, "O_EXCL")
+	setOpenFlag(O_SYNC, "O_SYNC")
+	setOpenFlag(O_TRUNC, "O_TRUNC")
+	setOpenFlag(O_DIRECTORY, "O_DIRECTORY")
+	setOpenFlag(O_NOFOLLOW, "O_NOFOLLOW")
+	setOpenFlag(O_NONBLOCK, "O_NONBLOCK")
+	setOpenFlag(O_SYMLINK, "O_SYMLINK")
+	setOpenFlag(O_SEARCH, "O_SEARCH")
+	setOpenFlag(O_EXEC, "O_EXEC")
+	setOpenFlag(O_SHLOCK, "O_SHLOCK")
+	setOpenFlag(O_EXLOCK, "O_EXLOCK")
+	setOpenFlag(O_EVTONLY, "O_EVTONLY")
+	setOpenFlag(O_CLOEXEC, "O_CLOEXEC")
+	setOpenFlag(O_NOFOLLOW_ANY, "O_NOFOLLOW_ANY")
+}
 
 // https://github.com/apple/darwin-xnu/blob/main/bsd/sys/types.h#L151
 type dev_t uint32
