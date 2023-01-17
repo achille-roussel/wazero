@@ -33,8 +33,10 @@ const (
 	__AT_SYMLINK_FOLLOW = 0x0040
 	__AT_REMOVEDIR      = 0x0080
 
+	// https://go.googlesource.com/sys/+/master/unix/zsysnum_darwin_amd64.go
 	__SYS_OPENAT    = 463
 	__SYS_RENAMEAT  = 465
+	__SYS_FACCESSAT = 466
 	__SYS_LINKAT    = 471
 	__SYS_UNLINKAT  = 472
 	__SYS_SYMLINKAT = 474
@@ -278,4 +280,24 @@ func freadlink(fd int) (string, error) {
 		return "", syscall.ENAMETOOLONG
 	}
 	return string(buf[:n]), nil
+}
+
+func faccessat(fd int, path string, mode uint32, flags int) error {
+	p, err := syscall.BytePtrFromString(path)
+	if err != nil {
+		return err
+	}
+	_, _, e := syscall.Syscall6(
+		uintptr(__SYS_FACCESSAT),
+		uintptr(fd),
+		uintptr(unsafe.Pointer(p)),
+		uintptr(mode),
+		uintptr(flags),
+		uintptr(0),
+		uintptr(0),
+	)
+	if e != 0 {
+		return e
+	}
+	return nil
 }
