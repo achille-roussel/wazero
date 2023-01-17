@@ -46,10 +46,10 @@ func openReadOnlyFile(open openFileFunc, name string, flags int, perm fs.FileMod
 // files opened from it may not be read-only (e.g. if they are opened in write
 // mode). To have a fully recursive read-only view of a file system, use
 // ReadOnlyFS instead.
-func ReadOnlyFile(r File) File {
-	switch f := r.(type) {
+func ReadOnlyFile(f File) File {
+	switch r := f.(type) {
 	case *file[readOnlyFile]:
-		return f
+		return r
 	default:
 		return newFile(readOnlyFile{file: r})
 	}
