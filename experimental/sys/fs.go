@@ -876,8 +876,10 @@ func (flags OpenFlags) String() string {
 }
 
 func setOpenFlag(flag int, name string) {
-	index := bits.TrailingZeros(uint(flag)) % openFlagsCount
-	openFlagNames[index] = name
+	if flag != 0 {
+		index := bits.TrailingZeros(uint(flag))
+		openFlagNames[index] = name
+	}
 }
 
 var openFlagNames [openFlagsCount]string
