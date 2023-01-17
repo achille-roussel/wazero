@@ -26,14 +26,14 @@ func TestRootFS_ReadOnly(t *testing.T) {
 }
 
 func TestRootFS_ReadWrite(t *testing.T) {
-	systest.TestReadWriteFS(t, func(t *testing.T) sys.FS {
-		return sys.RootFS(sys.DirFS(t.TempDir()))
+	systest.TestReadWriteFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {
+		return sys.RootFS(makeDirFS(t, baseFS))
 	})
 }
 
 func TestRootFS_WrapRootFS(t *testing.T) {
-	systest.TestReadWriteFS(t, func(t *testing.T) sys.FS {
-		return sys.RootFS(sys.RootFS(sys.DirFS(t.TempDir())))
+	systest.TestReadWriteFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {
+		return sys.RootFS(sys.RootFS(makeDirFS(t, baseFS)))
 	})
 }
 

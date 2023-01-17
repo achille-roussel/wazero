@@ -17,19 +17,7 @@ import (
 //
 // The intent is for this test suite to help validate that read-write
 // implementations of the sys.FS interface all exhibit the same behavior.
-func TestReadWriteFS(t *testing.T, newFS NewFS) {
-	makeFS := func(t *testing.T, baseFS fs.FS) sys.FS {
-		testFS := newFS(t)
-		readFS := sys.NewFS(baseFS)
-		if err := sys.CopyFS(testFS, readFS); err != nil {
-			t.Fatal(err)
-		}
-		if err := sys.EqualFS(testFS, readFS); err != nil {
-			t.Fatal(err)
-		}
-		return testFS
-	}
-
+func TestReadWriteFS(t *testing.T, makeFS MakeFS) {
 	fsTestRun(t, makeFS, []fsTestGroup{
 		{"OpenFile", testReadWriteOpenFile},
 		{"Open", testReadWriteOpen},

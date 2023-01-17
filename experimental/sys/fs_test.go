@@ -1,7 +1,6 @@
 package sys_test
 
 import (
-	"errors"
 	"io/fs"
 	"testing"
 	"testing/fstest"
@@ -10,13 +9,6 @@ import (
 	"github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/experimental/sys/systest"
 )
-
-func TestErrFS(t *testing.T) {
-	err := errors.New("nope")
-	systest.TestErrorFS(t, err, func(t *testing.T) sys.FS {
-		return sys.ErrFS(err)
-	})
-}
 
 func TestNewFS(t *testing.T) {
 	systest.TestReadOnlyFS(t, func(t *testing.T, baseFS fs.FS) sys.FS {

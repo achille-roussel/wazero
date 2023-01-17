@@ -24,18 +24,6 @@ import (
 // calling testing.(*T).Fatal or testing.(*T).Fatalf.
 type MakeFS func(*testing.T, fs.FS) sys.FS
 
-// NewFS is a function tyep used to instantiate file systems during tests.
-//
-// The function recives the *testing.T instance of the test that the file
-// system is created for.
-//
-// If cleanup needs to be done to tear down the file system, the NewFS function
-// must register a cleanup function to the test using testing.(*T).Cleanup.
-//
-// If the file system creation fails, the function must abort the test by
-// calling testing.(*T).Fatal or testing.(*T).Fatalf.
-type NewFS func(*testing.T) sys.FS
-
 func testFS(t *testing.T, makeFS MakeFS) {
 	fstestTestFS(t, makeFS, fstest.MapFS{
 		"file-0": &fstest.MapFile{
@@ -117,6 +105,15 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 				base = fstest.MapFS{}
 			}
 			fsys := makeFS(t, base)
+
+			// Always validate that the initial state of the file system
+			// corresponds to what we expects. If this invariant is invalidated,
+			// some tests could end up passing even if they did not exhibit the
+			// expected behavior.
+			if err := sys.EqualFS(fsys, sys.NewFS(base)); err != nil {
+				t.Fatalf("invalid initial state of the file system: %v", err)
+			}
+
 			if err := test.test(fsys); !errors.Is(err, test.err) {
 				if errors.Is(err, sys.ErrNotImplemented) {
 					t.Skip(err)
