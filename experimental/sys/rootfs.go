@@ -2,6 +2,7 @@ package sys
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
 )
@@ -111,6 +112,10 @@ type mountedFile struct {
 	sharedFile
 }
 
+func (f *mountedFile) GoString() string {
+	return fmt.Sprintf("&sys.mountedFile{%#v}", f.File)
+}
+
 func (f *mountedFile) Close() error {
 	if f.dir != nil { // the root has no parent directory
 		f.dir.unref()
@@ -192,6 +197,10 @@ type sandboxedFile struct {
 	File
 }
 
+func (f *sandboxedFile) GoString() string {
+	return fmt.Sprintf("&sys.sandboxedFile{%#v}", f.File)
+}
+
 func (f *sandboxedFile) Close() error {
 	f.root.unref()
 	f.root = nil
@@ -246,7 +255,8 @@ func (f *sandboxedFile) Rename(oldName string, newDir Directory, newName string)
 
 type nopClose struct{ File }
 
-func (nopClose) Close() error { return nil }
+func (f nopClose) GoString() string { return fmt.Sprintf("sys.nopClose{%#v}", f.File) }
+func (f nopClose) Close() error     { return nil }
 
 // sentinel error value used to break out of WalkPath when resolving symbolic links
 var errResolveSymlink = errors.New("resolve symlink")

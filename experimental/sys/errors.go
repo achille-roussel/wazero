@@ -31,6 +31,10 @@ func unwrap(err error) error {
 	}
 }
 
+func newPathError(op, path string, err error) error {
+	return &fs.PathError{Op: op, Path: path, Err: err}
+}
+
 func makePathError(op, path string, err error) error {
 	pe, _ := err.(*fs.PathError)
 	if pe == nil {

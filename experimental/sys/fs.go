@@ -70,7 +70,7 @@ func NewFS(base fs.FS) FS {
 			}
 		}
 
-		return ReadOnlyFile(f, name, fsys), nil
+		return ReadOnlyFile(&fsFile{file: f, fsys: fsys, name: name}), nil
 	})
 }
 
@@ -88,6 +88,104 @@ func hasNoFollowFlags(flags int) bool {
 
 func hasFlags(flags, check int) bool {
 	return (flags & check) == check
+}
+
+type fsFile struct {
+	ReadOnly
+	file fs.File
+	fsys FS
+	name string
+}
+
+func (f *fsFile) GoString() string {
+	return fmt.Sprintf("&sys.fsFile{%#v}", f.file)
+}
+
+func (f *fsFile) Name() string {
+	return f.name
+}
+
+func (f *fsFile) Sys() any {
+	if x, ok := f.file.(interface {
+		Sys() any
+	}); ok {
+		return x.Sys()
+	}
+	return f.file
+}
+
+func (f *fsFile) Close() error { return f.file.Close() }
+
+func (f *fsFile) Read(b []byte) (int, error) { return f.file.Read(b) }
+
+func (f *fsFile) Stat() (fs.FileInfo, error) { return f.file.Stat() }
+
+func (f *fsFile) ReadAt(b []byte, offset int64) (int, error) {
+	if r, ok := f.file.(io.ReaderAt); ok {
+		return r.ReadAt(b, offset)
+	}
+	// TODO: should we emulate if the base implements io.Seeker?
+	return 0, ErrNotSupported
+}
+
+func (f *fsFile) Seek(offset int64, whence int) (int64, error) {
+	if r, ok := f.file.(io.Seeker); ok {
+		return r.Seek(offset, whence)
+	}
+	return 0, ErrNotSupported
+}
+
+func (f *fsFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	if d, ok := f.file.(fs.ReadDirFile); ok {
+		return d.ReadDir(n)
+	}
+	return nil, ErrNotSupported
+}
+
+func (f *fsFile) Readlink() (string, error) {
+	if r, ok := f.file.(interface {
+		Readlink() (string, error)
+	}); ok {
+		return r.Readlink()
+	} else if s, err := f.file.Stat(); err != nil {
+		return "", err
+	} else if s.Mode().Type() != fs.ModeSymlink {
+		return "", ErrInvalid
+	} else if b, err := io.ReadAll(f.file); err != nil {
+		return "", err
+	} else {
+		return string(b), nil
+	}
+}
+
+func (f *fsFile) Access(name string, mode fs.FileMode) error {
+	if d, ok := f.file.(interface {
+		Access(string, fs.FileMode) error
+	}); ok {
+		return d.Access(name, mode)
+	} else if f2, err := f.OpenFile(name, O_RDONLY, 0); err != nil {
+		return err
+	} else {
+		defer f2.Close()
+		if stat, err := f2.Stat(); err != nil {
+			return err
+		} else if perm := mode.Perm(); (perm & stat.Mode().Perm()) != perm {
+			return ErrPermission
+		} else {
+			return nil
+		}
+	}
+	return ErrNotSupported
+}
+
+func (f *fsFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	if f.fsys == nil {
+		return nil, ErrNotSupported
+	}
+	if !hasReadOnlyFlags(flags) {
+		return nil, ErrReadOnly
+	}
+	return f.fsys.OpenFile(JoinPath(f.name, name), flags, perm)
 }
 
 // FuncFS is an implementation of the FS interface using a function to open
@@ -112,14 +210,14 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 			// The root should always be successfully opened; wrap the
 			// error instead of returning it so it does not invalidation
 			// this expectation.
-			return NewFile(&errRoot{err}, "."), nil
+			return newFile(errRoot{err}), nil
 		}
 		if _, ok := err.(*fs.PathError); !ok {
 			err = &fs.PathError{Op: "open", Path: name, Err: err}
 		}
 		return nil, err
 	}
-	return NewFile(f, name), nil
+	return NewFile(f), nil
 }
 
 // ErrFS returns a FS which errors with err on all its method calls.
@@ -489,6 +587,10 @@ func equalStat(source, target File) error {
 	sourceMode := sourceInfo.Mode()
 	targetMode := targetInfo.Mode()
 	if sourceMode != targetMode {
+		fmt.Printf("%#v\n", source)
+		fmt.Printf("%#v\n", target)
+		fmt.Printf("%#v\n", sourceInfo)
+		fmt.Printf("%#v\n", targetInfo)
 		return fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
 	}
 	sourceModTime := sysinfo.ModTime(sourceInfo)

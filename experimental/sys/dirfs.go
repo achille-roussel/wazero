@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -45,6 +46,8 @@ func (path dirFS) openFile(name string, flags int, perm fs.FileMode) (File, erro
 }
 
 type dirFile struct{ *os.File }
+
+func (f dirFile) GoString() string { return fmt.Sprintf("sys.dirFile{%q}", f.Name()) }
 
 func (f dirFile) Sys() any { return f.File }
 
