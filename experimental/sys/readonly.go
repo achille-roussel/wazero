@@ -12,18 +12,40 @@ import (
 // attempts to mutate the state of the file system.
 func ReadOnlyFS(fsys FS) FS {
 	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
-		if !hasReadOnlyFlags(flags) {
-			return nil, ErrReadOnly
-		}
-		f, err := fsys.OpenFile(name, flags, perm)
-		if err != nil {
-			return nil, err
-		}
-		return ReadOnlyFile(f), nil
+		return openReadOnlyFile(fsys.OpenFile, name, flags, perm)
 	})
 }
 
+type readOnlyFS struct{ *file[readOnlyFile] }
+
+func (r readOnlyFS) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	return openReadOnlyFile(r.file.OpenFile, name, flags, perm)
+}
+
+func openReadOnlyFile(open openFileFunc, name string, flags int, perm fs.FileMode) (File, error) {
+	if !hasReadOnlyFlags(flags) {
+		return nil, ErrReadOnly
+	}
+	f, err := open(name, flags, perm)
+	if err != nil {
+		return nil, err
+	}
+	switch r := f.(type) {
+	case readOnlyFS:
+		return r, nil
+	case *file[readOnlyFile]:
+		return readOnlyFS{r}, nil
+	default:
+		return readOnlyFS{newFile(readOnlyFile{file: r})}, nil
+	}
+}
+
 // ReadOnlyFile constructs a read-only file.
+//
+// The returned file does not allow any mutations but if it is a directory,
+// files opened from it may not be read-only (e.g. if they are opened in write
+// mode). To have a fully recursive read-only view of a file system, use
+// ReadOnlyFS instead.
 func ReadOnlyFile(r File) File {
 	switch f := r.(type) {
 	case *file[readOnlyFile]:

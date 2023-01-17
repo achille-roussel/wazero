@@ -111,7 +111,7 @@ func FileDevice(info fs.FileInfo) Device { return Device(sysinfo.Device(info)) }
 // methods of the underlying file will only be called with valid inputs.
 func NewFile(f File) File {
 	switch f.(type) {
-	case *file[File], *file[readOnlyFile], *mountedFile, dirFile:
+	case *file[File], *file[readOnlyFile], *file[errRoot], *mountedFile, dirFile, readOnlyFS:
 		return f
 	}
 	return newFile(f)
