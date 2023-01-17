@@ -586,11 +586,18 @@ func equalStat(source, target File) error {
 	}
 	sourceMode := sourceInfo.Mode()
 	targetMode := targetInfo.Mode()
-	if sourceMode != targetMode {
-		fmt.Printf("%#v\n", source)
-		fmt.Printf("%#v\n", target)
-		fmt.Printf("%#v\n", sourceInfo)
-		fmt.Printf("%#v\n", targetInfo)
+	sourceType := sourceMode.Type()
+	targetType := targetMode.Type()
+	if sourceType != targetType {
+		return fmt.Errorf("file types mismatch: want=%s got=%s", sourceType, targetType)
+	}
+	sourcePerm := sourceMode.Perm()
+	targetPerm := targetMode.Perm()
+	// Sometimes the permission bits may not be available. Clearly we were able
+	// to open the files so we should have at least read permissions reported so
+	// just ignore the permissions if either the source or target are zero. This
+	// happens with virtualized directories for fstest.MapFS for example.
+	if sourcePerm != 0 && targetPerm != 0 && sourcePerm != targetPerm {
 		return fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
 	}
 	sourceModTime := sysinfo.ModTime(sourceInfo)
