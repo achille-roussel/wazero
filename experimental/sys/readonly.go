@@ -104,10 +104,7 @@ func (f readOnlyFile) Stat() (fs.FileInfo, error) {
 }
 
 func (f readOnlyFile) Access(name string, mode fs.FileMode) error {
-	if (mode & 0b010) == 0 {
-		return f.file.Access(name, mode)
-	}
-	return ErrPermission
+	return f.file.Access(name, mode)
 }
 
 func (f readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {

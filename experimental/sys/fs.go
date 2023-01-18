@@ -860,6 +860,12 @@ func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Direc
 // which can be passed to the OpenFile methods of the FS interface.
 type OpenFlags int
 
+// ReadOnly returns true if the set of flags intends to open a file in read-only
+// mode.
+func (flags OpenFlags) ReadOnly() bool {
+	return hasReadOnlyFlags(int(flags))
+}
+
 // String returns a human-readble view of the combination of flags.
 func (flags OpenFlags) String() string {
 	names := make([]string, 0, len(openFlagNames))
