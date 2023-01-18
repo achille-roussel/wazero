@@ -33,6 +33,11 @@ const (
 	O_DSYNC = syscall.O_SYNC
 	O_RSYNC = syscall.O_SYNC
 
+	F_OK = 0
+	X_OK = 1
+	W_OK = 2
+	R_OK = 4
+
 	__AT_FDCWD          = -2
 	__AT_SYMLINK_FOLLOW = 0x0040
 	__AT_REMOVEDIR      = 0x0080

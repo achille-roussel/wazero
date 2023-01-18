@@ -36,6 +36,11 @@ const (
 	O_PATH    = 010000000
 	O_TMPFILE = 020000000
 
+	F_OK = 0
+	X_OK = 1
+	W_OK = 2
+	R_OK = 4
+
 	__AT_FDCWD          = -100
 	__AT_REMOVEDIR      = 0x200
 	__AT_SYMLINK_FOLLOW = 0x400

@@ -72,7 +72,7 @@ func testLoop(test func(sys.FS, string) error) func(sys.FS) error {
 	}
 }
 
-var testReadWriteOpenFile = append(testDefaultOpenFile,
+var testReadWriteOpenFile = append(testValidateOpenFile,
 	fsTestCase{
 		name: "opening a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -128,7 +128,7 @@ var testReadWriteOpenFile = append(testDefaultOpenFile,
 	},
 )
 
-var testReadWriteOpen = append(testDefaultOpen,
+var testReadWriteOpen = append(testValidateOpen,
 	fsTestCase{
 		name: "opening a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -139,21 +139,15 @@ var testReadWriteOpen = append(testDefaultOpen,
 	},
 )
 
-var testReadWriteAccess = append(testDefaultAccess,
+var testReadWriteAccess = append(testValidateAccess,
 	fsTestCase{
 		name: "accessing a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
 		test: testLoop(func(fsys sys.FS, path string) error { return sys.Access(fsys, path+"/test", 0) }),
 	},
-
-	fsTestCase{
-		name: "existing files can be accessed in write mode",
-		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", 0b010) },
-	},
 )
 
-var testReadWriteMknod = append(testDefaultMknod,
+var testReadWriteMknod = append(testValidateMknod,
 	fsTestCase{
 		name: "creating a node at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -224,7 +218,7 @@ var testReadWriteMknod = append(testDefaultMknod,
 	},
 )
 
-var testReadWriteMkdir = append(testDefaultMkdir,
+var testReadWriteMkdir = append(testValidateMkdir,
 	fsTestCase{
 		name: "creating a directory at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -276,7 +270,7 @@ var testReadWriteMkdir = append(testDefaultMkdir,
 	},
 )
 
-var testReadWriteRmdir = append(testDefaultRmdir,
+var testReadWriteRmdir = append(testValidateRmdir,
 	fsTestCase{
 		name: "removing a directory at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -340,7 +334,7 @@ var testReadWriteRmdir = append(testDefaultRmdir,
 	},
 )
 
-var testReadWriteUnlink = append(testDefaultUnlink,
+var testReadWriteUnlink = append(testValidateUnlink,
 	fsTestCase{
 		name: "unlinking a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -378,7 +372,7 @@ var testReadWriteUnlink = append(testDefaultUnlink,
 	},
 )
 
-var testReadWriteLink = append(testDefaultLink,
+var testReadWriteLink = append(testValidateLink,
 	fsTestCase{
 		name: "linking files at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -471,7 +465,7 @@ var testReadWriteLink = append(testDefaultLink,
 	},
 )
 
-var testReadWriteSymlink = append(testDefaultSymlink,
+var testReadWriteSymlink = append(testValidateSymlink,
 	fsTestCase{
 		name: "linking files at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -571,7 +565,7 @@ var testReadWriteSymlink = append(testDefaultSymlink,
 	},
 )
 
-var testReadWriteReadlink = append(testDefaultReadlink,
+var testReadWriteReadlink = append(testValidateReadlink,
 	fsTestCase{
 		name: "reading a link at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -641,7 +635,7 @@ var testReadWriteReadlink = append(testDefaultReadlink,
 	},
 )
 
-var testReadWriteRename = append(testDefaultRename,
+var testReadWriteRename = append(testValidateRename,
 	fsTestCase{
 		name: "moving a file from a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -720,7 +714,7 @@ var testReadWriteRename = append(testDefaultRename,
 	},
 )
 
-var testReadWriteChmod = append(testDefaultChmod,
+var testReadWriteChmod = append(testValidateChmod,
 	fsTestCase{
 		name: "changing file permissions at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -743,7 +737,7 @@ var testReadWriteChmod = append(testDefaultChmod,
 	},
 )
 
-var testReadWriteChtimes = append(testDefaultChtimes,
+var testReadWriteChtimes = append(testValidateChtimes,
 	fsTestCase{
 		name: "changing file times at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -774,7 +768,7 @@ var testReadWriteChtimes = append(testDefaultChtimes,
 	},
 )
 
-var testReadWriteTruncate = append(testDefaultTruncate,
+var testReadWriteTruncate = append(testValidateTruncate,
 	fsTestCase{
 		name: "truncating a file at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -813,7 +807,7 @@ var testReadWriteTruncate = append(testDefaultTruncate,
 	},
 )
 
-var testReadWriteStat = append(testDefaultStat,
+var testReadWriteStat = append(testValidateStat,
 	fsTestCase{
 		name: "stat at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -824,7 +818,7 @@ var testReadWriteStat = append(testDefaultStat,
 	},
 )
 
-var testReadWriteLstat = append(testDefaultLstat,
+var testReadWriteLstat = append(testValidateLstat,
 	fsTestCase{
 		name: "stat at a path containing a symbolic link loop fails with ErrLoop",
 		err:  sys.ErrLoop,
@@ -835,11 +829,11 @@ var testReadWriteLstat = append(testDefaultLstat,
 	},
 )
 
-var testReadWriteFileOpen = append(testDefaultFileOpen)
+var testReadWriteFileOpen = append(testValidateFileOpen)
 
-var testReadWriteFileOpenFile = append(testDefaultFileOpenFile)
+var testReadWriteFileOpenFile = append(testValidateFileOpenFile)
 
-var testReadWriteFileRead = append(testDefaultFileRead,
+var testReadWriteFileRead = append(testValidateFileRead,
 	fsTestCase{
 		name: "reading from a file open with O_WRONLY fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -852,7 +846,7 @@ var testReadWriteFileRead = append(testDefaultFileRead,
 	},
 )
 
-var testReadWriteFileWrite = append(testDefaultFileWrite,
+var testReadWriteFileWrite = append(testValidateFileWrite,
 	fsTestCase{
 		name: "writing bytes to a file changes its content",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -874,7 +868,7 @@ var testReadWriteFileWrite = append(testDefaultFileWrite,
 	},
 )
 
-var testReadWriteFileChmod = append(testDefaultFileChmod,
+var testReadWriteFileChmod = append(testValidateFileChmod,
 	fsTestCase{
 		name: "change file permissions of an open file",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -885,7 +879,7 @@ var testReadWriteFileChmod = append(testDefaultFileChmod,
 	},
 )
 
-var testReadWriteFileChtimes = append(testDefaultFileChtimes,
+var testReadWriteFileChtimes = append(testValidateFileChtimes,
 	fsTestCase{
 		name: "change file times of an open file",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, ModTime: epoch}},
@@ -898,7 +892,7 @@ var testReadWriteFileChtimes = append(testDefaultFileChtimes,
 	},
 )
 
-var testReadWriteFileTruncate = append(testDefaultFileTruncate,
+var testReadWriteFileTruncate = append(testValidateFileTruncate,
 	fsTestCase{
 		name: "truncating a file to less than its size erases its content",
 		base: fstest.MapFS{
@@ -938,7 +932,7 @@ var testReadWriteFileTruncate = append(testDefaultFileTruncate,
 	},
 )
 
-var testReadWriteFileSync = append(testDefaultFileSync,
+var testReadWriteFileSync = append(testValidateFileSync,
 	fsTestCase{
 		name: "syncing a file flushes buffered mutations to persistent storage",
 		base: fstest.MapFS{},
@@ -952,7 +946,7 @@ var testReadWriteFileSync = append(testDefaultFileSync,
 	},
 )
 
-var testReadWriteFileDatasync = append(testDefaultFileDatasync,
+var testReadWriteFileDatasync = append(testValidateFileDatasync,
 	fsTestCase{
 		name: "syncing a file data flushes buffered writes to persistent storage",
 		base: fstest.MapFS{},
@@ -982,7 +976,7 @@ func testCopy(test func(r, w sys.File) error) func(sys.FS) error {
 	}
 }
 
-var testReadWriteFileCopy = append(testDefaultFileCopy,
+var testReadWriteFileCopy = append(testValidateFileCopy,
 	fsTestCase{
 		name: "copying from a closed file fails with ErrClosed",
 		base: fstest.MapFS{

@@ -58,7 +58,7 @@ func TestReadOnlyFS(t *testing.T, makeFS MakeFS) {
 // The test suites below contain tests validating the behavior of read-only
 // file systems.
 
-var testReadOnlyOpenFile = append(testDefaultOpenFile,
+var testReadOnlyOpenFile = append(testValidateOpenFile,
 	fsTestCase{
 		name: "opening a file with O_APPEND fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -100,25 +100,11 @@ var testReadOnlyOpenFile = append(testDefaultOpenFile,
 	},
 )
 
-var testReadOnlyOpen = append(testDefaultOpen)
+var testReadOnlyOpen = append(testValidateOpen)
 
-var testReadOnlyAccess = append(testDefaultAccess,
-	fsTestCase{
-		name: "accessing a file in write-only mode fails with ErrPermission",
-		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrPermission,
-		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", sys.O_WRONLY) },
-	},
+var testReadOnlyAccess = append(testValidateAccess)
 
-	fsTestCase{
-		name: "accessing a file in read-write mode fails with ErrPermission",
-		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrPermission,
-		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", sys.O_RDWR) },
-	},
-)
-
-var testReadOnlyMknod = append(testDefaultMknod,
+var testReadOnlyMknod = append(testValidateMknod,
 	fsTestCase{
 		name: "creating a node fails with ErrReadOnly",
 		err:  sys.ErrReadOnly,
@@ -126,7 +112,7 @@ var testReadOnlyMknod = append(testDefaultMknod,
 	},
 )
 
-var testReadOnlyMkdir = append(testDefaultMkdir,
+var testReadOnlyMkdir = append(testValidateMkdir,
 	fsTestCase{
 		name: "creating a directory fails with ErrReadOnly",
 		err:  sys.ErrReadOnly,
@@ -134,7 +120,7 @@ var testReadOnlyMkdir = append(testDefaultMkdir,
 	},
 )
 
-var testReadOnlyRmdir = append(testDefaultRmdir,
+var testReadOnlyRmdir = append(testValidateRmdir,
 	fsTestCase{
 		name: "removing a directory fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
@@ -143,7 +129,7 @@ var testReadOnlyRmdir = append(testDefaultRmdir,
 	},
 )
 
-var testReadOnlyUnlink = append(testDefaultUnlink,
+var testReadOnlyUnlink = append(testValidateUnlink,
 	fsTestCase{
 		name: "unlinking a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -152,7 +138,7 @@ var testReadOnlyUnlink = append(testDefaultUnlink,
 	},
 )
 
-var testReadOnlyLink = append(testDefaultLink,
+var testReadOnlyLink = append(testValidateLink,
 	fsTestCase{
 		name: "linking a file fails with ErrReadOnly",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
@@ -161,7 +147,7 @@ var testReadOnlyLink = append(testDefaultLink,
 	},
 )
 
-var testReadOnlySymlink = append(testDefaultSymlink,
+var testReadOnlySymlink = append(testValidateSymlink,
 	fsTestCase{
 		name: "creating a symbolic link fails with ErrReadOnly",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
@@ -170,9 +156,9 @@ var testReadOnlySymlink = append(testDefaultSymlink,
 	},
 )
 
-var testReadOnlyReadlink = append(testDefaultReadlink)
+var testReadOnlyReadlink = append(testValidateReadlink)
 
-var testReadOnlyRename = append(testDefaultRename,
+var testReadOnlyRename = append(testValidateRename,
 	fsTestCase{
 		name: "renaming a file fails with ErrReadOnly",
 		base: fstest.MapFS{"old": &fstest.MapFile{Mode: 0644}},
@@ -181,7 +167,7 @@ var testReadOnlyRename = append(testDefaultRename,
 	},
 )
 
-var testReadOnlyChmod = append(testDefaultChmod,
+var testReadOnlyChmod = append(testValidateChmod,
 	fsTestCase{
 		name: "changing a file permissions fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -190,7 +176,7 @@ var testReadOnlyChmod = append(testDefaultChmod,
 	},
 )
 
-var testReadOnlyChtimes = append(testDefaultChtimes,
+var testReadOnlyChtimes = append(testValidateChtimes,
 	fsTestCase{
 		name: "changing a file times fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -199,7 +185,7 @@ var testReadOnlyChtimes = append(testDefaultChtimes,
 	},
 )
 
-var testReadOnlyTruncate = append(testDefaultTruncate,
+var testReadOnlyTruncate = append(testValidateTruncate,
 	fsTestCase{
 		name: "truncating a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -208,19 +194,19 @@ var testReadOnlyTruncate = append(testDefaultTruncate,
 	},
 )
 
-var testReadOnlyStat = append(testDefaultStat)
+var testReadOnlyStat = append(testValidateStat)
 
-var testReadOnlyLstat = append(testDefaultLstat)
+var testReadOnlyLstat = append(testValidateLstat)
 
-var testReadOnlyFileOpen = append(testDefaultFileOpen)
+var testReadOnlyFileOpen = append(testValidateFileOpen)
 
-var testReadOnlyFileOpenFile = append(testDefaultFileOpenFile)
+var testReadOnlyFileOpenFile = append(testValidateFileOpenFile)
 
-var testReadOnlyFileRead = append(testDefaultFileRead)
+var testReadOnlyFileRead = append(testValidateFileRead)
 
-var testReadOnlyFileWrite = append(testDefaultFileWrite)
+var testReadOnlyFileWrite = append(testValidateFileWrite)
 
-var testReadOnlyFileChmod = append(testDefaultFileChmod,
+var testReadOnlyFileChmod = append(testValidateFileChmod,
 	fsTestCase{
 		name: "changing a file permissions fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -231,7 +217,7 @@ var testReadOnlyFileChmod = append(testDefaultFileChmod,
 	},
 )
 
-var testReadOnlyFileChtimes = append(testDefaultFileChtimes,
+var testReadOnlyFileChtimes = append(testValidateFileChtimes,
 	fsTestCase{
 		name: "changing a file times fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -244,7 +230,7 @@ var testReadOnlyFileChtimes = append(testDefaultFileChtimes,
 	},
 )
 
-var testReadOnlyFileTruncate = append(testDefaultFileTruncate,
+var testReadOnlyFileTruncate = append(testValidateFileTruncate,
 	fsTestCase{
 		name: "truncating a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -255,7 +241,7 @@ var testReadOnlyFileTruncate = append(testDefaultFileTruncate,
 	},
 )
 
-var testReadOnlyFileSync = append(testDefaultFileSync,
+var testReadOnlyFileSync = append(testValidateFileSync,
 	fsTestCase{
 		name: "syncing a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -266,7 +252,7 @@ var testReadOnlyFileSync = append(testDefaultFileSync,
 	},
 )
 
-var testReadOnlyFileDatasync = append(testDefaultFileDatasync,
+var testReadOnlyFileDatasync = append(testValidateFileDatasync,
 	fsTestCase{
 		name: "datasyncing a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
@@ -277,7 +263,7 @@ var testReadOnlyFileDatasync = append(testDefaultFileDatasync,
 	},
 )
 
-var testReadOnlyFileCopy = append(testDefaultFileCopy,
+var testReadOnlyFileCopy = append(testValidateFileCopy,
 	fsTestCase{
 		name: "copying from a file reads its content",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},

@@ -169,13 +169,19 @@ func (f *fsFile) Access(name string, mode fs.FileMode) error {
 		return err
 	} else {
 		defer f2.Close()
-		if stat, err := f2.Stat(); err != nil {
-			return err
-		} else if perm := mode.Perm(); (perm & stat.Mode().Perm()) != perm {
-			return ErrPermission
-		} else {
+		if mode == 0 {
 			return nil
 		}
+		stat, err := f2.Stat()
+		if err != nil {
+			return err
+		}
+		perm := stat.Mode().Perm() >> 6
+		mask := mode.Perm()
+		if (perm & mask) != mask {
+			return ErrPermission
+		}
+		return nil
 	}
 	return ErrNotSupported
 }
