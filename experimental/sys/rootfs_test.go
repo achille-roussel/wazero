@@ -11,7 +11,7 @@ import (
 )
 
 func shallowFS(base sys.FS) sys.FS {
-	return sys.MaskFS(base, func(path string, info fs.FileInfo) error {
+	return sys.MaskFS(base, func(info fs.FileInfo) error {
 		if info.IsDir() {
 			return sys.ErrNotExist
 		}

@@ -559,9 +559,17 @@ func (f errRoot) OpenFile(name string, flags int, perm fs.FileMode) (File, error
 
 type errRootInfo struct{}
 
-func (info errRootInfo) Name() string       { return "." }
-func (ifno errRootInfo) Size() int64        { return 0 }
-func (info errRootInfo) Mode() fs.FileMode  { return 0777 | fs.ModeDir }
-func (info errRootInfo) ModTime() time.Time { return time.Time{} }
-func (info errRootInfo) IsDir() bool        { return true }
-func (info errRootInfo) Sys() any           { return nil }
+func (errRootInfo) Name() string       { return "." }
+func (errRootInfo) Size() int64        { return 0 }
+func (errRootInfo) Mode() fs.FileMode  { return 0777 | fs.ModeDir }
+func (errRootInfo) ModTime() time.Time { return time.Time{} }
+func (errRootInfo) IsDir() bool        { return true }
+func (errRootInfo) Sys() any           { return nil }
+
+// FileFS constructs a FS instance from a base file, using the file's OpenFile
+// method to navigate the file system.
+func FileFS(base File) FS { return &fileFS{base} }
+
+type fileFS struct{ File }
+
+func (fsys *fileFS) Open(name string) (fs.File, error) { return Open(fsys, name) }

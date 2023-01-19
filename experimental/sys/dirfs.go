@@ -52,6 +52,9 @@ func (f dirFile) GoString() string { return fmt.Sprintf("sys.dirFile{%q}", f.Nam
 func (f dirFile) Sys() any { return f.File }
 
 func (f dirFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
+	if !ValidPath(name) {
+		return nil, makePathError("open", name, ErrNotExist)
+	}
 	osFile, err := f.openFile(name, flags, perm)
 	if err != nil {
 		return nil, err

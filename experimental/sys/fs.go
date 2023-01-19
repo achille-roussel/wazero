@@ -33,48 +33,52 @@ type FS interface {
 // The returned file system is read-only, all attempts to open files in write
 // mode, or mutate the state of the file system will error with ErrReadOnly.
 func NewFS(base fs.FS) FS {
-	return FuncFS(func(fsys FS, name string, flags int, perm fs.FileMode) (File, error) {
-		if !hasReadOnlyFlags(flags) {
-			return nil, ErrReadOnly
-		}
-		link := name
-		loop := 0
-	openFile:
-		if loop++; loop == 40 {
-			return nil, ErrLoop
-		}
-		f, err := base.Open(link)
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
+		return openFS(base, name, flags, perm)
+	})
+}
+
+func openFS(fsys fs.FS, name string, flags int, perm fs.FileMode) (File, error) {
+	if !hasReadOnlyFlags(flags) {
+		return nil, ErrReadOnly
+	}
+	link := name
+	loop := 0
+openFile:
+	if loop++; loop == 40 {
+		return nil, ErrLoop
+	}
+	f, err := fsys.Open(link)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasDirectoryFlags(flags) || !hasNoFollowFlags(flags) {
+		s, err := f.Stat()
 		if err != nil {
+			f.Close()
 			return nil, err
 		}
+		m := s.Mode()
+		t := m.Type()
 
-		if hasDirectoryFlags(flags) || !hasNoFollowFlags(flags) {
-			s, err := f.Stat()
-			if err != nil {
+		if hasDirectoryFlags(flags) {
+			if t != fs.ModeDir {
 				f.Close()
+				return nil, ErrNotDirectory
+			}
+		} else if t == fs.ModeSymlink {
+			b, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
 				return nil, err
 			}
-			m := s.Mode()
-			t := m.Type()
-
-			if hasDirectoryFlags(flags) {
-				if t != fs.ModeDir {
-					f.Close()
-					return nil, ErrNotDirectory
-				}
-			} else if t == fs.ModeSymlink {
-				b, err := io.ReadAll(f)
-				f.Close()
-				if err != nil {
-					return nil, err
-				}
-				link = string(b)
-				goto openFile
-			}
+			link = string(b)
+			goto openFile
 		}
+	}
 
-		return ReadOnlyFile(&fsFile{file: f, fsys: fsys, name: name}), nil
-	})
+	return ReadOnlyFile(&fsFile{file: f, fsys: fsys, name: name}), nil
 }
 
 func hasReadOnlyFlags(flags int) bool {
@@ -96,7 +100,7 @@ func hasFlags(flags, check int) bool {
 type fsFile struct {
 	ReadOnly
 	file fs.File
-	fsys FS
+	fsys fs.FS
 	name string
 }
 
@@ -191,26 +195,28 @@ func (f *fsFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error
 	if f.fsys == nil {
 		return nil, ErrNotSupported
 	}
-	if !hasReadOnlyFlags(flags) {
-		return nil, ErrReadOnly
-	}
-	return f.fsys.OpenFile(JoinPath(f.name, name), flags, perm)
+	return openFS(f.fsys, f.join(name), flags, perm)
 }
 
 func (f *fsFile) Lstat(name string) (fs.FileInfo, error) {
 	if f.fsys == nil {
 		return nil, ErrNotSupported
 	}
-	return Lstat(f.fsys, JoinPath(f.name, name))
+	file, err := openFS(f.fsys, f.join(name), openFlagsLstat, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return file.Stat()
+}
+
+func (f *fsFile) join(name string) string {
+	return JoinPath(f.name, name)
 }
 
 // FuncFS is an implementation of the FS interface using a function to open
 // new files.
-//
-// The function has a signature similar to OpenFile, but the first argument is
-// the FuncFS itself as a FS value, allowing to be captured in the returned
-// File (e.g. if it is constructed with ReadOnlyFile).
-type FuncFS func(FS, string, int, fs.FileMode) (File, error)
+type FuncFS func(string, int, fs.FileMode) (File, error)
 
 func (open FuncFS) Open(name string) (fs.File, error) {
 	return Open(open, name)
@@ -220,7 +226,7 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 	if !ValidPath(name) {
 		return nil, makePathError("open", name, ErrNotExist)
 	}
-	f, err := open(open, name, flags, perm)
+	f, err := open(name, flags, perm)
 	if err != nil {
 		if name == "." {
 			// The root should always be successfully opened; wrap the
@@ -238,50 +244,36 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 
 // ErrFS returns a FS which errors with err on all its method calls.
 func ErrFS(err error) FS {
-	return FuncFS(func(_ FS, _ string, _ int, _ fs.FileMode) (File, error) {
+	return FuncFS(func(_ string, _ int, _ fs.FileMode) (File, error) {
 		return nil, err
-	})
-}
-
-// FileFS constructs a FS instance from a base file, using the file's OpenFile
-// method to navigate the file system.
-func FileFS(base File) FS {
-	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
-		return base.OpenFile(name, flags, perm)
 	})
 }
 
 // SubFS constructs a FS from the given base with the root set to path.
 func SubFS(base FS, path string) FS {
-	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
 		return base.OpenFile(JoinPath(path, name), flags, perm)
 	})
 }
 
 // MaskFS contructs a file system which only exposes files for which a mask
 // function returns no errors.
-func MaskFS(base FS, mask func(path string, info fs.FileInfo) error) FS {
-	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
-		return openMaskedFile(base.OpenFile, mask, ".", name, flags, perm)
+func MaskFS(base FS, mask func(fs.FileInfo) error) FS {
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
+		return openMaskedFile(base.OpenFile, mask, name, flags, perm)
 	})
 }
 
 type maskedFile struct {
-	mask maskFileFunc
-	path string
+	mask func(fs.FileInfo) error
 	File
 }
 
 func (f *maskedFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
-	return openMaskedFile(f.File.OpenFile, f.mask, f.path, name, flags, perm)
+	return openMaskedFile(f.File.OpenFile, f.mask, name, flags, perm)
 }
 
-type openFileFunc func(string, int, fs.FileMode) (File, error)
-
-type maskFileFunc func(string, fs.FileInfo) error
-
-func openMaskedFile(open openFileFunc, mask maskFileFunc, path, name string, flags int, perm fs.FileMode) (File, error) {
-	path = JoinPath(path, name)
+func openMaskedFile(open openFileFunc, mask func(fs.FileInfo) error, name string, flags int, perm fs.FileMode) (File, error) {
 	file, err := open(name, flags, perm)
 	if err != nil {
 		return nil, err
@@ -292,13 +284,15 @@ func openMaskedFile(open openFileFunc, mask maskFileFunc, path, name string, fla
 			file.Close()
 			return nil, err
 		}
-		if err := mask(name, info); err != nil {
+		if err := mask(info); err != nil {
 			file.Close()
 			return nil, err
 		}
 	}
-	return &maskedFile{mask: mask, path: name, File: file}, nil
+	return &maskedFile{mask, file}, nil
 }
+
+type openFileFunc func(string, int, fs.FileMode) (File, error)
 
 // CopyFS copies the file system src into dst.
 //
@@ -806,6 +800,66 @@ func Link(fsys FS, oldPath, newPath string) error {
 // Rename renames a file from oldPath to newPath in fsys.
 func Rename(fsys FS, oldPath, newPath string) error {
 	return callDir2(fsys, "rename", oldPath, newPath, Directory.Rename)
+}
+
+// Remove removes a directory entry at path in fsys.
+func Remove(fsys FS, path string) error {
+	return callDir(fsys, "remove", path, func(dir Directory, name string) error {
+		err := dir.Rmdir(name)
+		if errors.Is(err, ErrNotDirectory) {
+			err = dir.Unlink(name)
+		}
+		return err
+	})
+}
+
+// RemoveAll is like Remove but if the path refers to a directory, it removes
+// all its sub directories as well.
+func RemoveAll(fsys FS, path string) error {
+	return callDir(fsys, "remove", path, func(dir Directory, name string) error {
+		err := dir.Rmdir(name)
+		switch {
+		case errors.Is(err, ErrNotDirectory):
+			err = dir.Unlink(name)
+		case errors.Is(err, ErrNotEmpty):
+			err = removeAll(dir, name)
+		}
+		return err
+	})
+}
+
+func removeAll(dir Directory, name string) error {
+	d, err := dir.OpenFile(name, O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := Scan(d, func(entry fs.DirEntry) error {
+		if entry.IsDir() {
+			return removeAll(d, entry.Name())
+		}
+		return d.Unlink(entry.Name())
+	}); err != nil {
+		return err
+	}
+	return dir.Rmdir(name)
+}
+
+func Scan(dir Directory, fn func(fs.DirEntry) error) error {
+	for {
+		entries, err := dir.ReadDir(100)
+		for _, entry := range entries {
+			if err := fn(entry); err != nil {
+				return err
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func callFile(fsys FS, op, name string, flags int, do func(File) error) (err error) {

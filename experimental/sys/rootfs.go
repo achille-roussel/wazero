@@ -63,7 +63,7 @@ func mountFS(base FS, mounts []MountPoint) FS {
 		mounts: mounts,
 	}
 
-	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
 		m := fsys.findMountPoint(name)
 		f, err := m.Fsys.OpenFile(name, flags, perm)
 		if err != nil {
@@ -160,7 +160,7 @@ func (f *mountedFile) OpenFile(name string, flags int, perm fs.FileMode) (file F
 // produce unpredictable behavior if they are used without being wrapped in a
 // sandbox.
 func sandboxFS(fsys FS) FS {
-	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
 		d, err := OpenRoot(fsys)
 		if err != nil {
 			return nil, err

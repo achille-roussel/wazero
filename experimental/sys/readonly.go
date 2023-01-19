@@ -11,7 +11,7 @@ import (
 // only read operations, and will return ErrReadOnly on any method call which
 // attempts to mutate the state of the file system.
 func ReadOnlyFS(fsys FS) FS {
-	return FuncFS(func(_ FS, name string, flags int, perm fs.FileMode) (File, error) {
+	return FuncFS(func(name string, flags int, perm fs.FileMode) (File, error) {
 		return openReadOnlyFile(fsys.OpenFile, name, flags, perm)
 	})
 }
