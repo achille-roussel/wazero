@@ -2,6 +2,7 @@ package sys
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -194,6 +195,13 @@ func (f *fsFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error
 		return nil, ErrReadOnly
 	}
 	return f.fsys.OpenFile(JoinPath(f.name, name), flags, perm)
+}
+
+func (f *fsFile) Lstat(name string) (fs.FileInfo, error) {
+	if f.fsys == nil {
+		return nil, ErrNotSupported
+	}
+	return Lstat(f.fsys, JoinPath(f.name, name))
 }
 
 // FuncFS is an implementation of the FS interface using a function to open
@@ -808,29 +816,15 @@ func callFile(fsys FS, op, name string, flags int, do func(File) error) (err err
 }
 
 func callFile1[Func func(File) (R, error), R any](fsys FS, op, name string, flags int, do Func) (ret R, err error) {
-	_, ret, err = callFile2(fsys, op, name, flags, func(file File) (struct{}, R, error) {
-		r, e := do(file)
-		return struct{}{}, r, e
-	})
-	return
-}
-
-func callFile2[Func func(File) (R1, R2, error), R1, R2 any](fsys FS, op, name string, flags int, do Func) (r1 R1, r2 R2, err error) {
-	if !ValidPath(name) {
-		return r1, r2, makePathError(op, name, ErrNotExist)
-	}
 	f, err := fsys.OpenFile(name, flags, 0)
 	if err != nil {
-		return r1, r2, makePathError(op, name, err)
+		return ret, makePathError(op, name, err)
 	}
 	defer f.Close()
 	return do(f)
 }
 
 func callDir(fsys FS, op, name string, do func(Directory, string) error) error {
-	if !ValidPath(name) {
-		return makePathError(op, name, ErrNotExist)
-	}
 	dir, base := SplitPath(name)
 	d, err := OpenDir(fsys, dir)
 	if err != nil {
@@ -841,12 +835,6 @@ func callDir(fsys FS, op, name string, do func(Directory, string) error) error {
 }
 
 func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
-	if !ValidPath(name1) {
-		return makePathError(op, name1, ErrNotExist)
-	}
-	if !ValidPath(name2) {
-		return makePathError(op, name2, ErrInvalid)
-	}
 	dir1, base1 := SplitPath(name1)
 	dir2, base2 := SplitPath(name2)
 	d1, err := OpenDir(fsys, dir1)
@@ -856,6 +844,9 @@ func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Direc
 	defer d1.Close()
 	d2, err := OpenDir(fsys, dir2)
 	if err != nil {
+		if errors.Is(err, ErrNotExist) && !ValidPath(dir2) {
+			err = ErrInvalid
+		}
 		return makePathError(op, name2, err)
 	}
 	defer d2.Close()

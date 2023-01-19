@@ -76,6 +76,8 @@ type Directory interface {
 	// Moves a file from oldName to newName. oldName is expressed relative to
 	// the receivers, while newName is expressed relative to newDir.
 	Rename(oldName string, newDir Directory, newName string) error
+	// Returns information about a directory entry on the file system.
+	Lstat(name string) (fs.FileInfo, error)
 	// Returns the underlying system file.
 	Sys() any
 }
@@ -467,6 +469,20 @@ func (f *file[T]) Rename(oldName string, newDir Directory, newName string) (err 
 	return err
 }
 
+func (f *file[T]) Lstat(name string) (info fs.FileInfo, err error) {
+	if f.closed {
+		err = ErrClosed
+	} else if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		info, err = f.base.Lstat(name)
+	}
+	if err != nil {
+		err = makePathError("lstat", name, err)
+	}
+	return info, err
+}
+
 func (f *file[T]) makePathError(op string, err error) error {
 	return makePathError(op, f.Name(), err)
 }
@@ -531,6 +547,7 @@ func (f errRoot) Unlink(string) error                     { return f.err }
 func (f errRoot) Symlink(string, string) error            { return f.err }
 func (f errRoot) Link(string, Directory, string) error    { return f.err }
 func (f errRoot) Rename(string, Directory, string) error  { return f.err }
+func (f errRoot) Lstat(string) (fs.FileInfo, error)       { return nil, f.err }
 func (f errRoot) ReadDir(int) ([]fs.DirEntry, error)      { return nil, io.EOF }
 func (f errRoot) Stat() (fs.FileInfo, error)              { return errRootInfo{}, nil }
 func (f errRoot) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {

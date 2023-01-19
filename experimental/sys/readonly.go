@@ -118,6 +118,10 @@ func (f readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (File, 
 	return ReadOnlyFile(file), nil
 }
 
+func (f readOnlyFile) Lstat(name string) (fs.FileInfo, error) {
+	return f.file.Lstat(name)
+}
+
 // ReadOnly is a helper type declaring methods of the File interface for
 // implementations that only allow read operations.
 type ReadOnly struct{}

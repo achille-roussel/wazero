@@ -6,6 +6,63 @@ import (
 	"time"
 )
 
+func NewFileInfo(name string, stat *syscall.Stat_t) fs.FileInfo {
+	return &fileInfo{name, *stat}
+}
+
+type fileInfo struct {
+	name string
+	stat syscall.Stat_t
+}
+
+func (info *fileInfo) Name() string {
+	return info.name
+}
+
+func (info *fileInfo) Mode() fs.FileMode {
+	mode := fs.FileMode(info.stat.Mode).Perm()
+	switch {
+	case (info.stat.Mode & syscall.S_IFBLK) != 0:
+		mode |= fs.ModeDevice
+	case (info.stat.Mode & syscall.S_IFCHR) != 0:
+		mode |= fs.ModeDevice | fs.ModeCharDevice
+	case (info.stat.Mode & syscall.S_IFDIR) != 0:
+		mode |= fs.ModeDir
+	case (info.stat.Mode & syscall.S_IFIFO) != 0:
+		mode |= fs.ModeNamedPipe
+	case (info.stat.Mode & syscall.S_IFLNK) != 0:
+		mode |= fs.ModeSymlink
+	case (info.stat.Mode & syscall.S_IFSOCK) != 0:
+		mode |= fs.ModeSocket
+	}
+	if (info.stat.Mode & syscall.S_ISGID) != 0 {
+		mode |= fs.ModeSetgid
+	}
+	if (info.stat.Mode & syscall.S_ISUID) != 0 {
+		mode |= fs.ModeSetuid
+	}
+	if (info.stat.Mode & syscall.S_ISVTX) != 0 {
+		mode |= fs.ModeSticky
+	}
+	return mode
+}
+
+func (info *fileInfo) ModTime() time.Time {
+	return time.Unix(statMtime(&info.stat))
+}
+
+func (info *fileInfo) IsDir() bool {
+	return (info.stat.Mode & syscall.S_IFDIR) != 0
+}
+
+func (info *fileInfo) Size() int64 {
+	return info.stat.Size
+}
+
+func (info *fileInfo) Sys() any {
+	return &info.stat
+}
+
 func makeMode(fileMode fs.FileMode) (mode uint32) {
 	mode = uint32(fileMode.Perm())
 	switch fileMode.Type() {

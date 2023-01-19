@@ -41,9 +41,10 @@ const (
 	W_OK = 2
 	R_OK = 4
 
-	__AT_FDCWD          = -100
-	__AT_REMOVEDIR      = 0x200
-	__AT_SYMLINK_FOLLOW = 0x400
+	__AT_FDCWD            = -100
+	__AT_SYMLINK_NOFOLLOW = 0x100
+	__AT_REMOVEDIR        = 0x200
+	__AT_SYMLINK_FOLLOW   = 0x400
 
 	// We add O_NONBLOCK to prevent open from blocking if it is called on a named
 	// pipe which has no writer.
@@ -303,4 +304,24 @@ func renameat(oldfd int, oldpath string, newfd int, newpath string) error {
 
 func faccessat(dirfd int, path string, mode uint32, flags int) error {
 	return syscall.Faccessat(dirfd, path, mode, flags)
+}
+
+func fstatat(dirfd int, path string, stat *syscall.Stat_t, flags int) error {
+	p, err := syscall.BytePtrFromString(path)
+	if err != nil {
+		return err
+	}
+	_, _, e := syscall.Syscall6(
+		uintptr(syscall.SYS_NEWFSTATAT),
+		uintptr(dirfd),
+		uintptr(unsafe.Pointer(p)),
+		uintptr(unsafe.Pointer(stat)),
+		uintptr(flags),
+		uintptr(0),
+		uintptr(0),
+	)
+	if e != 0 {
+		return e
+	}
+	return nil
 }

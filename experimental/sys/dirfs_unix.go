@@ -107,8 +107,16 @@ func (f dirFile) Rename(oldName string, newDir Directory, newName string) error 
 	return f.wrap("rename", renameat(f.fd(), oldName, dirfd(newDir), newName))
 }
 
+func (f dirFile) Lstat(name string) (fs.FileInfo, error) {
+	var stat syscall.Stat_t
+	if err := fstatat(f.fd(), name, &stat, __AT_SYMLINK_NOFOLLOW); err != nil {
+		return nil, err
+	}
+	return sysinfo.NewFileInfo(name, &stat), nil
+}
+
 func (f dirFile) openFile(name string, flags int, perm fs.FileMode) (*os.File, error) {
-	file, err := openFileAt(int(f.fd()), f.Name(), name, flags, perm)
+	file, err := openFileAt(f.fd(), f.Name(), name, flags, perm)
 	return file, f.wrap("open", err)
 }
 
