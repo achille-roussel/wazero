@@ -832,13 +832,17 @@ func RemoveAll(fsys FS, path string) error {
 }
 
 func removeAll(dir Directory, name string) error {
-	err := walk(dir, func(dir Directory, entry fs.DirEntry) error {
-		if entry.IsDir() {
-			return dir.Rmdir(entry.Name())
-		}
-		return dir.Unlink(entry.Name())
-	})
+	d, err := dir.OpenFile(name, O_DIRECTORY, 0)
 	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := Scan(d, func(entry fs.DirEntry) error {
+		if entry.IsDir() {
+			return removeAll(d, entry.Name())
+		}
+		return d.Unlink(entry.Name())
+	}); err != nil {
 		return err
 	}
 	return dir.Rmdir(name)
@@ -898,17 +902,18 @@ func WalkDir(fsys FS, path string, fn func(Directory, fs.DirEntry) error) error 
 
 func walk(dir Directory, fn func(Directory, fs.DirEntry) error) error {
 	return Scan(dir, func(entry fs.DirEntry) error {
-		if entry.IsDir() {
-			d, err := dir.OpenFile(entry.Name(), O_DIRECTORY, 0)
-			if err != nil {
-				return err
-			}
-			defer d.Close()
-			if err := walk(d, fn); err != nil {
-				return err
-			}
+		if err := fn(dir, entry); err != nil {
+			return err
 		}
-		return fn(dir, entry)
+		if !entry.IsDir() {
+			return nil
+		}
+		d, err := dir.OpenFile(entry.Name(), O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		return walk(d, fn)
 	})
 }
 
