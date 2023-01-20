@@ -105,13 +105,16 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 				// and files, which may prevent them from being deleted. We do a
 				// recursive pass to reset all the permissions to allow the files
 				// to be cleaned up.
-				tmp := filepath.Dir(t.TempDir())
-				err := sys.WalkDirFiles(sys.DirFS(tmp), ".",
-					func(file sys.File, info fs.FileInfo) error {
-						if info.IsDir() {
-							return file.Chmod(0755)
+				tmp := sys.DirFS(filepath.Dir(t.TempDir()))
+				err := sys.WalkDir(tmp, ".",
+					func(path string, entry fs.DirEntry, err error) error {
+						if err != nil {
+							return err
+						} else if entry.IsDir() {
+							return sys.Chmod(tmp, path, 0755)
+						} else {
+							return sys.Chmod(tmp, path, 0644)
 						}
-						return file.Chmod(0644)
 					},
 				)
 				if err != nil {

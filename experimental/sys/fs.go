@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"math/bits"
+	"path"
 	"strings"
 	"time"
 
@@ -866,55 +867,45 @@ func Scan(dir Directory, fn func(fs.DirEntry) error) error {
 	}
 }
 
-// WalkDirFiles walks the directory tree of fsys at path, calling fn for each
-// file or directory.
-func WalkDirFiles(fsys FS, path string, fn func(File, fs.FileInfo) error) error {
-	return WalkDir(fsys, path, func(dir Directory, entry fs.DirEntry) error {
-		var flags int
-		if entry.IsDir() {
-			flags = O_DIRECTORY
-		} else {
-			flags = O_RDWR | O_NOFOLLOW | O_NONBLOCK
-		}
-		f, err := dir.OpenFile(entry.Name(), flags, 0)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		s, err := f.Stat()
-		if err != nil {
-			return err
-		}
-		return fn(f, s)
-	})
-}
-
 // WalkDir wlkas the directory tree of fsys at path, calling fn for each
 // directory entry.
-func WalkDir(fsys FS, path string, fn func(Directory, fs.DirEntry) error) error {
+func WalkDir(fsys FS, path string, fn fs.WalkDirFunc) error {
 	d, err := OpenDir(fsys, path)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	return walk(d, fn)
+	return walk(d, path, fn)
 }
 
-func walk(dir Directory, fn func(Directory, fs.DirEntry) error) error {
+func walk(dir Directory, dirPath string, fn fs.WalkDirFunc) error {
 	return Scan(dir, func(entry fs.DirEntry) error {
-		if err := fn(dir, entry); err != nil {
-			return err
-		}
+		entryName := entry.Name()
+		entryPath := path.Join(dirPath, entryName)
 		if !entry.IsDir() {
-			return nil
+			return fn(entryPath, entry, nil)
 		}
-		d, err := dir.OpenFile(entry.Name(), O_DIRECTORY, 0)
+		d, err := dir.OpenFile(entryName, O_DIRECTORY, 0)
 		if err != nil {
-			return err
+			err = fn(entryPath, entry, err)
+			return silenceSkipDir(err)
 		}
 		defer d.Close()
-		return walk(d, fn)
+		if err := fn(entryPath, entry, err); err != nil {
+			return silenceSkipDir(err)
+		}
+		if err := walk(d, entryPath, fn); err != nil {
+			return silenceSkipDir(err)
+		}
+		return nil
 	})
+}
+
+func silenceSkipDir(err error) error {
+	if errors.Is(err, fs.SkipDir) {
+		err = nil
+	}
+	return err
 }
 
 func callFile(fsys FS, op, name string, flags int, fn func(File) error) (err error) {
