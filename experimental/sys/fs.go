@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"math/bits"
-	"path"
 	"strings"
 	"time"
 
@@ -865,40 +864,6 @@ func Scan(dir Directory, fn func(fs.DirEntry) error) error {
 			return err
 		}
 	}
-}
-
-// WalkDir wlkas the directory tree of fsys at path, calling fn for each
-// directory entry.
-func WalkDir(fsys FS, path string, fn fs.WalkDirFunc) error {
-	d, err := OpenDir(fsys, path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return walk(d, path, fn)
-}
-
-func walk(dir Directory, dirPath string, fn fs.WalkDirFunc) error {
-	return Scan(dir, func(entry fs.DirEntry) error {
-		entryName := entry.Name()
-		entryPath := path.Join(dirPath, entryName)
-		if !entry.IsDir() {
-			return fn(entryPath, entry, nil)
-		}
-		d, err := dir.OpenFile(entryName, O_DIRECTORY, 0)
-		if err != nil {
-			err = fn(entryPath, entry, err)
-			return silenceSkipDir(err)
-		}
-		defer d.Close()
-		if err := fn(entryPath, entry, err); err != nil {
-			return silenceSkipDir(err)
-		}
-		if err := walk(d, entryPath, fn); err != nil {
-			return silenceSkipDir(err)
-		}
-		return nil
-	})
 }
 
 func silenceSkipDir(err error) error {

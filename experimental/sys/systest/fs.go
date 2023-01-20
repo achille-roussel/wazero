@@ -106,7 +106,7 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 				// recursive pass to reset all the permissions to allow the files
 				// to be cleaned up.
 				tmp := sys.DirFS(filepath.Dir(t.TempDir()))
-				err := sys.WalkDir(tmp, ".",
+				err := fs.WalkDir(tmp, ".",
 					func(path string, entry fs.DirEntry, err error) error {
 						if err != nil {
 							return err
