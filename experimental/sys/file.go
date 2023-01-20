@@ -49,7 +49,10 @@ type File interface {
 // Directory is an interface representing an open directory.
 //
 // Methods accepting a file name perform name resolution relative to the
-// location of the directory on the file system.
+// location of the directory on the file system. Symbolic links are never
+// followed by methods of the Directory interface. If a name refers to a
+// symbolic link, the operation is applied to the link itself instead of the
+// link's target.
 //
 // The file names passed to methods of the Directory interface must be valid
 // accoring to ValidPath. For all invalid names, the methods return ErrNotExist.
@@ -76,6 +79,8 @@ type Directory interface {
 	// Moves a file from oldName to newName. oldName is expressed relative to
 	// the receivers, while newName is expressed relative to newDir.
 	Rename(oldName string, newDir Directory, newName string) error
+	// Sets permissions of a directory entry in the file system.
+	Lchmod(name string, mode fs.FileMode) error
 	// Returns information about a directory entry on the file system.
 	Lstat(name string) (fs.FileInfo, error)
 	// Returns the underlying system file.
@@ -113,7 +118,7 @@ func FileDevice(info fs.FileInfo) Device { return Device(sysinfo.Device(info)) }
 // methods of the underlying file will only be called with valid inputs.
 func NewFile(f File) File {
 	switch f.(type) {
-	case *file[File], *file[readOnlyFile], *file[errRoot], *mountedFile, dirFile, readOnlyFS:
+	case *file[File], *file[readOnlyFile], *file[dirFile], *file[errRoot], *mountedFile, readOnlyFS:
 		return f
 	}
 	return newFile(f)
@@ -469,6 +474,20 @@ func (f *file[T]) Rename(oldName string, newDir Directory, newName string) (err 
 	return err
 }
 
+func (f *file[T]) Lchmod(name string, mode fs.FileMode) (err error) {
+	if f.closed {
+		err = ErrClosed
+	} else if !ValidPath(name) {
+		err = ErrNotExist
+	} else {
+		err = f.base.Lchmod(name, mode)
+	}
+	if err != nil {
+		err = makePathError("chmod", name, err)
+	}
+	return err
+}
+
 func (f *file[T]) Lstat(name string) (info fs.FileInfo, err error) {
 	if f.closed {
 		err = ErrClosed
@@ -478,7 +497,7 @@ func (f *file[T]) Lstat(name string) (info fs.FileInfo, err error) {
 		info, err = f.base.Lstat(name)
 	}
 	if err != nil {
-		err = makePathError("lstat", name, err)
+		err = makePathError("stat", name, err)
 	}
 	return info, err
 }
@@ -547,6 +566,7 @@ func (f errRoot) Unlink(string) error                     { return f.err }
 func (f errRoot) Symlink(string, string) error            { return f.err }
 func (f errRoot) Link(string, Directory, string) error    { return f.err }
 func (f errRoot) Rename(string, Directory, string) error  { return f.err }
+func (f errRoot) Lchmod(string, fs.FileMode) error        { return f.err }
 func (f errRoot) Lstat(string) (fs.FileInfo, error)       { return nil, f.err }
 func (f errRoot) ReadDir(int) ([]fs.DirEntry, error)      { return nil, io.EOF }
 func (f errRoot) Stat() (fs.FileInfo, error)              { return errRootInfo{}, nil }
@@ -573,3 +593,9 @@ func FileFS(base File) FS { return &fileFS{base} }
 type fileFS struct{ File }
 
 func (fsys *fileFS) Open(name string) (fs.File, error) { return Open(fsys, name) }
+
+func closeIfNotNil(f File) {
+	if f != nil {
+		f.Close()
+	}
+}

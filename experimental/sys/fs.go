@@ -13,6 +13,12 @@ import (
 	"github.com/tetratelabs/wazero/experimental/sys/sysinfo"
 )
 
+const (
+	// MaxSymlinkLookups defines the maximum number of symbolic links that might
+	// be followed when resolving paths.
+	MaxSymlinkLookups = 40
+)
+
 // FS is an interface representing file systems.
 //
 // FS is an extension of fs.FS which depending on the underlying backend,
@@ -40,12 +46,12 @@ func NewFS(base fs.FS) FS {
 
 func openFS(fsys fs.FS, name string, flags int, perm fs.FileMode) (File, error) {
 	if !hasReadOnlyFlags(flags) {
-		return nil, ErrReadOnly
+		return nil, ErrPermission
 	}
 	link := name
 	loop := 0
 openFile:
-	if loop++; loop == 40 {
+	if loop++; loop == MaxSymlinkLookups {
 		return nil, ErrLoop
 	}
 	f, err := fsys.Open(link)
@@ -53,12 +59,13 @@ openFile:
 		return nil, err
 	}
 
+	s, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+
 	if hasDirectoryFlags(flags) || !hasNoFollowFlags(flags) {
-		s, err := f.Stat()
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
 		m := s.Mode()
 		t := m.Type()
 
@@ -78,7 +85,7 @@ openFile:
 		}
 	}
 
-	return ReadOnlyFile(&fsFile{file: f, fsys: fsys, name: name}), nil
+	return ReadOnlyFile(&fsFile{file: f, fsys: fsys, name: name, mode: s.Mode()}), nil
 }
 
 func hasReadOnlyFlags(flags int) bool {
@@ -99,9 +106,14 @@ func hasFlags(flags, check int) bool {
 
 type fsFile struct {
 	ReadOnly
+	mode fs.FileMode
 	file fs.File
 	fsys fs.FS
 	name string
+}
+
+func (f *fsFile) canRead() bool {
+	return (f.mode & 0400) != 0
 }
 
 func (f *fsFile) GoString() string {
@@ -113,21 +125,28 @@ func (f *fsFile) Name() string {
 }
 
 func (f *fsFile) Sys() any {
-	if x, ok := f.file.(interface {
-		Sys() any
-	}); ok {
-		return x.Sys()
-	}
 	return f.file
 }
 
-func (f *fsFile) Close() error { return f.file.Close() }
+func (f *fsFile) Close() error {
+	return f.file.Close()
+}
 
-func (f *fsFile) Read(b []byte) (int, error) { return f.file.Read(b) }
+func (f *fsFile) Read(b []byte) (int, error) {
+	if !f.canRead() {
+		return 0, ErrPermission
+	}
+	return f.file.Read(b)
+}
 
-func (f *fsFile) Stat() (fs.FileInfo, error) { return f.file.Stat() }
+func (f *fsFile) Stat() (fs.FileInfo, error) {
+	return f.file.Stat()
+}
 
 func (f *fsFile) ReadAt(b []byte, offset int64) (int, error) {
+	if !f.canRead() {
+		return 0, ErrPermission
+	}
 	if r, ok := f.file.(io.ReaderAt); ok {
 		return r.ReadAt(b, offset)
 	}
@@ -170,21 +189,18 @@ func (f *fsFile) Access(name string, mode fs.FileMode) error {
 		Access(string, fs.FileMode) error
 	}); ok {
 		return d.Access(name, mode)
-	} else if f2, err := f.OpenFile(name, O_RDONLY, 0); err != nil {
-		return err
 	} else {
-		defer f2.Close()
-		if mode == 0 {
-			return nil
-		}
-		stat, err := f2.Stat()
+		stat, err := f.Lstat(name)
 		if err != nil {
 			return err
 		}
-		perm := stat.Mode().Perm() >> 6
-		mask := mode.Perm()
-		if (perm & mask) != mask {
-			return ErrPermission
+		if mode != 0 {
+			perm := (mode & 0b111)
+			perm |= (mode & 0b111) << 3
+			perm |= (mode & 0b111) << 6
+			if (stat.Mode() & perm) == 0 {
+				return ErrPermission
+			}
 		}
 		return nil
 	}
@@ -228,12 +244,6 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 	}
 	f, err := open(name, flags, perm)
 	if err != nil {
-		if name == "." {
-			// The root should always be successfully opened; wrap the
-			// error instead of returning it so it does not invalidation
-			// this expectation.
-			return newFile(errRoot{err}), nil
-		}
 		if _, ok := err.(*fs.PathError); !ok {
 			err = &fs.PathError{Op: "open", Path: name, Err: err}
 		}
@@ -244,7 +254,10 @@ func (open FuncFS) OpenFile(name string, flags int, perm fs.FileMode) (File, err
 
 // ErrFS returns a FS which errors with err on all its method calls.
 func ErrFS(err error) FS {
-	return FuncFS(func(_ string, _ int, _ fs.FileMode) (File, error) {
+	return FuncFS(func(name string, _ int, _ fs.FileMode) (File, error) {
+		if name == "." {
+			return newFile(errRoot{err}), nil
+		}
 		return nil, err
 	})
 }
@@ -315,40 +328,28 @@ func CopyFS(dst, src FS) error {
 }
 
 func copyFS(dst, src File) error {
-	for {
-		entries, err := src.ReadDir(100)
-		for _, entry := range entries {
-			fileInfo, err := entry.Info()
-			if err != nil {
-				return err
-			}
-			fileName := entry.Name()
-			fileType := entry.Type()
-			switch fileType {
-			case fs.ModeDir:
-				err = copyDir(dst, src, fileName, fileInfo)
-			case fs.ModeSymlink:
-				err = copySymlink(dst, src, fileName, fileInfo)
-			case 0: // regular file
-				err = copyFile(dst, src, fileName, fileInfo)
-			default:
-				err = copyNode(dst, src, fileName, fileInfo)
-			}
-			if err != nil {
-				return err
-			}
-		}
+	return Scan(src, func(entry fs.DirEntry) error {
+		fileInfo, err := entry.Info()
 		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
 			return err
 		}
-	}
+		fileName := entry.Name()
+		fileType := entry.Type()
+		switch fileType {
+		case fs.ModeDir:
+			return copyDir(dst, src, fileName, fileInfo)
+		case fs.ModeSymlink:
+			return copySymlink(dst, src, fileName, fileInfo)
+		case 0: // regular file
+			return copyFile(dst, src, fileName, fileInfo)
+		default:
+			return copyNode(dst, src, fileName, fileInfo)
+		}
+	})
 }
 
 func copyDir(dst, src File, name string, stat fs.FileInfo) error {
-	if err := dst.Mkdir(name, stat.Mode()); err != nil {
+	if err := dst.Mkdir(name, 0777); err != nil {
 		return err
 	}
 	r, err := src.OpenFile(name, openFlagsDirectory, 0)
@@ -362,6 +363,9 @@ func copyDir(dst, src File, name string, stat fs.FileInfo) error {
 	}
 	defer w.Close()
 	if err := copyFS(w, r); err != nil {
+		return err
+	}
+	if err := w.Chmod(stat.Mode()); err != nil {
 		return err
 	}
 	return copyTimes(w, stat)
@@ -389,7 +393,7 @@ func copySymlink(dst, src File, name string, stat fs.FileInfo) error {
 }
 
 func copyNode(dst, src File, name string, stat fs.FileInfo) error {
-	if err := dst.Mknod(name, stat.Mode(), 0); err != nil {
+	if err := dst.Mknod(name, 0666, 0); err != nil {
 		return err
 	}
 	if (stat.Mode() & fs.ModeDevice) != 0 {
@@ -409,12 +413,15 @@ func copyFile(dst, src File, name string, stat fs.FileInfo) error {
 		return err
 	}
 	defer r.Close()
-	w, err := dst.OpenFile(name, openFlagsWriteOnly|openFlagsCopy, stat.Mode())
+	w, err := dst.OpenFile(name, openFlagsWriteOnly|openFlagsCopy, 0666)
 	if err != nil {
 		return err
 	}
 	defer w.Close()
 	if _, err := w.ReadFrom(r); err != nil {
+		return err
+	}
+	if err := w.Chmod(stat.Mode()); err != nil {
 		return err
 	}
 	return copyTimes(w, stat)
@@ -452,113 +459,95 @@ func EqualFS(a, b FS) error {
 }
 
 func equalFS(source, target File, buf *[equalFSBufsize]byte) error {
-	for {
-		entries, err := source.ReadDir(100)
-		for _, entry := range entries {
-			fileName := entry.Name()
-			fileType := entry.Type()
-			switch fileType {
-			case fs.ModeDir:
-				err = equalDir(source, target, fileName, buf)
-			case fs.ModeSymlink:
-				err = equalSymlink(source, target, fileName)
-			case 0: // regular
-				err = equalFile(source, target, fileName, buf)
-			default:
-				err = equalNode(source, target, fileName, fileType, buf)
-			}
+	return Scan(source, func(entry fs.DirEntry) error {
+		fileName := entry.Name()
+		fileType := entry.Type()
+		switch fileType {
+		case fs.ModeDir:
+			return equalDir(source, target, fileName, buf)
+		case fs.ModeSymlink:
+			return equalSymlink(source, target, fileName)
+		case 0: // regular
+			return equalFile(source, target, fileName, buf)
+		default:
+			return equalNode(source, target, fileName, fileType, buf)
 		}
-		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
-			return err
+	})
+}
+
+func equalOpenFile(source, target File, name string, flags int, fn func(File, File) error) error {
+	perm, err := equalStat(source, target)
+	if err != nil {
+		return equalErrorf(name, "%w", err)
+	}
+	if (perm & 0400) == 0 {
+		return nil // no permissions to read this file
+	}
+	sourceFile, err1 := source.OpenFile(name, flags, 0)
+	if err1 == nil {
+		defer sourceFile.Close()
+	}
+	targetFile, err2 := target.OpenFile(name, flags, 0)
+	if err2 == nil {
+		defer targetFile.Close()
+	}
+	if err1 != nil || err2 != nil {
+		if !errors.Is(err1, unwrap(err2)) {
+			return fmt.Errorf("file open error mismatch: want=%v got=%v", err1, err2)
 		}
 	}
+	return fn(sourceFile, targetFile)
 }
 
 func equalDir(source, target File, name string, buf *[equalFSBufsize]byte) error {
-	sourceDir, err := source.OpenFile(name, openFlagsDirectory, 0)
-	if err != nil {
-		return err
-	}
-	defer sourceDir.Close()
-	targetDir, err := target.OpenFile(name, openFlagsDirectory, 0)
-	if err != nil {
-		return err
-	}
-	defer targetDir.Close()
-	if err := equalStat(sourceDir, targetDir); err != nil {
-		return equalErrorf(name, "%w", err)
-	}
-	return equalFS(sourceDir, targetDir, buf)
+	return equalOpenFile(source, target, name, openFlagsDirectory,
+		func(sourceDir, targetDir File) error {
+			return equalFS(sourceDir, targetDir, buf)
+		},
+	)
 }
 
 func equalSymlink(source, target File, name string) error {
-	sourceFile, err := source.OpenFile(name, openFlagsSymlink, 0)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-	targetFile, err := target.OpenFile(name, openFlagsSymlink, 0)
-	if err != nil {
-		return err
-	}
-	defer targetFile.Close()
-	sourceLink, err := sourceFile.Readlink()
-	if err != nil {
-		return err
-	}
-	targetLink, err := targetFile.Readlink()
-	if err != nil {
-		return err
-	}
-	if sourceLink != targetLink {
-		return equalErrorf(name, "symbolic links mimatch: want=%q got=%q", sourceLink, targetLink)
-	}
-	return nil
+	return equalOpenFile(source, target, name, openFlagsSymlink,
+		func(sourceFile, targetFile File) error {
+			sourceLink, err := sourceFile.Readlink()
+			if err != nil {
+				return err
+			}
+			targetLink, err := targetFile.Readlink()
+			if err != nil {
+				return err
+			}
+			if sourceLink != targetLink {
+				return equalErrorf(name, "symbolic links mimatch: want=%q got=%q", sourceLink, targetLink)
+			}
+			return nil
+		},
+	)
 }
 
 func equalNode(source, target File, name string, typ fs.FileMode, buf *[equalFSBufsize]byte) error {
-	sourceNode, err := source.OpenFile(name, openFlagsReadOnly|openFlagsNode, 0)
-	if err != nil {
-		return err
-	}
-	defer sourceNode.Close()
-	targetNode, err := target.OpenFile(name, openFlagsReadOnly|openFlagsNode, 0)
-	if err != nil {
-		return err
-	}
-	defer targetNode.Close()
-	if err := equalStat(sourceNode, targetNode); err != nil {
-		return equalErrorf(name, "%w", err)
-	}
-	if (typ & fs.ModeDevice) != 0 {
-		if err := equalData(sourceNode, targetNode, buf); err != nil {
-			return equalErrorf(name, "%w", err)
-		}
-	}
-	return nil
+	return equalOpenFile(source, target, name, openFlagsReadOnly|openFlagsNode,
+		func(sourceNode, targetNode File) error {
+			if (typ & fs.ModeDevice) != 0 {
+				if err := equalData(sourceNode, targetNode, buf); err != nil {
+					return equalErrorf(name, "%w", err)
+				}
+			}
+			return nil
+		},
+	)
 }
 
 func equalFile(source, target File, name string, buf *[equalFSBufsize]byte) error {
-	sourceFile, err := source.OpenFile(name, openFlagsReadOnly|openFlagsFile, 0)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-	targetFile, err := target.OpenFile(name, openFlagsReadOnly|openFlagsFile, 0)
-	if err != nil {
-		return err
-	}
-	defer targetFile.Close()
-	if err := equalStat(sourceFile, targetFile); err != nil {
-		return equalErrorf(name, "%w", err)
-	}
-	if err := equalData(sourceFile, targetFile, buf); err != nil {
-		return equalErrorf(name, "%w", err)
-	}
-	return nil
+	return equalOpenFile(source, target, name, openFlagsReadOnly|openFlagsFile,
+		func(sourceFile, targetFile File) error {
+			if err := equalData(sourceFile, targetFile, buf); err != nil {
+				return equalErrorf(name, "%w", err)
+			}
+			return nil
+		},
+	)
 }
 
 func equalData(source, target File, buf *[equalFSBufsize]byte) error {
@@ -585,21 +574,21 @@ func equalData(source, target File, buf *[equalFSBufsize]byte) error {
 	return nil
 }
 
-func equalStat(source, target File) error {
+func equalStat(source, target File) (fs.FileMode, error) {
 	sourceInfo, err := source.Stat()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	targetInfo, err := target.Stat()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	sourceMode := sourceInfo.Mode()
 	targetMode := targetInfo.Mode()
 	sourceType := sourceMode.Type()
 	targetType := targetMode.Type()
 	if sourceType != targetType {
-		return fmt.Errorf("file types mismatch: want=%s got=%s", sourceType, targetType)
+		return 0, fmt.Errorf("file types mismatch: want=%s got=%s", sourceType, targetType)
 	}
 	sourcePerm := sourceMode.Perm()
 	targetPerm := targetMode.Perm()
@@ -608,27 +597,28 @@ func equalStat(source, target File) error {
 	// just ignore the permissions if either the source or target are zero. This
 	// happens with virtualized directories for fstest.MapFS for example.
 	if sourcePerm != 0 && targetPerm != 0 && sourcePerm != targetPerm {
-		return fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
+		return 0, fmt.Errorf("file modes mismatch: want=%s got=%s", sourceMode, targetMode)
 	}
 	sourceModTime := sysinfo.ModTime(sourceInfo)
 	targetModTime := sysinfo.ModTime(targetInfo)
 	if err := equalTime("modification", sourceModTime, targetModTime); err != nil {
-		return err
+		return 0, err
 	}
 	sourceAccessTime := sysinfo.AccessTime(sourceInfo)
 	targetAccessTime := sysinfo.AccessTime(targetInfo)
 	if err := equalTime("access", sourceAccessTime, targetAccessTime); err != nil {
-		return err
+		return 0, err
 	}
 	// Directory sizes are platform-dependent, there is no need to compare.
 	if !sourceInfo.IsDir() {
 		sourceSize := sourceInfo.Size()
 		targetSize := targetInfo.Size()
 		if sourceSize != targetSize {
-			return fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
+			return 0, fmt.Errorf("files sizes mismatch: want=%d got=%d", sourceSize, targetSize)
 		}
 	}
-	return nil
+	perm := sourcePerm & targetPerm
+	return perm, nil
 }
 
 func equalTime(typ string, source, target time.Time) error {
@@ -648,6 +638,17 @@ func equalErrorf(name, msg string, args ...any) error {
 // If the file does not exist, it is created with mode 0666 (before umask).
 func Create(fsys FS, path string) (File, error) {
 	return fsys.OpenFile(path, openFlagsCreate, 0666)
+}
+
+// Touch touchs a file at path in fsys, creating it if it did not exist, and
+// updating its modification and access time to now.
+func Touch(fsys FS, path string, now time.Time) error {
+	f, err := Create(fsys, path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Chtimes(now, now)
 }
 
 // Open opens a file at the given path in fsys.
@@ -689,8 +690,10 @@ func Readlink(fsys FS, path string) (string, error) {
 // If the path refers to a symbolic link, Chmod dereferences it and modifies the
 // permissions of the link's target.
 func Chmod(fsys FS, path string, mode fs.FileMode) error {
-	return callFile(fsys, "chmod", path, openFlagsChmod, func(file File) error {
-		return file.Chmod(mode)
+	// Chmod is a special case because we might be attempting to modify the
+	// permissions of a file that we do not have permissions to open.
+	return callLookup(fsys, "chmod", path, func(dir Directory, name string) error {
+		return dir.Lchmod(name, mode)
 	})
 }
 
@@ -727,7 +730,7 @@ func Stat(fsys FS, path string) (fs.FileInfo, error) {
 // If the path refers to a symbolic link, Lstat returns information about the
 // link, and not its target.
 func Lstat(fsys FS, path string) (fs.FileInfo, error) {
-	return callFile1(fsys, "lstat", path, openFlagsLstat, File.Stat)
+	return callDir1(fsys, "lstat", path, Directory.Lstat)
 }
 
 // ReadDir reads the list of diretory entries at a path in fsys.
@@ -750,7 +753,7 @@ func WriteFile(fsys FS, path string, data []byte, perm fs.FileMode) error {
 
 // Access tests whether a file at the given path can be accessed.
 func Access(fsys FS, path string, mode fs.FileMode) error {
-	return callDir(fsys, "access", path, func(dir Directory, path string) error {
+	return callLookup(fsys, "access", path, func(dir Directory, path string) error {
 		return dir.Access(path, mode)
 	})
 }
@@ -829,22 +832,19 @@ func RemoveAll(fsys FS, path string) error {
 }
 
 func removeAll(dir Directory, name string) error {
-	d, err := dir.OpenFile(name, O_DIRECTORY, 0)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	if err := Scan(d, func(entry fs.DirEntry) error {
+	err := walk(dir, func(dir Directory, entry fs.DirEntry) error {
 		if entry.IsDir() {
-			return removeAll(d, entry.Name())
+			return dir.Rmdir(entry.Name())
 		}
-		return d.Unlink(entry.Name())
-	}); err != nil {
+		return dir.Unlink(entry.Name())
+	})
+	if err != nil {
 		return err
 	}
 	return dir.Rmdir(name)
 }
 
+// Scan calls fn for each entry in dir.
 func Scan(dir Directory, fn func(fs.DirEntry) error) error {
 	for {
 		entries, err := dir.ReadDir(100)
@@ -862,38 +862,95 @@ func Scan(dir Directory, fn func(fs.DirEntry) error) error {
 	}
 }
 
-func callFile(fsys FS, op, name string, flags int, do func(File) error) (err error) {
+// WalkDirFiles walks the directory tree of fsys at path, calling fn for each
+// file or directory.
+func WalkDirFiles(fsys FS, path string, fn func(File, fs.FileInfo) error) error {
+	return WalkDir(fsys, path, func(dir Directory, entry fs.DirEntry) error {
+		var flags int
+		if entry.IsDir() {
+			flags = O_DIRECTORY
+		} else {
+			flags = O_RDWR | O_NOFOLLOW | O_NONBLOCK
+		}
+		f, err := dir.OpenFile(entry.Name(), flags, 0)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		s, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		return fn(f, s)
+	})
+}
+
+// WalkDir wlkas the directory tree of fsys at path, calling fn for each
+// directory entry.
+func WalkDir(fsys FS, path string, fn func(Directory, fs.DirEntry) error) error {
+	d, err := OpenDir(fsys, path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return walk(d, fn)
+}
+
+func walk(dir Directory, fn func(Directory, fs.DirEntry) error) error {
+	return Scan(dir, func(entry fs.DirEntry) error {
+		if entry.IsDir() {
+			d, err := dir.OpenFile(entry.Name(), O_DIRECTORY, 0)
+			if err != nil {
+				return err
+			}
+			defer d.Close()
+			if err := walk(d, fn); err != nil {
+				return err
+			}
+		}
+		return fn(dir, entry)
+	})
+}
+
+func callFile(fsys FS, op, name string, flags int, fn func(File) error) (err error) {
 	_, err = callFile1(fsys, op, name, flags, func(file File) (struct{}, error) {
-		return struct{}{}, do(file)
+		return struct{}{}, fn(file)
 	})
 	return
 }
 
-func callFile1[Func func(File) (R, error), R any](fsys FS, op, name string, flags int, do Func) (ret R, err error) {
+func callFile1[F func(File) (R, error), R any](fsys FS, op, name string, flags int, fn F) (ret R, err error) {
 	f, err := fsys.OpenFile(name, flags, 0)
 	if err != nil {
 		return ret, makePathError(op, name, err)
 	}
 	defer f.Close()
-	return do(f)
+	return fn(f)
 }
 
-func callDir(fsys FS, op, name string, do func(Directory, string) error) error {
+func callDir(fsys FS, op, name string, fn func(Directory, string) error) error {
+	_, err := callDir1(fsys, op, name, func(dir Directory, name string) (struct{}, error) {
+		return struct{}{}, fn(dir, name)
+	})
+	return err
+}
+
+func callDir1[F func(Directory, string) (R, error), R any](fsys FS, op, name string, fn F) (ret R, err error) {
 	dir, base := SplitPath(name)
 	d, err := OpenDir(fsys, dir)
 	if err != nil {
-		return makePathError(op, name, err)
+		return ret, makePathError(op, name, err)
 	}
 	defer d.Close()
-	return do(d, base)
+	return fn(d, base)
 }
 
-func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
-	dir1, base1 := SplitPath(name1)
-	dir2, base2 := SplitPath(name2)
+func callDir2(fsys FS, op, path1, path2 string, fn func(Directory, string, Directory, string) error) error {
+	dir1, base1 := SplitPath(path1)
+	dir2, base2 := SplitPath(path2)
 	d1, err := OpenDir(fsys, dir1)
 	if err != nil {
-		return makePathError(op, name1, err)
+		return makePathError(op, path1, err)
 	}
 	defer d1.Close()
 	d2, err := OpenDir(fsys, dir2)
@@ -901,10 +958,70 @@ func callDir2(fsys FS, op, name1, name2 string, do func(Directory, string, Direc
 		if errors.Is(err, ErrNotExist) && !ValidPath(dir2) {
 			err = ErrInvalid
 		}
-		return makePathError(op, name2, err)
+		return makePathError(op, path2, err)
 	}
 	defer d2.Close()
-	return do(d1, base1, d2, base2)
+	return fn(d1, base1, d2, base2)
+}
+
+func callLookup(fsys FS, op, path string, fn func(Directory, string) error) error {
+	return callDir(fsys, op, path, func(dir Directory, name string) error {
+		var lastOpenDir File
+		defer func() { closeIfNotNil(lastOpenDir) }()
+
+		for loop := 0; loop < MaxSymlinkLookups; loop++ {
+			stat, err := dir.Lstat(name)
+			if err != nil {
+				return err
+			}
+			if stat.Mode().Type() != fs.ModeSymlink {
+				err := fn(dir, name)
+				if err == nil || !errors.Is(err, ErrLoop) {
+					// The directory operation will not apply to a symbolic link
+					// so ErrLoop at this stage indicate that the entry was
+					// changed to a symbolic link since the call to Lstat and we
+					// can continue below with the link resolution.
+					return err
+				}
+			}
+			link, err := symlink(dir, name)
+			if err != nil {
+				if errors.Is(err, ErrInvalid) && ValidPath(name) {
+					// The file was changed to not be a symbolic link anymore.
+					// We can assume that we had not seen it and instead attempt
+					// to change permissions on the current file.
+					// Technically we have not followed any links in this loop
+					// iteration so we mask the loop count increment.
+					loop--
+					continue
+				}
+				return err
+			}
+			open := dir.OpenFile
+			if link = CleanPath(link); strings.HasPrefix(link, "/") {
+				link = link[1:]
+				open = fsys.OpenFile
+			}
+			parent, target := SplitPath(link)
+			d, err := open(parent, openFlagsDirectory, 0)
+			if err != nil {
+				return err
+			}
+			closeIfNotNil(lastOpenDir)
+			lastOpenDir, dir, name = d, d, target
+		}
+
+		return ErrLoop
+	})
+}
+
+func symlink(dir Directory, name string) (string, error) {
+	f, err := dir.OpenFile(name, openFlagsSymlink, 0)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return f.Readlink()
 }
 
 // OpenFlags is a bitset representing the system-dependent combination of flags

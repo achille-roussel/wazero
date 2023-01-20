@@ -60,9 +60,9 @@ func TestReadOnlyFS(t *testing.T, makeFS MakeFS) {
 
 var testReadOnlyOpenFile = append(testValidateOpenFile,
 	fsTestCase{
-		name: "opening a file with O_APPEND fails with ErrReadOnly",
+		name: "opening a file with O_APPEND fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
+		err:  sys.ErrPermission,
 		test: func(fsys sys.FS) error {
 			_, err := fsys.OpenFile("test", sys.O_APPEND, 0)
 			return err
@@ -70,9 +70,9 @@ var testReadOnlyOpenFile = append(testValidateOpenFile,
 	},
 
 	fsTestCase{
-		name: "opening a file with O_CREATE fails with ErrReadOnly",
+		name: "opening a file with O_CREATE fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
+		err:  sys.ErrPermission,
 		test: func(fsys sys.FS) error {
 			_, err := fsys.OpenFile("test", sys.O_CREATE, 0)
 			return err
@@ -80,9 +80,9 @@ var testReadOnlyOpenFile = append(testValidateOpenFile,
 	},
 
 	fsTestCase{
-		name: "opening a file with O_TRUNC fails with ErrReadOnly",
+		name: "opening a file with O_TRUNC fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
+		err:  sys.ErrPermission,
 		test: func(fsys sys.FS) error {
 			_, err := fsys.OpenFile("test", sys.O_TRUNC, 0)
 			return err
@@ -90,9 +90,9 @@ var testReadOnlyOpenFile = append(testValidateOpenFile,
 	},
 
 	fsTestCase{
-		name: "opening a file with O_WRONLY fails with ErrReadOnly",
+		name: "opening a file with O_WRONLY fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
+		err:  sys.ErrPermission,
 		test: func(fsys sys.FS) error {
 			_, err := fsys.OpenFile("test", sys.O_WRONLY, 0)
 			return err
@@ -178,9 +178,9 @@ var testReadOnlyChmod = append(testValidateChmod,
 
 var testReadOnlyChtimes = append(testValidateChtimes,
 	fsTestCase{
-		name: "changing a file times fails with ErrReadOnly",
+		name: "changing a file times fails with ErrPermission",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
+		err:  sys.ErrPermission,
 		test: func(fsys sys.FS) error { return sys.Chtimes(fsys, "test", epoch, epoch) },
 	},
 )
@@ -189,7 +189,7 @@ var testReadOnlyTruncate = append(testValidateTruncate,
 	fsTestCase{
 		name: "truncating a file fails with ErrReadOnly",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
-		err:  sys.ErrReadOnly,
+		err:  sys.ErrPermission,
 		test: func(fsys sys.FS) error { return sys.Truncate(fsys, "test", 0) },
 	},
 )

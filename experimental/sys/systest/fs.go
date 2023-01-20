@@ -3,6 +3,7 @@ package systest
 import (
 	"errors"
 	"io/fs"
+	"path/filepath"
 	"sort"
 	"testing"
 	"testing/fstest"
@@ -99,6 +100,25 @@ func (suite fsTestSuite) run(t *testing.T, makeFS MakeFS) {
 
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
+			defer func() {
+				// Some tests will modify write permissions of some directories
+				// and files, which may prevent them from being deleted. We do a
+				// recursive pass to reset all the permissions to allow the files
+				// to be cleaned up.
+				tmp := filepath.Dir(t.TempDir())
+				err := sys.WalkDirFiles(sys.DirFS(tmp), ".",
+					func(file sys.File, info fs.FileInfo) error {
+						if info.IsDir() {
+							return file.Chmod(0755)
+						}
+						return file.Chmod(0644)
+					},
+				)
+				if err != nil {
+					t.Log("cleanup:", err)
+				}
+			}()
+
 			test := tests[name]
 			base := test.base
 			if base == nil {
@@ -147,3 +167,56 @@ func fsTestRun(t *testing.T, makeFS MakeFS, groups []fsTestGroup) {
 		group.run(t, makeFS)
 	}
 }
+
+/*
+func touch(path string) func(sys.FS) error {
+	return func(fsys sys.FS) error {
+		return sys.Touch(fsys, path, time.Now())
+	}
+}
+
+func chmod(path string, mode fs.FileMode) func(sys.FS) error {
+	return func(fsys sys.FS) error {
+		return sys.Chmod(fsys, path, mode)
+	}
+}
+
+func read(path, want string) func(sys.FS) error {
+	return func(fsys sys.FS) error {
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		if string(data) != want {
+			return fmt.Errorf("read %s: file content mismatch: want=%q got=%q", path, want, data)
+		}
+		return nil
+	}
+}
+
+func write(path, data string, mode fs.FileMode) func(sys.FS) error {
+	return func(fsys sys.FS) error {
+		return sys.WriteFile(fsys, path, []byte(data), mode)
+	}
+}
+
+func expect(want error, cmd func(sys.FS) error) func(sys.FS) error {
+	return func(fsys sys.FS) error {
+		if err := cmd(fsys); !errors.Is(err, want) {
+			return err
+		}
+		return nil
+	}
+}
+
+func commands(cmds ...func(sys.FS) error) func(sys.FS) error {
+	return func(fsys sys.FS) error {
+		for _, cmd := range cmds {
+			if err := cmd(fsys); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+*/

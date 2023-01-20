@@ -33,10 +33,10 @@ const (
 	O_DSYNC = syscall.O_SYNC
 	O_RSYNC = syscall.O_SYNC
 
-	F_OK = 0
-	X_OK = 1
-	W_OK = 2
-	R_OK = 4
+	F_OK fs.FileMode = 0
+	X_OK fs.FileMode = 1
+	W_OK fs.FileMode = 2
+	R_OK fs.FileMode = 4
 
 	__AT_FDCWD          = -2
 	__AT_SYMLINK_FOLLOW = 0x0040
@@ -63,13 +63,12 @@ const (
 	openFlagsSymlink   = O_SYMLINK | O_NOFOLLOW
 	openFlagsReadlink  = O_SYMLINK | O_NOFOLLOW
 	openFlagsFile      = O_NONBLOCK | O_NOFOLLOW
-	openFlagsChmod     = O_RDONLY | O_NONBLOCK
-	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
+	openFlagsChtimes   = O_WRONLY | O_NONBLOCK
 	openFlagsTruncate  = O_WRONLY | O_NONBLOCK
 	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 	openFlagsStat      = O_RDONLY | O_NONBLOCK
 	openFlagsReadDir   = O_DIRECTORY
-	openFlagsWriteFile = O_CREATE | O_NOFOLLOW | O_TRUNC | O_WRONLY
+	openFlagsWriteFile = O_CREATE | O_TRUNC | O_WRONLY
 	openFlagsNoFollow  = O_NOFOLLOW
 	openFlagsPath      = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 

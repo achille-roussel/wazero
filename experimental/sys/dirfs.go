@@ -42,7 +42,7 @@ func (path dirFS) openFile(name string, flags int, perm fs.FileMode) (File, erro
 	if err != nil {
 		return nil, err
 	}
-	return dirFile{osFile}, nil
+	return newFile(dirFile{osFile}), nil
 }
 
 type dirFile struct{ *os.File }
@@ -59,7 +59,7 @@ func (f dirFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error
 	if err != nil {
 		return nil, err
 	}
-	return dirFile{osFile}, nil
+	return newFile(dirFile{osFile}), nil
 }
 
 func (f dirFile) ReadDir(n int) ([]fs.DirEntry, error) {

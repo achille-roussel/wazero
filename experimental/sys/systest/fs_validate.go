@@ -184,6 +184,16 @@ var testValidateAccess = fsTestSuite{
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0700}},
 		test: func(fsys sys.FS) error { return sys.Access(fsys, "test", sys.R_OK) },
 	},
+
+	{
+		name: "accessing a symbolic link checks access of the link target",
+		base: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0400},
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Access(fsys, "link", sys.W_OK) },
+	},
 }
 
 var testValidateMknod = fsTestSuite{
@@ -224,6 +234,7 @@ var testValidateLink = fsTestSuite{
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error { return sys.Link(fsys, "/", "new") },
 	},
+
 	{
 		name: "linking a file with an invalid target name fails with ErrInvalid",
 		err:  sys.ErrInvalid,
@@ -248,16 +259,37 @@ var testValidateReadlink = fsTestSuite{
 			return err
 		},
 	},
+
+	{
+		name: "reading a symbolic link at a location where a file exists fails with ErrInvalid",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
+		err:  sys.ErrInvalid,
+		test: func(fsys sys.FS) error {
+			_, err := sys.Readlink(fsys, "test")
+			return err
+		},
+	},
+
+	{
+		name: "reading a symbolic link at a location where a directory exists fails with ErrInvalid",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
+		err:  sys.ErrInvalid,
+		test: func(fsys sys.FS) error {
+			_, err := sys.Readlink(fsys, "test")
+			return err
+		},
+	},
 }
 
 var testValidateRename = fsTestSuite{
 	{
-		name: "renaming a file with an invalid source name fails with ErrNotExist",
+		name: "moving a file with an invalid source name fails with ErrNotExist",
 		err:  sys.ErrNotExist,
 		test: func(fsys sys.FS) error { return sys.Rename(fsys, "/", "new") },
 	},
+
 	{
-		name: "renaming a file with an invalid target name fails with ErrInvalid",
+		name: "moving a file with an invalid target name fails with ErrInvalid",
 		err:  sys.ErrInvalid,
 		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "/") },
 	},
@@ -501,6 +533,17 @@ var testValidateFileRead = fsTestSuite{
 	},
 
 	{
+		name: "reading a file which does not have read permissions fails with ErrPermission",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0200}},
+		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0200}},
+		err:  sys.ErrPermission,
+		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
+			_, err := f.Read(make([]byte, 1))
+			return err
+		}),
+	},
+
+	{
 		name: "reading a file returns its content",
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644, Data: []byte("hello")}},
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
@@ -523,6 +566,17 @@ var testValidateFileWrite = fsTestSuite{
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		err:  sys.ErrPermission,
 		test: testOpenFile("test", sys.O_RDONLY, 0, func(f sys.File) error {
+			_, err := f.Write(make([]byte, 1))
+			return err
+		}),
+	},
+
+	{
+		name: "writing a file which does not have write permissions fails with ErrPermission",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0400}},
+		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0400}},
+		err:  sys.ErrPermission,
+		test: testOpenFile("test", sys.O_WRONLY, 0, func(f sys.File) error {
 			_, err := f.Write(make([]byte, 1))
 			return err
 		}),

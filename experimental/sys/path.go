@@ -76,9 +76,9 @@ func ValidPath(name string) bool {
 }
 
 // WalkPath walks through the path components of path, as if the path was
-// resolved from the given base path, calling do for each path component.
+// resolved from the given base path, calling fn for each path component.
 //
-// If path contains leading lookups to parent directories, do is called with
+// If path contains leading lookups to parent directories, fn is called with
 // the string ".." for each parent lookup up to consuming all parent lookups
 // reaching the root of the base path.
 //
@@ -91,7 +91,7 @@ func ValidPath(name string) bool {
 // The path must be a valid input to ValidPath.
 //
 // The function panics if base or path are invalid.
-func WalkPath(base, path string, do func(string) error) (newBase, newPath string, err error) {
+func WalkPath(base, path string, fn func(string) error) (newBase, newPath string, err error) {
 	if !fs.ValidPath(base) {
 		panic("cannot walk path from invalid base: " + base)
 	}
@@ -105,7 +105,7 @@ func WalkPath(base, path string, do func(string) error) (newBase, newPath string
 			continue
 		}
 		base, _ = SplitPath(base)
-		if err := do(".."); err != nil {
+		if err := fn(".."); err != nil {
 			if path == "" {
 				path = "."
 			}
@@ -125,7 +125,7 @@ func WalkPath(base, path string, do func(string) error) (newBase, newPath string
 		}
 		name := path[i : i+j]
 		i += j + 1
-		if err = do(name); err != nil {
+		if err = fn(name); err != nil {
 			break
 		}
 	}

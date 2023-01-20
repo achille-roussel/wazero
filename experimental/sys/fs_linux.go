@@ -36,10 +36,10 @@ const (
 	O_PATH    = 010000000
 	O_TMPFILE = 020000000
 
-	F_OK = 0
-	X_OK = 1
-	W_OK = 2
-	R_OK = 4
+	F_OK fs.FileMode = 0
+	X_OK fs.FileMode = 1
+	W_OK fs.FileMode = 2
+	R_OK fs.FileMode = 4
 
 	__AT_FDCWD            = -100
 	__AT_SYMLINK_NOFOLLOW = 0x100
@@ -57,8 +57,7 @@ const (
 	openFlagsSymlink   = O_NOFOLLOW | O_PATH
 	openFlagsReadlink  = O_NOFOLLOW | O_PATH
 	openFlagsFile      = O_NOFOLLOW | O_NONBLOCK
-	openFlagsChmod     = O_RDONLY | O_NONBLOCK
-	openFlagsChtimes   = O_RDONLY | O_NONBLOCK
+	openFlagsChtimes   = O_WRONLY | O_NONBLOCK
 	openFlagsTruncate  = O_WRONLY | O_NONBLOCK
 	openFlagsLstat     = O_RDONLY | O_NONBLOCK | O_NOFOLLOW
 	openFlagsStat      = O_RDONLY | O_NONBLOCK
@@ -324,4 +323,9 @@ func fstatat(dirfd int, path string, stat *syscall.Stat_t, flags int) error {
 		return e
 	}
 	return nil
+}
+
+func fchmodat(dirfd int, path string, perm uint32, flags int) error {
+	// BUG: linux does not support AT_SYMLINK_NOFOLLOW
+	return syscall.Fchmodat(dirfd, path, perm, 0)
 }

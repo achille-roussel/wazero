@@ -207,6 +207,12 @@ func (f *sandboxedFile) Close() error {
 	return f.File.Close()
 }
 
+func (f *sandboxedFile) Access(name string, mode fs.FileMode) error {
+	return lookupDir(f, "access", name, func(dir Directory, name string) error {
+		return dir.Access(name, mode)
+	})
+}
+
 func (f *sandboxedFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	newFile, err := f.openFile(name, flags, perm)
 	if err != nil {
@@ -246,11 +252,21 @@ func (f *sandboxedFile) Symlink(oldName, newName string) error {
 }
 
 func (f *sandboxedFile) Link(oldName string, newDir Directory, newName string) error {
-	return lookupDir2(f, "link", oldName, newName, Directory.Link)
+	return lookupDir2(f, newDir, "link", oldName, newName, Directory.Link)
 }
 
 func (f *sandboxedFile) Rename(oldName string, newDir Directory, newName string) error {
-	return lookupDir2(f, "rename", oldName, newName, Directory.Rename)
+	return lookupDir2(f, newDir, "rename", oldName, newName, Directory.Rename)
+}
+
+func (f *sandboxedFile) Lchmod(name string, mode fs.FileMode) error {
+	return lookupDir(f, "chmod", name, func(dir Directory, name string) error {
+		return dir.Lchmod(name, mode)
+	})
+}
+
+func (f *sandboxedFile) Lstat(name string) (fs.FileInfo, error) {
+	return lookupDir1(f, "stat", name, Directory.Lstat)
 }
 
 type nopClose struct{ File }
@@ -297,7 +313,7 @@ func lookup(root, dir File, base, path string, flags int, perm fs.FileMode) (Fil
 	var loop int
 	var err error
 resolvePath:
-	if loop++; loop == 40 {
+	if loop++; loop == MaxSymlinkLookups {
 		return nil, ErrLoop
 	}
 
@@ -306,11 +322,7 @@ resolvePath:
 		if err != nil {
 			return err
 		}
-		defer func() {
-			if f != nil {
-				f.Close()
-			}
-		}()
+		defer func() { closeIfNotNil(f) }()
 
 		s, err := f.Stat()
 		if err != nil {
@@ -361,44 +373,52 @@ resolvePath:
 		return nil, err
 	}
 
-	s, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, err
-	}
-
-	if !hasNoFollowFlags(flags) && s.Mode().Type() == fs.ModeSymlink {
-		s, err := f.Readlink()
-		f.Close()
+	if !hasDirectoryFlags(flags) && !hasNoFollowFlags(flags) {
+		stat, err := f.Stat()
 		if err != nil {
+			f.Close()
 			return nil, err
 		}
-		path = ""
-		if err := setSymbolicLink(s); err != nil {
-			return nil, err
+		if stat.Mode().Type() == fs.ModeSymlink {
+			link, err := f.Readlink()
+			f.Close()
+			if err != nil {
+				return nil, err
+			}
+			path = ""
+			if err := setSymbolicLink(link); err != nil {
+				return nil, err
+			}
+			goto resolvePath
 		}
-		goto resolvePath
 	}
 
 	return f, nil
 }
 
-func lookupDir(f *sandboxedFile, op, name string, do func(Directory, string) error) error {
+func lookupDir(f *sandboxedFile, op, name string, fn func(Directory, string) error) error {
+	_, err := lookupDir1(f, op, name, func(d Directory, name string) (struct{}, error) {
+		return struct{}{}, fn(d, name)
+	})
+	return err
+}
+
+func lookupDir1[F func(Directory, string) (R, error), R any](f *sandboxedFile, op, name string, fn F) (ret R, err error) {
 	dir, base := SplitPath(name)
 	if dir == "." {
-		return do(f.File, base)
+		return fn(f.File, base)
 	}
 	d, err := f.openFile(dir, openFlagsDirectory, 0)
 	if err != nil {
-		return err
+		return ret, err
 	}
 	defer d.Close()
-	return do(d, base)
+	return fn(d, base)
 }
 
-func lookupDir2(f *sandboxedFile, op, name1, name2 string, do func(Directory, string, Directory, string) error) error {
+func lookupDir2(f *sandboxedFile, d Directory, op, name1, name2 string, fn func(Directory, string, Directory, string) error) error {
 	arg1 := Directory(f.File)
-	arg2 := Directory(f.File)
+	arg2 := d
 	dir1, base1 := SplitPath(name1)
 	dir2, base2 := SplitPath(name2)
 	if dir1 != "." {
@@ -417,5 +437,5 @@ func lookupDir2(f *sandboxedFile, op, name1, name2 string, do func(Directory, st
 		defer d2.Close()
 		arg2 = d2
 	}
-	return do(arg1, base1, arg2, base2)
+	return fn(arg1, base1, arg2, base2)
 }

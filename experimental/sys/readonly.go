@@ -24,7 +24,7 @@ func (r readOnlyFS) OpenFile(name string, flags int, perm fs.FileMode) (File, er
 
 func openReadOnlyFile(open openFileFunc, name string, flags int, perm fs.FileMode) (File, error) {
 	if !hasReadOnlyFlags(flags) {
-		return nil, ErrReadOnly
+		return nil, ErrPermission
 	}
 	f, err := open(name, flags, perm)
 	if err != nil {
@@ -109,7 +109,7 @@ func (f readOnlyFile) Access(name string, mode fs.FileMode) error {
 
 func (f readOnlyFile) OpenFile(name string, flags int, perm fs.FileMode) (File, error) {
 	if !hasReadOnlyFlags(flags) {
-		return nil, ErrReadOnly
+		return nil, ErrPermission
 	}
 	file, err := f.file.OpenFile(name, flags, perm)
 	if err != nil {
@@ -187,5 +187,9 @@ func (ReadOnly) Link(string, Directory, string) error {
 }
 
 func (ReadOnly) Rename(string, Directory, string) error {
+	return ErrReadOnly
+}
+
+func (ReadOnly) Lchmod(string, fs.FileMode) error {
 	return ErrReadOnly
 }

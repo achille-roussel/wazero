@@ -1,6 +1,7 @@
 package sysinfo
 
 import (
+	"fmt"
 	"io/fs"
 	"syscall"
 	"time"
@@ -15,24 +16,32 @@ type fileInfo struct {
 	stat syscall.Stat_t
 }
 
+func (info *fileInfo) String() string {
+	mode := info.Mode()
+	size := info.Size()
+	mtime := info.ModTime().Format("Jan _2 15:04")
+	nlink := statNlink(&info.stat)
+	return fmt.Sprintf("%s %d %d %s %s", mode, nlink, size, mtime, info.name)
+}
+
 func (info *fileInfo) Name() string {
 	return info.name
 }
 
 func (info *fileInfo) Mode() fs.FileMode {
 	mode := fs.FileMode(info.stat.Mode).Perm()
-	switch {
-	case (info.stat.Mode & syscall.S_IFBLK) != 0:
+	switch info.stat.Mode & syscall.S_IFMT {
+	case syscall.S_IFBLK:
 		mode |= fs.ModeDevice
-	case (info.stat.Mode & syscall.S_IFCHR) != 0:
+	case syscall.S_IFCHR:
 		mode |= fs.ModeDevice | fs.ModeCharDevice
-	case (info.stat.Mode & syscall.S_IFDIR) != 0:
+	case syscall.S_IFDIR:
 		mode |= fs.ModeDir
-	case (info.stat.Mode & syscall.S_IFIFO) != 0:
+	case syscall.S_IFIFO:
 		mode |= fs.ModeNamedPipe
-	case (info.stat.Mode & syscall.S_IFLNK) != 0:
+	case syscall.S_IFLNK:
 		mode |= fs.ModeSymlink
-	case (info.stat.Mode & syscall.S_IFSOCK) != 0:
+	case syscall.S_IFSOCK:
 		mode |= fs.ModeSocket
 	}
 	if (info.stat.Mode & syscall.S_ISGID) != 0 {

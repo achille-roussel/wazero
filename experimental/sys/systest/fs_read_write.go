@@ -332,6 +332,20 @@ var testReadWriteRmdir = append(testValidateRmdir,
 		},
 		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "top/sub") },
 	},
+
+	fsTestCase{
+		name: "removing from a directory with no write permission fails with ErrPermission",
+		base: fstest.MapFS{
+			"dir1":      &fstest.MapFile{Mode: 0500 | fs.ModeDir},
+			"dir1/dir2": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+		},
+		want: fstest.MapFS{
+			"dir":       &fstest.MapFile{Mode: 0500 | fs.ModeDir},
+			"dir1/dir2": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+		},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Rmdir(fsys, "dir1/dir2") },
+	},
 )
 
 var testReadWriteUnlink = append(testValidateUnlink,
@@ -369,6 +383,20 @@ var testReadWriteUnlink = append(testValidateUnlink,
 			"file-3": &fstest.MapFile{Mode: 0644, Data: []byte("3")},
 		},
 		test: func(fsys sys.FS) error { return sys.Unlink(fsys, "file-2") },
+	},
+
+	fsTestCase{
+		name: "unlinking a file within a directory with no write permission fails with ErrPermission",
+		base: fstest.MapFS{
+			"dir":      &fstest.MapFile{Mode: 0500 | fs.ModeDir},
+			"dir/file": &fstest.MapFile{Mode: 0644},
+		},
+		want: fstest.MapFS{
+			"dir":      &fstest.MapFile{Mode: 0500 | fs.ModeDir},
+			"dir/file": &fstest.MapFile{Mode: 0644},
+		},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Unlink(fsys, "dir/file") },
 	},
 )
 
@@ -430,6 +458,20 @@ var testReadWriteLink = append(testValidateLink,
 		want: fstest.MapFS{
 			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
 			"target": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+		},
+		err:  sys.ErrExist,
+		test: func(fsys sys.FS) error { return sys.Link(fsys, "source", "target") },
+	},
+
+	fsTestCase{
+		name: "linking a file to a location where a symbolic link already exists fails with ErrExist",
+		base: fstest.MapFS{
+			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
+			"target": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("foo")},
+		},
+		want: fstest.MapFS{
+			"source": &fstest.MapFile{Mode: 0644, Data: []byte("1")},
+			"target": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("foo")},
 		},
 		err:  sys.ErrExist,
 		test: func(fsys sys.FS) error { return sys.Link(fsys, "source", "target") },
@@ -700,6 +742,31 @@ var testReadWriteRename = append(testValidateRename,
 	},
 
 	fsTestCase{
+		name: "files can be moved within a directory",
+		base: fstest.MapFS{
+			"old": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
+			"foo": &fstest.MapFile{Mode: 0644, Data: []byte("world")},
+		},
+		want: fstest.MapFS{
+			"new": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
+			"foo": &fstest.MapFile{Mode: 0644, Data: []byte("world")},
+		},
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "new") },
+	},
+
+	fsTestCase{
+		name: "files can be moved between directories",
+		base: fstest.MapFS{
+			"old": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
+			"dir": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+		},
+		want: fstest.MapFS{
+			"dir/new": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
+		},
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "dir/new") },
+	},
+
+	fsTestCase{
 		name: "moving a file to a location where a directory already exists fails with ErrExist",
 		base: fstest.MapFS{
 			"old": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
@@ -711,6 +778,40 @@ var testReadWriteRename = append(testValidateRename,
 		},
 		err:  sys.ErrExist,
 		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "new") },
+	},
+
+	fsTestCase{
+		name: "moving a file to a location where a symbolic link already exists unlinks it",
+		base: fstest.MapFS{
+			"foo": &fstest.MapFile{Mode: 0644},
+			"old": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
+			"new": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("foo")},
+		},
+		want: fstest.MapFS{
+			"foo": &fstest.MapFile{Mode: 0644},
+			"old": &fstest.MapFile{Mode: 0644, Data: []byte("hello")},
+		},
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "new") },
+	},
+
+	fsTestCase{
+		name: "moving a file from a directory without write permissions fails with ErrPermission",
+		base: fstest.MapFS{
+			"dir":     &fstest.MapFile{Mode: 0500 | fs.ModeDir},
+			"dir/old": &fstest.MapFile{Mode: 0644},
+		},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "dir/old", "new") },
+	},
+
+	fsTestCase{
+		name: "moving a file to a directory without write permissions fails with ErrPermission",
+		base: fstest.MapFS{
+			"dir": &fstest.MapFile{Mode: 0500 | fs.ModeDir},
+			"old": &fstest.MapFile{Mode: 0644},
+		},
+		err:  sys.ErrPermission,
+		test: func(fsys sys.FS) error { return sys.Rename(fsys, "old", "dir/new") },
 	},
 )
 
@@ -734,6 +835,39 @@ var testReadWriteChmod = append(testValidateChmod,
 		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0644}},
 		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0600}},
 		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "test", 0600) },
+	},
+
+	fsTestCase{
+		name: "changing file permissions of an existing directory",
+		base: fstest.MapFS{"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir}},
+		want: fstest.MapFS{"test": &fstest.MapFile{Mode: 0700}},
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "test", 0700) },
+	},
+
+	fsTestCase{
+		name: "changing permissions of a symbolic link applies the changes to the target file",
+		base: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0644 | fs.ModeDir},
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		want: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0600},
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "link", 0600) },
+	},
+
+	fsTestCase{
+		name: "changing permissions of a symbolic link applies the changes to the target directory",
+		base: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0755 | fs.ModeDir},
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		want: fstest.MapFS{
+			"test": &fstest.MapFile{Mode: 0700},
+			"link": &fstest.MapFile{Mode: 0777 | fs.ModeSymlink, Data: []byte("test")},
+		},
+		test: func(fsys sys.FS) error { return sys.Chmod(fsys, "link", 0700) },
 	},
 )
 
