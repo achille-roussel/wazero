@@ -1575,3 +1575,69 @@ In lieu of formal documentation, we infer this pattern works from other sources 
 See https://github.com/golang/go/blob/go1.24.0/src/sync/waitgroup.go#L76
 See https://github.com/golang/go/issues/5045#issuecomment-252730563
 See https://www.youtube.com/watch?v=VmrEG-3bWyM
+
+## WebAssembly GC heap representation
+
+The wasm-gc proposal (part of Wasm 3.0) introduces managed `struct` and
+`array` objects whose lifetime is determined by the runtime, not by the
+guest's manual frees. Every Wasm runtime that ships GC has to decide who
+allocates and reclaims these objects.
+
+Two viable strategies for a Go-hosted runtime:
+
+**Option A — Piggyback on Go's GC.** Represent a `struct` instance as
+`*WasmStruct` (a Go-allocated header) and an `array` as `*WasmArray`,
+both backed by Go-managed memory. Field storage is `[]any`, with ref
+fields holding live Go pointers. Reachability tracing — and therefore
+reclamation — is Go's runtime's job. Cycles are handled for free
+because Go's collector is precise and tracing.
+
+**Option B — Custom arena + mark-sweep collector.** Allocate from a
+per-store `[]byte` arena; refs are 32-bit indices into a parallel object
+table. Run mark-sweep at allocation pressure. Stack-map roots come from
+the interpreter (which already knows the operand-stack type at every
+point).
+
+We have chosen **Option A** for the interpreter for these reasons:
+
+1. **Correctness first.** Option B requires implementing a real GC,
+   including write barriers for `array.copy`, cycle handling, and a
+   stop-the-world mechanism — every one of which is a place for the
+   collector to be subtly wrong. Option A inherits Go's already
+   battle-tested collector.
+2. **Simpler integration with refs that escape into Go.** A ref placed
+   into a Go-side table (or stored in a host function's local) just
+   works: it's a real Go pointer and stays live as long as Go holds it.
+   With Option B, references that escape have to be wrapped in handles
+   to keep the in-arena object pinned.
+3. **No stack-map work.** The interpreter's operand stack is a
+   `[]uint64`; refs in this representation are `unsafe.Pointer` /
+   `uintptr` values that Go's GC cannot see. To make Option A work the
+   interpreter will gain a parallel `[]any` ref stack indexed in
+   lockstep with the value stack. This is mechanical to add and keeps
+   Go's GC seeing all live refs without any heap walking on our part.
+4. **i31 cost.** Both options have to box `i31` somehow. With Option A
+   we use a small heap-allocated `i31Ref` struct; the cost is one
+   small allocation per `ref.i31`. A future optimisation can use a
+   tagged `uintptr`, but only after the ref-stack approach is in
+   place — Go's runtime forbids non-pointer bit patterns in pointer-
+   typed fields, so the tagging has to use a dedicated path.
+
+The downside of Option A is per-field interface-header overhead (16
+bytes per `any` on 64-bit). For a struct with all-numeric fields this
+is several times the footprint of the equivalent packed C struct. We
+accept this in the first cut because:
+
+- The interpreter is the only execution engine that will run wasm-gc
+  modules on this branch — production workloads that need maximal
+  throughput should use a runtime with a real JIT (which is a separate
+  Phase, not blocking GC correctness).
+- Profiling the first real wasm-gc workload (Kotlin/Wasm, Dart/Flutter,
+  J2Wasm, Hoot, etc.) will tell us whether GC pressure is the
+  bottleneck before we invest in a custom arena.
+
+The optimising compiler (`wazevo`) does not yet support wasm-gc and
+returns an explicit error rather than miscompile such modules; when GC
+support comes to `wazevo` we will revisit the strategy in light of the
+constraints native code generation imposes (stack maps, register
+pressure, write barriers).
