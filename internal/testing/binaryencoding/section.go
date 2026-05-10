@@ -16,11 +16,40 @@ func encodeSection(sectionID wasm.SectionID, contents []byte) []byte {
 //
 // See EncodeFunctionType
 // See https://www.w3.org/TR/2019/REC-wasm-core-1-20191205/#type-section%E2%91%A0
+// encodeTypeSection encodes a wasm.SectionIDType for the given types,
+// emitting 0x4E rec-group prefixes when consecutive entries share a
+// RecGroupSize > 1. Backwards compatible with pre-GC modules where every
+// type has RecGroupSize == 0 or 1: each is emitted as a standalone entry.
+//
+// See EncodeFunctionType
 func encodeTypeSection(types []wasm.FunctionType) []byte {
-	contents := leb128.EncodeUint32(uint32(len(types)))
-	for i := range types {
+	// Count entries: each rec group of size N counts as 1; each
+	// standalone type counts as 1.
+	entryCount := uint32(0)
+	for i := 0; i < len(types); {
+		if types[i].RecGroupSize > 1 {
+			entryCount++
+			i += types[i].RecGroupSize
+		} else {
+			entryCount++
+			i++
+		}
+	}
+
+	contents := leb128.EncodeUint32(entryCount)
+	for i := 0; i < len(types); {
 		t := &types[i]
-		contents = append(contents, EncodeFunctionType(t)...)
+		if t.RecGroupSize > 1 {
+			contents = append(contents, 0x4E)
+			contents = append(contents, leb128.EncodeUint32(uint32(t.RecGroupSize))...)
+			for j := 0; j < t.RecGroupSize; j++ {
+				contents = append(contents, EncodeFunctionType(&types[i+j])...)
+			}
+			i += t.RecGroupSize
+		} else {
+			contents = append(contents, EncodeFunctionType(t)...)
+			i++
+		}
 	}
 	return encodeSection(wasm.SectionIDType, contents)
 }
