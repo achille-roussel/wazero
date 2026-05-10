@@ -37,11 +37,10 @@ func runCases(t *testing.T, ctx context.Context, config wazero.RuntimeConfig) {
 	spectest.RunCase(t, testcases, "throw", ctx, config, -1, 0, math.MaxInt)
 	spectest.RunCase(t, testcases, "throw_ref", ctx, config, -1, 0, math.MaxInt)
 	spectest.RunCase(t, testcases, "tag", ctx, config, -1, 0, math.MaxInt)
-
-	// Run try_table.wast in two ranges, skipping lines 470-495
-	// (two assert_invalid blocks for try_table type validation):
-	// we desugar non-nullable ref types to nullable, so we cannot
-	// detect the type mismatch between (ref null $t) and (ref $t).
-	spectest.RunCase(t, testcases, "try_table", ctx, config, -1, 0, 470)
-	spectest.RunCase(t, testcases, "try_table", ctx, config, -1, 496, math.MaxInt)
+	// The two previously-skipped assert_invalid blocks (lines 470-495)
+	// now pass: the binary decoder preserves non-nullable ref info in
+	// FunctionType.ParamRefInfos / ResultRefInfos, and try_table catch
+	// validation uses IsValueTypeSubtypeOf with rich info so that the
+	// nullable-vs-non-nullable type mismatch is detected.
+	spectest.RunCase(t, testcases, "try_table", ctx, config, -1, 0, math.MaxInt)
 }

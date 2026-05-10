@@ -616,22 +616,34 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					// Validate that the target label can accept the catch values.
 					target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(labelIdx)-1]
 					var expectedTypes []ValueType
+					var expectedRich []*ValueTypeRef
 					if target.op == OpcodeLoop {
 						expectedTypes = target.blockType.Params
+						expectedRich = target.blockType.ParamRefInfos
 					} else {
 						expectedTypes = target.blockType.Results
+						expectedRich = target.blockType.ResultRefInfos
 					}
 					var catchTypes []ValueType
+					var catchRich []*ValueTypeRef
 					catchTypes = append(catchTypes, tagType.Params...)
+					catchRich = appendRefInfos(catchRich, tagType.ParamRefInfos, len(tagType.Params))
 					if catchKind == CatchKindCatchRef {
+						// catch_ref delivers a non-nullable exnref alongside
+						// the tag's params: the caught exception object is
+						// guaranteed non-null by construction.
 						catchTypes = append(catchTypes, ValueTypeExnref)
+						catchRich = append(catchRich, &ValueTypeRef{Nullable: false, HeapKind: HeapTypeKindExn})
 					}
 					if len(catchTypes) != len(expectedTypes) {
 						return fmt.Errorf("catch clause type mismatch: catch delivers %d values but label expects %d", len(catchTypes), len(expectedTypes))
 					}
 					for j := range catchTypes {
-						if !isStrictRefSubtypeOf(catchTypes[j], expectedTypes[j]) {
-							return fmt.Errorf("catch clause type mismatch at index %d: %v is not a subtype of %v", j, catchTypes[j], expectedTypes[j])
+						aRich := refInfoAt(catchRich, j)
+						eRich := refInfoAt(expectedRich, j)
+						if !IsValueTypeSubtypeOf(catchTypes[j], aRich, expectedTypes[j], eRich) {
+							return fmt.Errorf("catch clause type mismatch at index %d: %v is not a subtype of %v", j,
+								valueTypeDisplay(catchTypes[j], aRich), valueTypeDisplay(expectedTypes[j], eRich))
 						}
 					}
 				case CatchKindCatchAll, CatchKindCatchAllRef:
@@ -646,21 +658,30 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					}
 					target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(labelIdx)-1]
 					var expectedTypes []ValueType
+					var expectedRich []*ValueTypeRef
 					if target.op == OpcodeLoop {
 						expectedTypes = target.blockType.Params
+						expectedRich = target.blockType.ParamRefInfos
 					} else {
 						expectedTypes = target.blockType.Results
+						expectedRich = target.blockType.ResultRefInfos
 					}
 					var catchTypes []ValueType
+					var catchRich []*ValueTypeRef
 					if catchKind == CatchKindCatchAllRef {
+						// catch_all_ref delivers a non-nullable exnref.
 						catchTypes = append(catchTypes, ValueTypeExnref)
+						catchRich = append(catchRich, &ValueTypeRef{Nullable: false, HeapKind: HeapTypeKindExn})
 					}
 					if len(catchTypes) != len(expectedTypes) {
 						return fmt.Errorf("catch_all clause type mismatch: catch delivers %d values but label expects %d", len(catchTypes), len(expectedTypes))
 					}
 					for j := range catchTypes {
-						if catchTypes[j] != expectedTypes[j] {
-							return fmt.Errorf("catch_all clause type mismatch at index %d", j)
+						aRich := refInfoAt(catchRich, j)
+						eRich := refInfoAt(expectedRich, j)
+						if !IsValueTypeSubtypeOf(catchTypes[j], aRich, expectedTypes[j], eRich) {
+							return fmt.Errorf("catch_all clause type mismatch at index %d: %v is not a subtype of %v", j,
+								valueTypeDisplay(catchTypes[j], aRich), valueTypeDisplay(expectedTypes[j], eRich))
 						}
 					}
 				default:
@@ -2509,28 +2530,22 @@ func DecodeBlockType(types []FunctionType, r *bytes.Reader, enabledFeatures api.
 			return nil, 0, fmt.Errorf("read ref heap type in block: %w", err)
 		}
 		num += htNum
-		switch ht {
-		case -23: // exn
-			ret = blockType_v_exnref
-		case -16: // func
-			ret = blockType_v_funcref
-		case -17: // extern
-			ret = blockType_v_externref
-		default: // concrete type index — treat as nullable funcref
-			ret = blockType_v_funcref
+		kind, typeIdx, ok := HeapTypeKindFromBinary(ht)
+		if !ok {
+			return nil, 0, fmt.Errorf("invalid heap type in block: %d", ht)
 		}
+		ret = makeInlineBlockResultRefType(kind, typeIdx, true /*nullable*/)
 	case -28: // 0x64 = ref (non-nullable) — GC proposal
 		ht, htNum, err := leb128.DecodeInt33AsInt64(r)
 		if err != nil {
 			return nil, 0, fmt.Errorf("read ref heap type in block: %w", err)
 		}
 		num += htNum
-		switch ht {
-		case -23: // exn
-			ret = blockType_v_exnref // TODO: non-null exnref
-		default:
-			ret = blockType_v_funcref
+		kind, typeIdx, ok := HeapTypeKindFromBinary(ht)
+		if !ok {
+			return nil, 0, fmt.Errorf("invalid heap type in block: %d", ht)
 		}
+		ret = makeInlineBlockResultRefType(kind, typeIdx, false /*non-nullable*/)
 	default:
 		if err = enabledFeatures.RequireEnabled(api.CoreFeatureMultiValue); err != nil {
 			return nil, num, fmt.Errorf("block with function type return invalid as %v", err)
@@ -2555,6 +2570,71 @@ var (
 	blockType_v_externref = &FunctionType{Results: []ValueType{ValueTypeExternref}, ResultNumInUint64: 1}
 	blockType_v_exnref    = &FunctionType{Results: []ValueType{ValueTypeExnref}, ResultNumInUint64: 1}
 )
+
+// refInfoAt returns the rich ref-type info at position i, or nil if the
+// sidecar slice is shorter than i or has a nil entry there.
+func refInfoAt(refs []*ValueTypeRef, i int) *ValueTypeRef {
+	if i < 0 || i >= len(refs) {
+		return nil
+	}
+	return refs[i]
+}
+
+// appendRefInfos appends `n` entries from `src` (or nil if src is nil) to
+// `dst`. Used when concatenating rich-info slices for catch validation
+// where the source might be either a FunctionType's sidecar or absent.
+func appendRefInfos(dst, src []*ValueTypeRef, n int) []*ValueTypeRef {
+	if len(src) == 0 {
+		for i := 0; i < n; i++ {
+			dst = append(dst, nil)
+		}
+		return dst
+	}
+	for i := 0; i < n; i++ {
+		dst = append(dst, refInfoAt(src, i))
+	}
+	return dst
+}
+
+// valueTypeDisplay returns a human-readable form for a (byte, rich) value
+// type pair, used in validator error messages.
+func valueTypeDisplay(b ValueType, rich *ValueTypeRef) string {
+	if rich != nil {
+		return rich.String()
+	}
+	return ValueTypeName(b)
+}
+
+// makeInlineBlockResultRefType builds a single-result-only FunctionType for
+// an inline block type whose result is a reference type that either
+//
+//   - has non-nullable nullability (`(ref ht)`), or
+//   - refers to a concrete type index (`(ref null $t)` / `(ref $t)`),
+//
+// neither of which can be represented by a single shorthand byte.
+//
+// The byte slot in Results is set to the corresponding nullable shorthand
+// (or funcref for concrete kinds) so byte-only consumers see a valid value
+// type, and ResultRefInfos[0] carries the rich info.
+func makeInlineBlockResultRefType(kind HeapTypeKind, typeIdx uint32, nullable bool) *FunctionType {
+	var shorthand byte
+	if kind == HeapTypeKindConcrete {
+		shorthand = byte(ValueTypeFuncref)
+	} else if sb, ok := kind.AbstractShorthandByte(); ok {
+		shorthand = sb
+	} else {
+		shorthand = byte(ValueTypeFuncref)
+	}
+	return &FunctionType{
+		Results:           []ValueType{shorthand},
+		ResultNumInUint64: 1,
+		ResultRefInfos: []*ValueTypeRef{{
+			Nullable: nullable,
+			HeapKind: kind,
+			TypeIdx:  typeIdx,
+		}},
+	}
+}
 
 // SplitCallStack returns the input stack resliced to the count of params and
 // results, or errors if it isn't long enough for either.

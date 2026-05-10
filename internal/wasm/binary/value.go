@@ -12,49 +12,86 @@ import (
 )
 
 func decodeValueTypes(r *bytes.Reader, num uint32) ([]wasm.ValueType, error) {
+	types, _, err := decodeValueTypesWithRefInfo(r, num)
+	return types, err
+}
+
+// decodeValueTypesWithRefInfo reads `num` value types and returns both the
+// byte representation (for backward compatibility with code paths that
+// only need the shorthand byte) and a parallel rich-info slice.
+//
+// refInfos is nil when no position requires rich info (the common case
+// for Wasm 2.0 modules). When any position is a non-nullable reference or
+// a reference to a concrete type index, refInfos has len == num with
+// non-nil entries at those positions and nil entries elsewhere.
+//
+// Non-nullable refs are still placed into `types` as the corresponding
+// nullable-shorthand byte so existing byte-only consumers continue to
+// see a well-formed value-type byte. The validator (and any consumer
+// that cares about nullability or concrete type indices) reads refInfos
+// for the precise info.
+func decodeValueTypesWithRefInfo(r *bytes.Reader, num uint32) ([]wasm.ValueType, []*wasm.ValueTypeRef, error) {
 	if num == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	ret := make([]wasm.ValueType, 0, num)
+	types := make([]wasm.ValueType, 0, num)
+	var refInfos []*wasm.ValueTypeRef
+	setRefInfo := func(i int, ref *wasm.ValueTypeRef) {
+		if refInfos == nil {
+			refInfos = make([]*wasm.ValueTypeRef, num)
+		}
+		refInfos[i] = ref
+	}
+
 	for i := uint32(0); i < num; i++ {
 		b, err := r.ReadByte()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		switch b {
 		case wasm.ValueTypeI32, wasm.ValueTypeF32, wasm.ValueTypeI64, wasm.ValueTypeF64,
 			wasm.ValueTypeExternref, wasm.ValueTypeFuncref, wasm.ValueTypeV128,
 			wasm.ValueTypeExnref:
-			ret = append(ret, b)
+			types = append(types, b)
 		case wasm.RefPrefixNullable, wasm.RefPrefixNonNullable:
+			nullable := b == wasm.RefPrefixNullable
 			ht, _, err := leb128.DecodeInt33AsInt64(r)
 			if err != nil {
-				return nil, fmt.Errorf("read ref heap type: %w", err)
+				return nil, nil, fmt.Errorf("read ref heap type: %w", err)
 			}
-			// The following nullable refs are an alternative representation of the corresponding ref types:
-			// - (ref null exn) is equivalent to exnref
-			// - (ref null func) is equivalent to funcref
-			// - (ref null extern) is equivalent to externref
-			// See https://webassembly.github.io/gc/core/syntax/types.html#reference-types
-			// Current limitation: we desugar NON-NULLABLE types to NULLABLE types internally.
-			// This technically breaks type-checking in some cases, but we will fix this
-			// when we introduce proper ref types.
-			switch ht {
-			case wasm.HeapTypeExn:
-				ret = append(ret, wasm.ValueTypeExnref)
-			case wasm.HeapTypeFunc:
-				ret = append(ret, wasm.ValueTypeFuncref)
-			case wasm.HeapTypeExtern:
-				ret = append(ret, wasm.ValueTypeExternref)
-			default: // concrete type index — treat as nullable funcref
-				ret = append(ret, wasm.ValueTypeFuncref)
+			kind, typeIdx, ok := wasm.HeapTypeKindFromBinary(ht)
+			if !ok {
+				return nil, nil, fmt.Errorf("invalid heap type: %d", ht)
+			}
+			// Place the nullable-shorthand byte in `types` for byte-only
+			// consumers. Concrete-ref kinds default to the funcref byte
+			// since they have no abstract shorthand (the actual heap
+			// type is in refInfos[i].HeapKind and TypeIdx).
+			var shorthand byte
+			if kind == wasm.HeapTypeKindConcrete {
+				shorthand = byte(wasm.ValueTypeFuncref)
+			} else if sb, sbOK := kind.AbstractShorthandByte(); sbOK {
+				shorthand = sb
+			} else {
+				shorthand = byte(wasm.ValueTypeFuncref)
+			}
+			types = append(types, shorthand)
+			// Record rich info iff the byte alone doesn't faithfully
+			// describe the type: any non-nullable form, or any concrete
+			// reference.
+			if !nullable || kind == wasm.HeapTypeKindConcrete {
+				setRefInfo(int(i), &wasm.ValueTypeRef{
+					Nullable: nullable,
+					HeapKind: kind,
+					TypeIdx:  typeIdx,
+				})
 			}
 		default:
-			return nil, fmt.Errorf("invalid value type: %d", b)
+			return nil, nil, fmt.Errorf("invalid value type: %d", b)
 		}
 	}
-	return ret, nil
+	return types, refInfos, nil
 }
 
 // decodeUTF8 decodes a size prefixed string from the reader, returning it and the count of bytes read.

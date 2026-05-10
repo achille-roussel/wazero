@@ -821,6 +821,19 @@ type FunctionType struct {
 	// Default zero value (false) is benign for non-GC modules because they
 	// never declare subtypes.
 	Final bool
+
+	// ParamRefInfos / ResultRefInfos carry rich ref-type info (nullability,
+	// concrete type index) for Params / Results positions whose nullable-
+	// shorthand byte form does NOT fully describe the type — i.e.
+	// non-nullable references `(ref ht)` and references to concrete type
+	// indices `(ref null $t)` / `(ref $t)`.
+	//
+	// Both slices are either nil (no position needs rich info, the common
+	// case for non-GC modules) or len(Params) / len(Results), with nil
+	// entries at positions whose byte form already round-trips through
+	// the type.
+	ParamRefInfos  []*ValueTypeRef
+	ResultRefInfos []*ValueTypeRef
 }
 
 func (f *FunctionType) CacheNumInUint64() {
@@ -1308,6 +1321,22 @@ const (
 	ValueTypeExternref           = api.ValueTypeExternref
 	// ValueTypeExnref is the exception reference type used in exception handling.
 	ValueTypeExnref ValueType = 0x69
+
+	// Below: shorthand value-type bytes for nullable references to the
+	// additional abstract heap types introduced by the WebAssembly GC
+	// proposal. As of this branch the binary decoder accepts these bytes
+	// but the full type-stack rich-ref handling lives in Phase 5; for
+	// now these constants exist so subtype helpers and tests can refer
+	// to them by name.
+	ValueTypeAnyref      ValueType = 0x6E // (ref null any)
+	ValueTypeEqref       ValueType = 0x6D // (ref null eq)
+	ValueTypeI31ref      ValueType = 0x6C // (ref null i31)
+	ValueTypeStructref   ValueType = 0x6B // (ref null struct)
+	ValueTypeArrayref    ValueType = 0x6A // (ref null array)
+	ValueTypeNullref     ValueType = 0x71 // (ref null none)
+	ValueTypeNoFuncref   ValueType = 0x73 // (ref null nofunc)
+	ValueTypeNoExternref ValueType = 0x72 // (ref null noextern)
+	ValueTypeNoExnref    ValueType = 0x74 // (ref null noexn)
 )
 
 const (
@@ -1356,6 +1385,76 @@ func isRefSubtypeOf(actual, expected ValueType) bool {
 // non-nullable should be a subtype of nullable, but NOT vice versa.
 func isStrictRefSubtypeOf(actual, expected ValueType) bool {
 	return actual == expected
+}
+
+// IsValueTypeSubtypeOf reports whether (actualByte, actualRich) is a
+// subtype of (expectedByte, expectedRich) — the Wasm-3.0 subtype relation
+// over both numeric/vector types and reference types with nullability and
+// heap-kind awareness.
+//
+// For non-reference types (numeric, vector) the byte values must match
+// exactly; rich info is ignored.
+//
+// For reference types:
+//   - Nullability: a non-nullable ref is a subtype of the corresponding
+//     nullable ref, but not vice versa. Specifically actual.Nullable
+//     implies expected.Nullable (i.e. !(actual.Nullable && !expected.Nullable)).
+//   - Heap kind: actual's HeapKind must be a subtype of expected's
+//     HeapKind under the abstract hierarchy (delegated to
+//     IsAbstractSubtypeOf for pairs of abstract kinds).
+//   - Concrete-ref heap kinds compare equal by TypeIdx for now; a full
+//     concrete-to-concrete subtype check via Store.IsSubtype is wired
+//     through once needed by ref.test / ref.cast in Phase 5.
+//
+// When either side's rich info is nil, the type is interpreted as the
+// nullable shorthand of the byte (matching the value-type encoding rule
+// that a bare heap-type byte means "ref null <heaptype>").
+func IsValueTypeSubtypeOf(
+	actualByte ValueType, actualRich *ValueTypeRef,
+	expectedByte ValueType, expectedRich *ValueTypeRef,
+) bool {
+	aNullable, aKind, aIdx, aRef := classifyValueType(actualByte, actualRich)
+	eNullable, eKind, eIdx, eRef := classifyValueType(expectedByte, expectedRich)
+
+	// Non-ref-vs-anything must match exactly on byte.
+	if !aRef || !eRef {
+		return actualByte == expectedByte
+	}
+
+	// Nullability: nullable cannot satisfy a non-nullable expectation.
+	if aNullable && !eNullable {
+		return false
+	}
+
+	// Concrete-vs-concrete: TypeIdx equality (true concrete-supertype
+	// chains will be checked via the Store registry in Phase 5).
+	if aKind == HeapTypeKindConcrete && eKind == HeapTypeKindConcrete {
+		return aIdx == eIdx
+	}
+	// Concrete <: any always holds. Other concrete-vs-abstract pairs need
+	// module context to resolve (concrete struct types live under struct
+	// <: eq <: any; concrete func types live under func; etc.); we are
+	// conservative here.
+	if aKind == HeapTypeKindConcrete && eKind == HeapTypeKindAny {
+		return true
+	}
+	if aKind == HeapTypeKindConcrete || eKind == HeapTypeKindConcrete {
+		return false
+	}
+	// Both abstract.
+	return aKind.IsAbstractSubtypeOf(eKind)
+}
+
+// classifyValueType reduces a (byte, *rich) value-type representation to
+// its (nullable, heapKind, typeIdx, isRef) tuple. Used by IsValueTypeSubtypeOf.
+func classifyValueType(b ValueType, rich *ValueTypeRef) (nullable bool, kind HeapTypeKind, typeIdx uint32, isRef bool) {
+	if rich != nil {
+		return rich.Nullable, rich.HeapKind, rich.TypeIdx, true
+	}
+	if k, ok := HeapTypeKindFromAbstractByte(b); ok {
+		return true, k, 0, true
+	}
+	return false, HeapTypeKindUnknown, 0, false
 }
 
 // ExternType is an alias of api.ExternType defined to simplify imports.
