@@ -54,6 +54,11 @@ type (
 		// do type-checks on indirect function calls.
 		typeIDs map[string]FunctionTypeID
 
+		// subtypes holds Cohen-style subtype display data, indexed by
+		// FunctionTypeID value. Used for O(1) ref.test / ref.cast subtype
+		// checks. Populated alongside typeIDs as types are registered.
+		subtypes []subtypeInfo
+
 		// functionMaxTypes represents the limit on the number of function types in a store.
 		// Note: this is fixed to 2^27 but have this a field for testability.
 		functionMaxTypes uint32
@@ -611,6 +616,9 @@ func (s *Store) GetFunctionTypeIDs(ts []FunctionType) ([]FunctionTypeID, error) 
 		}
 		ret[i] = id
 	}
+	if err := s.computeSubtypeDisplays(ts, ret); err != nil {
+		return nil, err
+	}
 	return ret, nil
 }
 
@@ -638,8 +646,114 @@ func (s *Store) getOrAssignTypeID(key string) (FunctionTypeID, error) {
 		}
 		id = FunctionTypeID(l)
 		s.typeIDs[key] = id
+		// Reserve a subtype slot for this ID; it will be filled in by
+		// computeSubtypeDisplays once all of the module's types are
+		// registered (some supertype edges may be forward references
+		// within a rec group).
+		s.subtypes = append(s.subtypes, subtypeInfo{})
 	}
 	return id, nil
+}
+
+// subtypeInfo carries Cohen-style subtype display data for one
+// FunctionTypeID. The display is indexed by depth: display[k] is the
+// FunctionTypeID of the supertype at depth k, and display[Depth] is the
+// type itself. Subtype-checking T <: U is constant-time: compare U.Depth
+// to T.Depth, then check T.display[U.Depth] == U.
+//
+// Resolved is false for newly-reserved entries whose display has not yet
+// been computed (e.g., during a single GetFunctionTypeIDs call where a
+// later type in the same rec group is the supertype of an earlier one).
+type subtypeInfo struct {
+	Depth    uint32
+	Display  []FunctionTypeID
+	Resolved bool
+}
+
+// computeSubtypeDisplays fills in the Cohen subtype display for each of
+// the FunctionTypeIDs in `ids` whose display has not yet been resolved.
+// `ts[i]` is the FunctionType that produced ids[i]; SuperTypeIndex on `ts`
+// is the module-level type-section index (not a FunctionTypeID).
+//
+// Two-pass termination: each pass resolves at least one entry whose
+// supertype is already resolved; the loop terminates when either all
+// entries are resolved or no progress was made (the latter indicates a
+// cycle, which is rejected as malformed).
+func (s *Store) computeSubtypeDisplays(ts []FunctionType, ids []FunctionTypeID) error {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	// Local set of (moduleIdx) entries still needing resolution.
+	pending := make([]int, 0, len(ts))
+	for i := range ts {
+		if !s.subtypes[ids[i]].Resolved {
+			pending = append(pending, i)
+		}
+	}
+
+	for len(pending) > 0 {
+		progressed := false
+		next := pending[:0]
+		for _, i := range pending {
+			t := &ts[i]
+			id := ids[i]
+			if t.SuperTypeIndex == nil {
+				// No supertype: depth 0, display = [self].
+				s.subtypes[id] = subtypeInfo{
+					Depth:    0,
+					Display:  []FunctionTypeID{id},
+					Resolved: true,
+				}
+				progressed = true
+				continue
+			}
+			supModIdx := *t.SuperTypeIndex
+			if supModIdx >= uint32(len(ids)) {
+				return fmt.Errorf("type[%d] supertype index %d out of range", i, supModIdx)
+			}
+			supID := ids[supModIdx]
+			supInfo := s.subtypes[supID]
+			if !supInfo.Resolved {
+				next = append(next, i)
+				continue
+			}
+			s.subtypes[id] = subtypeInfo{
+				Depth:    supInfo.Depth + 1,
+				Display:  append(append([]FunctionTypeID(nil), supInfo.Display...), id),
+				Resolved: true,
+			}
+			progressed = true
+		}
+		pending = next
+		if !progressed {
+			return fmt.Errorf("supertype cycle detected among %d type(s)", len(pending))
+		}
+	}
+	return nil
+}
+
+// IsSubtype reports whether the type with FunctionTypeID `sub` is a subtype
+// of the type with FunctionTypeID `sup`. This is the constant-time Cohen
+// display check used by ref.test / ref.cast at runtime.
+//
+// Requires both IDs to have been registered via GetFunctionTypeIDs (which
+// populates their subtype displays). Returns false if either ID is out of
+// range or has no resolved display.
+func (s *Store) IsSubtype(sub, sup FunctionTypeID) bool {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+	if int(sub) >= len(s.subtypes) || int(sup) >= len(s.subtypes) {
+		return false
+	}
+	subInfo := s.subtypes[sub]
+	supInfo := s.subtypes[sup]
+	if !subInfo.Resolved || !supInfo.Resolved {
+		return false
+	}
+	if supInfo.Depth > subInfo.Depth {
+		return false
+	}
+	return subInfo.Display[supInfo.Depth] == sup
 }
 
 // CloseWithExitCode implements the same method as documented on wazero.Runtime.
