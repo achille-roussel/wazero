@@ -752,6 +752,32 @@ type FunctionType struct {
 
 	// RecGroupPosition is the 0-based position of this type within its rec group.
 	RecGroupPosition int
+
+	// Form discriminates whether this entry defines a function, struct, or
+	// array type. Default zero value is CompositeFormFunc, so existing
+	// code that constructs FunctionType{Params: ..., Results: ...} keeps
+	// its function-type semantics without change.
+	Form CompositeForm
+
+	// Fields lists the fields of a struct type, in declaration order.
+	// Used only when Form == CompositeFormStruct.
+	Fields []FieldType
+
+	// ArrayField is the single element field type of an array type.
+	// Used only when Form == CompositeFormArray.
+	ArrayField FieldType
+
+	// SuperTypeIndex is the type-section index of an explicitly declared
+	// supertype, or nil for top-level (no supertype) types. The MVP allows
+	// at most one supertype.
+	SuperTypeIndex *Index
+
+	// Final indicates whether this type can be a supertype of others.
+	// The shorthand 0x60 / 0x5F / 0x5E forms and the explicit 0x4F (sub
+	// final) form set this to true; the 0x50 (sub) form sets it to false.
+	// Default zero value (false) is benign for non-GC modules because they
+	// never declare subtypes.
+	Final bool
 }
 
 func (f *FunctionType) CacheNumInUint64() {

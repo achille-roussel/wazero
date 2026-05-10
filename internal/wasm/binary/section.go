@@ -18,35 +18,40 @@ func decodeTypeSection(enabledFeatures api.CoreFeatures, r *bytes.Reader) ([]was
 
 	var result []wasm.FunctionType
 	for i := uint32(0); i < vs; i++ {
-		// Peek at the leading byte to check for rec group (0x4e, GC proposal).
 		b, err := r.ReadByte()
 		if err != nil {
 			return nil, fmt.Errorf("read %d-th type: %v", i, err)
 		}
 		if b == 0x4e {
-			// Rec group: contains multiple types.
+			// Rec group: contains a vector of sub types.
 			recCount, _, err := leb128.DecodeUint32(r)
 			if err != nil {
 				return nil, fmt.Errorf("read rec group count: %v", err)
 			}
 			for j := uint32(0); j < recCount; j++ {
 				var ft wasm.FunctionType
-				if err = decodeFunctionType(enabledFeatures, r, &ft); err != nil {
+				if err = decodeSubType(enabledFeatures, r, &ft); err != nil {
 					return nil, fmt.Errorf("read %d-th type in rec group: %v", j, err)
 				}
 				ft.RecGroupSize = int(recCount)
 				ft.RecGroupPosition = int(j)
+				_ = ft.String() // cache the key
 				result = append(result, ft)
 			}
 		} else {
-			// Put back the byte and decode as a regular function type.
+			// Single-type entry (possibly a sub form). Put the byte back
+			// and let decodeSubType dispatch on it. Standalone types keep
+			// RecGroupSize/RecGroupPosition at 0 to match pre-GC behavior;
+			// Phase 4 will revisit the meaning of these fields during
+			// validation if needed.
 			if err := r.UnreadByte(); err != nil {
 				return nil, err
 			}
 			var ft wasm.FunctionType
-			if err = decodeFunctionType(enabledFeatures, r, &ft); err != nil {
+			if err = decodeSubType(enabledFeatures, r, &ft); err != nil {
 				return nil, fmt.Errorf("read %d-th type: %v", i, err)
 			}
+			_ = ft.String() // cache the key
 			result = append(result, ft)
 		}
 	}
