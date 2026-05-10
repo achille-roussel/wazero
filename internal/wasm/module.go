@@ -857,31 +857,84 @@ func (f *FunctionType) EqualsType(other *FunctionType) bool {
 	return f.RecGroupSize == other.RecGroupSize && f.RecGroupPosition == other.RecGroupPosition
 }
 
-// key gets or generates the key for Store.typeIDs. e.g. "i32_v" for one i32 parameter and no (void) result.
+// key gets or generates the key for Store.typeIDs. e.g. "i32_v" for one i32
+// parameter and no (void) result. For GC composite forms (struct, array)
+// the key incorporates the field layout and sub-typing metadata so
+// structurally distinct types receive distinct keys, while structurally
+// identical types in different modules share the same canonical key (and
+// therefore the same Store-assigned TypeID).
+//
+// Iso-recursive tying — replacing intra-rec-group SuperTypeIndex references
+// with "rec.N" placeholders so two modules declaring the same recursive
+// group canonicalize identically — is Phase 4 work and is not yet applied.
+// As of this commit, SuperTypeIndex is encoded as an absolute index, which
+// means cross-module canonicalization is only correct for types whose
+// supertype (if any) lives outside the rec group at the same Module-level
+// index. That suffices for the simple cases this branch ships today.
 func (f *FunctionType) key() string {
 	if f.string != "" {
 		return f.string
 	}
 	var ret string
-	for _, b := range f.Params {
-		ret += ValueTypeName(b)
+	switch f.Form {
+	case CompositeFormFunc:
+		ret = funcKey(f.Params, f.Results)
+	case CompositeFormStruct:
+		ret = structKey(f.Fields)
+	case CompositeFormArray:
+		ret = arrayKey(f.ArrayField)
+	default:
+		ret = fmt.Sprintf("<form=%d>", f.Form)
 	}
-	if len(f.Params) == 0 {
-		ret += "v_"
-	} else {
-		ret += "_"
+	if f.SuperTypeIndex != nil {
+		ret += fmt.Sprintf("|sup=%d", *f.SuperTypeIndex)
 	}
-	for _, b := range f.Results {
-		ret += ValueTypeName(b)
-	}
-	if len(f.Results) == 0 {
-		ret += "v"
+	if f.Final {
+		ret += "|final"
 	}
 	if f.RecGroupSize > 1 {
 		ret += fmt.Sprintf("|rec%d/%d", f.RecGroupPosition, f.RecGroupSize)
 	}
 	f.string = ret
 	return ret
+}
+
+// funcKey is the legacy function-type key shape, e.g. "i32_v" or "i32i32_i32".
+func funcKey(params, results []ValueType) string {
+	var ret string
+	for _, b := range params {
+		ret += ValueTypeName(b)
+	}
+	if len(params) == 0 {
+		ret += "v_"
+	} else {
+		ret += "_"
+	}
+	for _, b := range results {
+		ret += ValueTypeName(b)
+	}
+	if len(results) == 0 {
+		ret += "v"
+	}
+	return ret
+}
+
+// structKey produces a canonical key for a struct type, e.g.
+// "struct{i32,mut i64,i8}".
+func structKey(fields []FieldType) string {
+	out := "struct{"
+	for i, f := range fields {
+		if i > 0 {
+			out += ","
+		}
+		out += f.String()
+	}
+	return out + "}"
+}
+
+// arrayKey produces a canonical key for an array type, e.g. "array(mut i32)".
+func arrayKey(elem FieldType) string {
+	return "array(" + elem.String() + ")"
 }
 
 // String implements fmt.Stringer.
