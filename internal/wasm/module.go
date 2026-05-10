@@ -273,6 +273,10 @@ func (m *Module) Validate(enabledFeatures api.CoreFeatures) error {
 		tp.CacheNumInUint64()
 	}
 
+	if err := m.validateTypeSection(enabledFeatures); err != nil {
+		return err
+	}
+
 	if err := m.validateStartSection(); err != nil {
 		return err
 	}
@@ -314,6 +318,45 @@ func (m *Module) Validate(enabledFeatures api.CoreFeatures) error {
 
 	if err = m.validateTagSection(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateTypeSection enforces feature-flag gating and structural
+// constraints on TypeSection entries.
+//
+// In particular, WebAssembly GC composite forms (struct, array) and
+// explicit sub-typing (SuperTypeIndex) require experimental.CoreFeaturesGC.
+// The decoder accepts these forms unconditionally; this check is the
+// authoritative gate.
+func (m *Module) validateTypeSection(enabledFeatures api.CoreFeatures) error {
+	// experimental.CoreFeaturesGC is the api-package value
+	// api.CoreFeatureSIMD << 5; we match by value to avoid a circular
+	// import between internal/wasm and experimental.
+	gcFeature := api.CoreFeatureSIMD << 5
+
+	for i := range m.TypeSection {
+		t := &m.TypeSection[i]
+		switch t.Form {
+		case CompositeFormFunc:
+			// Always allowed.
+		case CompositeFormStruct, CompositeFormArray:
+			if err := enabledFeatures.RequireEnabled(gcFeature); err != nil {
+				return fmt.Errorf("type[%d] uses %s composite form, but %w",
+					i, t.Form, err)
+			}
+		default:
+			return fmt.Errorf("type[%d] has unknown composite form %d", i, t.Form)
+		}
+		if t.SuperTypeIndex != nil {
+			if err := enabledFeatures.RequireEnabled(gcFeature); err != nil {
+				return fmt.Errorf("type[%d] declares a supertype, but %w", i, err)
+			}
+			if *t.SuperTypeIndex >= uint32(len(m.TypeSection)) {
+				return fmt.Errorf("type[%d] supertype index %d out of range",
+					i, *t.SuperTypeIndex)
+			}
+		}
 	}
 	return nil
 }
