@@ -236,3 +236,97 @@ func (r ValueTypeRef) ShorthandByte() (byte, bool) {
 	}
 	return r.HeapKind.AbstractShorthandByte()
 }
+
+// hierarchyTops returns the set of "top" abstract heap-type kinds —
+// supertypes a kind eventually reaches. The three Wasm 3.0 hierarchies are
+// disjoint: each abstract kind belongs to exactly one of them.
+//
+//	any:     any > eq > {i31, struct, array} > none
+//	func:    func > nofunc                            (plus concrete func types)
+//	extern:  extern > noextern
+//	exn:     exn > noexn
+//
+// HeapTypeKindConcrete returns HeapTypeKindUnknown because we cannot tell
+// without module context whether the concrete type belongs to the any
+// hierarchy (struct/array) or the func hierarchy.
+func (k HeapTypeKind) hierarchyTop() HeapTypeKind {
+	switch k {
+	case HeapTypeKindNoFunc, HeapTypeKindFunc:
+		return HeapTypeKindFunc
+	case HeapTypeKindNoExtern, HeapTypeKindExtern:
+		return HeapTypeKindExtern
+	case HeapTypeKindNoExn, HeapTypeKindExn:
+		return HeapTypeKindExn
+	case HeapTypeKindBottom, HeapTypeKindI31, HeapTypeKindStruct,
+		HeapTypeKindArray, HeapTypeKindEq, HeapTypeKindAny:
+		return HeapTypeKindAny
+	}
+	return HeapTypeKindUnknown
+}
+
+// IsAbstractSubtypeOf reports whether actual is a subtype of expected,
+// considering only the static abstract hierarchy of the WebAssembly GC
+// spec. Both arguments must be abstract kinds — pairs involving
+// HeapTypeKindConcrete return false because their subtyping requires
+// module-level type-section context (declared supertypes via 0x4F / 0x50,
+// concrete-form-determined hierarchy membership, etc.). The Phase 4
+// validator threads module context through a separate check.
+//
+// Subtype relationships per the spec:
+//   - reflexive: every kind is a subtype of itself.
+//   - bottom kinds (none, nofunc, noextern, noexn) are subtypes of every
+//     other kind in their respective hierarchy.
+//   - top kinds (any, func, extern, exn) are supertypes of every other
+//     kind in their respective hierarchy.
+//   - within the any hierarchy: i31, struct, array each <: eq, and eq <: any.
+//   - the four hierarchies are disjoint: no cross-hierarchy subtyping.
+//
+// Sources:
+//   - https://webassembly.github.io/spec/core/syntax/types.html
+//   - https://webassembly.github.io/spec/core/valid/types.html
+func (actual HeapTypeKind) IsAbstractSubtypeOf(expected HeapTypeKind) bool {
+	if actual == HeapTypeKindUnknown || expected == HeapTypeKindUnknown {
+		return false
+	}
+	if actual == HeapTypeKindConcrete || expected == HeapTypeKindConcrete {
+		return false
+	}
+	if actual == expected {
+		return true
+	}
+
+	actualTop := actual.hierarchyTop()
+	if actualTop != expected.hierarchyTop() {
+		return false
+	}
+
+	// Bottom of each hierarchy is a subtype of everything in that hierarchy.
+	switch actual {
+	case HeapTypeKindBottom, HeapTypeKindNoFunc, HeapTypeKindNoExtern, HeapTypeKindNoExn:
+		return true
+	}
+
+	// In the func / extern / exn hierarchies the only non-bottom abstract
+	// types are the tops themselves; if actual is the top it's not a
+	// strict subtype of anything else in the hierarchy.
+	if actualTop != HeapTypeKindAny {
+		return false
+	}
+
+	// Within the any hierarchy.
+	if expected == HeapTypeKindAny {
+		// any is the top of the hierarchy; everything below is a subtype.
+		return true
+	}
+	if actual == HeapTypeKindAny {
+		return false
+	}
+	if expected == HeapTypeKindEq {
+		// eq's strict subtypes among abstract kinds are i31, struct, array.
+		// (HeapTypeKindBottom is handled above.)
+		return actual == HeapTypeKindI31 || actual == HeapTypeKindStruct || actual == HeapTypeKindArray
+	}
+	// Remaining pairs among {i31, struct, array, eq} where actual != expected
+	// are unrelated: i31 / struct / array are sibling subtypes of eq.
+	return false
+}

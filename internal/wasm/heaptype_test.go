@@ -145,3 +145,121 @@ func TestValueTypeRefIsAbstract(t *testing.T) {
 	require.False(t, ValueTypeRef{HeapKind: HeapTypeKindConcrete, TypeIdx: 3}.IsAbstract())
 	require.False(t, ValueTypeRef{HeapKind: HeapTypeKindUnknown}.IsAbstract())
 }
+
+// abstractKinds is the canonical list of abstract heap-type kinds used by
+// the subtype matrix tests below. Order matters only for readability.
+var abstractKinds = []HeapTypeKind{
+	HeapTypeKindAny, HeapTypeKindEq,
+	HeapTypeKindI31, HeapTypeKindStruct, HeapTypeKindArray,
+	HeapTypeKindBottom,
+	HeapTypeKindFunc, HeapTypeKindNoFunc,
+	HeapTypeKindExtern, HeapTypeKindNoExtern,
+	HeapTypeKindExn, HeapTypeKindNoExn,
+}
+
+func TestIsAbstractSubtypeOf_Reflexive(t *testing.T) {
+	for _, k := range abstractKinds {
+		t.Run(k.String(), func(t *testing.T) {
+			require.True(t, k.IsAbstractSubtypeOf(k))
+		})
+	}
+}
+
+func TestIsAbstractSubtypeOf_AnyHierarchy(t *testing.T) {
+	// Every kind in the any hierarchy must be a subtype of `any`.
+	anyHierarchy := []HeapTypeKind{
+		HeapTypeKindEq, HeapTypeKindI31, HeapTypeKindStruct,
+		HeapTypeKindArray, HeapTypeKindBottom,
+	}
+	for _, k := range anyHierarchy {
+		require.True(t, k.IsAbstractSubtypeOf(HeapTypeKindAny),
+			"%s should be <: any", k)
+	}
+
+	// Strict subtypes of `eq`: i31, struct, array (and bottom).
+	for _, k := range []HeapTypeKind{HeapTypeKindI31, HeapTypeKindStruct, HeapTypeKindArray, HeapTypeKindBottom} {
+		require.True(t, k.IsAbstractSubtypeOf(HeapTypeKindEq), "%s should be <: eq", k)
+	}
+
+	// i31, struct, array are NOT subtypes of each other.
+	siblings := []HeapTypeKind{HeapTypeKindI31, HeapTypeKindStruct, HeapTypeKindArray}
+	for _, a := range siblings {
+		for _, b := range siblings {
+			if a == b {
+				continue
+			}
+			require.False(t, a.IsAbstractSubtypeOf(b), "%s should NOT be <: %s", a, b)
+		}
+	}
+
+	// `any` is not a subtype of anything strictly below it.
+	for _, k := range []HeapTypeKind{HeapTypeKindEq, HeapTypeKindI31, HeapTypeKindStruct, HeapTypeKindArray, HeapTypeKindBottom} {
+		require.False(t, HeapTypeKindAny.IsAbstractSubtypeOf(k),
+			"any should NOT be <: %s", k)
+	}
+}
+
+func TestIsAbstractSubtypeOf_FuncHierarchy(t *testing.T) {
+	// nofunc <: func, but func is not <: anything below it.
+	require.True(t, HeapTypeKindNoFunc.IsAbstractSubtypeOf(HeapTypeKindFunc))
+	require.False(t, HeapTypeKindFunc.IsAbstractSubtypeOf(HeapTypeKindNoFunc))
+}
+
+func TestIsAbstractSubtypeOf_ExternHierarchy(t *testing.T) {
+	require.True(t, HeapTypeKindNoExtern.IsAbstractSubtypeOf(HeapTypeKindExtern))
+	require.False(t, HeapTypeKindExtern.IsAbstractSubtypeOf(HeapTypeKindNoExtern))
+}
+
+func TestIsAbstractSubtypeOf_ExnHierarchy(t *testing.T) {
+	require.True(t, HeapTypeKindNoExn.IsAbstractSubtypeOf(HeapTypeKindExn))
+	require.False(t, HeapTypeKindExn.IsAbstractSubtypeOf(HeapTypeKindNoExn))
+}
+
+func TestIsAbstractSubtypeOf_DisjointHierarchies(t *testing.T) {
+	// The four hierarchies (any, func, extern, exn) are disjoint: no
+	// cross-hierarchy subtyping. Spot-check across-hierarchy pairs.
+	pairs := [][2]HeapTypeKind{
+		{HeapTypeKindAny, HeapTypeKindFunc},
+		{HeapTypeKindFunc, HeapTypeKindAny},
+		{HeapTypeKindEq, HeapTypeKindFunc},
+		{HeapTypeKindStruct, HeapTypeKindExtern},
+		{HeapTypeKindI31, HeapTypeKindExn},
+		{HeapTypeKindBottom, HeapTypeKindFunc}, // any-hierarchy bottom != func
+		{HeapTypeKindNoFunc, HeapTypeKindAny},  // func-hierarchy bottom != any
+		{HeapTypeKindNoExtern, HeapTypeKindExn},
+		{HeapTypeKindNoExn, HeapTypeKindAny},
+		{HeapTypeKindArray, HeapTypeKindExn},
+	}
+	for _, p := range pairs {
+		require.False(t, p[0].IsAbstractSubtypeOf(p[1]),
+			"%s should NOT be <: %s (disjoint hierarchies)", p[0], p[1])
+	}
+}
+
+func TestIsAbstractSubtypeOf_ConcreteAndUnknown(t *testing.T) {
+	// Concrete on either side is rejected at this layer; module context
+	// is required for proper concrete-ref subtyping.
+	require.False(t, HeapTypeKindConcrete.IsAbstractSubtypeOf(HeapTypeKindAny))
+	require.False(t, HeapTypeKindAny.IsAbstractSubtypeOf(HeapTypeKindConcrete))
+	require.False(t, HeapTypeKindConcrete.IsAbstractSubtypeOf(HeapTypeKindConcrete))
+
+	// Unknown on either side never matches.
+	require.False(t, HeapTypeKindUnknown.IsAbstractSubtypeOf(HeapTypeKindAny))
+	require.False(t, HeapTypeKindAny.IsAbstractSubtypeOf(HeapTypeKindUnknown))
+}
+
+func TestIsAbstractSubtypeOf_BottomKindsAcrossHierarchy(t *testing.T) {
+	// Each bottom kind is a subtype of every other kind in its hierarchy.
+	for _, k := range []HeapTypeKind{HeapTypeKindAny, HeapTypeKindEq, HeapTypeKindI31, HeapTypeKindStruct, HeapTypeKindArray} {
+		require.True(t, HeapTypeKindBottom.IsAbstractSubtypeOf(k),
+			"none should be <: %s", k)
+	}
+	require.True(t, HeapTypeKindNoFunc.IsAbstractSubtypeOf(HeapTypeKindFunc))
+	require.True(t, HeapTypeKindNoExtern.IsAbstractSubtypeOf(HeapTypeKindExtern))
+	require.True(t, HeapTypeKindNoExn.IsAbstractSubtypeOf(HeapTypeKindExn))
+
+	// Bottom kinds are NOT subtypes of each other across hierarchies.
+	require.False(t, HeapTypeKindBottom.IsAbstractSubtypeOf(HeapTypeKindNoFunc))
+	require.False(t, HeapTypeKindNoFunc.IsAbstractSubtypeOf(HeapTypeKindBottom))
+	require.False(t, HeapTypeKindNoExn.IsAbstractSubtypeOf(HeapTypeKindNoFunc))
+}
