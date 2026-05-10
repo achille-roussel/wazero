@@ -600,24 +600,35 @@ func (s *Store) GetFunctionTypeIDs(ts []FunctionType) ([]FunctionTypeID, error) 
 	ret := make([]FunctionTypeID, len(ts))
 	for i := range ts {
 		t := &ts[i]
-		inst, err := s.GetFunctionTypeID(t)
+		// Populate FunctionType.string (the debug/identity cache) so that
+		// the post-compile Module remains observably the same as before
+		// the iso-recursive canonicalization moved off of t.key().
+		_ = t.key()
+		key := canonicalTypeKey(t, uint32(i))
+		id, err := s.getOrAssignTypeID(key)
 		if err != nil {
 			return nil, err
 		}
-		ret[i] = inst
+		ret[i] = id
 	}
 	return ret, nil
 }
 
 func (s *Store) GetFunctionTypeID(t *FunctionType) (FunctionTypeID, error) {
+	return s.getOrAssignTypeID(t.key())
+}
+
+// getOrAssignTypeID looks up the given canonical key in the engine-wide
+// type registry; if absent, allocates the next FunctionTypeID and records
+// it. Concurrency-safe.
+func (s *Store) getOrAssignTypeID(key string) (FunctionTypeID, error) {
 	s.mux.RLock()
-	key := t.key()
 	id, ok := s.typeIDs[key]
 	s.mux.RUnlock()
 	if !ok {
 		s.mux.Lock()
 		defer s.mux.Unlock()
-		// Check again in case another goroutine has already added the type.
+		// Re-check under the write lock.
 		if id, ok = s.typeIDs[key]; ok {
 			return id, nil
 		}

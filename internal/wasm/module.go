@@ -937,6 +937,52 @@ func arrayKey(elem FieldType) string {
 	return "array(" + elem.String() + ")"
 }
 
+// canonicalTypeKey produces the iso-recursive canonical key for t at the
+// given module-level position. When t carries a SuperTypeIndex that
+// resolves to another member of the same rec group, the reference is
+// rewritten as "rec.N" (N = position within the group) so that two modules
+// declaring the same recursive group canonicalize to the same key
+// regardless of their absolute Module-level offsets.
+//
+// SuperTypeIndex references that point outside the rec group are still
+// encoded with the absolute module-level index. Resolving those to the
+// engine-wide TypeID of the supertype (so cross-module match works through
+// non-recursive subtype chains too) is a Phase 4 refinement.
+func canonicalTypeKey(t *FunctionType, modulePos uint32) string {
+	var ret string
+	switch t.Form {
+	case CompositeFormFunc:
+		ret = funcKey(t.Params, t.Results)
+	case CompositeFormStruct:
+		ret = structKey(t.Fields)
+	case CompositeFormArray:
+		ret = arrayKey(t.ArrayField)
+	default:
+		ret = fmt.Sprintf("<form=%d>", t.Form)
+	}
+	if t.SuperTypeIndex != nil {
+		groupSize := t.RecGroupSize
+		if groupSize < 1 {
+			groupSize = 1
+		}
+		groupStart := modulePos - uint32(t.RecGroupPosition)
+		groupEnd := groupStart + uint32(groupSize)
+		sup := *t.SuperTypeIndex
+		if sup >= groupStart && sup < groupEnd {
+			ret += fmt.Sprintf("|sup=rec.%d", sup-groupStart)
+		} else {
+			ret += fmt.Sprintf("|sup=abs.%d", sup)
+		}
+	}
+	if t.Final {
+		ret += "|final"
+	}
+	if t.RecGroupSize > 1 {
+		ret += fmt.Sprintf("|rec%d/%d", t.RecGroupPosition, t.RecGroupSize)
+	}
+	return ret
+}
+
 // String implements fmt.Stringer.
 func (f *FunctionType) String() string {
 	return f.key()

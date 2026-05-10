@@ -102,3 +102,94 @@ func TestFunctionType_Key_DistinctForms(t *testing.T) {
 	require.NotEqual(t, funcType.key(), arrayType.key())
 	require.NotEqual(t, structType.key(), arrayType.key())
 }
+
+func TestCanonicalTypeKey_NoSuperType(t *testing.T) {
+	// Without a SuperTypeIndex the canonical key matches the plain key()
+	// modulo the legacy cached-string form (which key() also produces).
+	f := FunctionType{Form: CompositeFormFunc, Results: []ValueType{ValueTypeI32}}
+	require.Equal(t, "v_i32", canonicalTypeKey(&f, 0))
+	require.Equal(t, "v_i32", canonicalTypeKey(&f, 17))
+}
+
+func TestCanonicalTypeKey_IntraGroupSupertype(t *testing.T) {
+	sup := uint32(5) // module-level position 5
+	// Type at module position 6 with rec-group position 1 and size 2.
+	// The rec group spans module positions [5..6], so SuperTypeIndex 5 is
+	// the entry at relative rec-position 0 within the SAME group.
+	f := FunctionType{
+		Form:             CompositeFormStruct,
+		Fields:           []FieldType{{ValueType: ValueTypeI32}},
+		SuperTypeIndex:   &sup,
+		RecGroupSize:     2,
+		RecGroupPosition: 1,
+	}
+	got := canonicalTypeKey(&f, 6)
+	require.Equal(t, "struct{i32}|sup=rec.0|rec1/2", got)
+
+	// Same type at a different module position (rec group starting at 100)
+	// should yield the IDENTICAL canonical key — that's the iso-recursive
+	// invariant.
+	supShifted := uint32(100)
+	f2 := FunctionType{
+		Form:             CompositeFormStruct,
+		Fields:           []FieldType{{ValueType: ValueTypeI32}},
+		SuperTypeIndex:   &supShifted,
+		RecGroupSize:     2,
+		RecGroupPosition: 1,
+	}
+	got2 := canonicalTypeKey(&f2, 101)
+	require.Equal(t, got, got2)
+}
+
+func TestCanonicalTypeKey_ExtraGroupSupertype(t *testing.T) {
+	sup := uint32(2)
+	// Type at module position 6 with rec-group position 1 and size 2.
+	// SuperTypeIndex 2 is outside the rec group [5..6].
+	f := FunctionType{
+		Form:             CompositeFormFunc,
+		Params:           []ValueType{ValueTypeI32},
+		SuperTypeIndex:   &sup,
+		RecGroupSize:     2,
+		RecGroupPosition: 1,
+	}
+	got := canonicalTypeKey(&f, 6)
+	require.Equal(t, "i32_v|sup=abs.2|rec1/2", got)
+
+	// Note: this is the conservative encoding; a future Phase 4 commit
+	// will resolve abs.2 to the supertype's TypeID for true cross-module
+	// canonicalization through subtype chains.
+}
+
+func TestCanonicalTypeKey_StandaloneWithSupertype(t *testing.T) {
+	sup := uint32(0)
+	// Standalone (non-rec-group) type at module position 1 with supertype 0.
+	// The "group" is implicitly size 1 starting at the type's own position,
+	// so SuperTypeIndex 0 is outside it.
+	f := FunctionType{
+		Form:           CompositeFormStruct,
+		Fields:         []FieldType{{ValueType: ValueTypeI32}},
+		SuperTypeIndex: &sup,
+	}
+	got := canonicalTypeKey(&f, 1)
+	require.Equal(t, "struct{i32}|sup=abs.0", got)
+}
+
+func TestCanonicalTypeKey_RecGroupSelfReference(t *testing.T) {
+	// A self-recursive type: position 0 in a size-1 rec group with supertype
+	// pointing to itself. Should canonicalize as rec.0 (intra-group).
+	sup := uint32(3)
+	f := FunctionType{
+		Form:             CompositeFormStruct,
+		Fields:           []FieldType{{ValueType: ValueTypeI32}},
+		SuperTypeIndex:   &sup,
+		RecGroupSize:     1,
+		RecGroupPosition: 0,
+	}
+	// RecGroupSize is 1, so the |rec0/1 suffix isn't appended (it's added
+	// only when RecGroupSize > 1). But the iso-recursive logic still
+	// recognises that sup is within the size-1 group at module position 3
+	// itself (treated as a single-type group). Note the function uses
+	// groupSize=max(RecGroupSize, 1) in this calculation.
+	got := canonicalTypeKey(&f, 3)
+	require.Equal(t, "struct{i32}|sup=rec.0", got)
+}
