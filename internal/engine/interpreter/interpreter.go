@@ -4963,7 +4963,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				v := ce.popValue()
 				matches := refMatches(v, wasm.HeapTypeKind(op.B1), op.B3, uint32(op.U1), f.moduleInstance)
 				if !matches {
-					panic(wasmruntime.ErrRuntimeInvalidConversionToInteger)
+					panic(wasmruntime.ErrRuntimeCastFailure)
 				}
 				ce.pushValue(v)
 				frame.pc++

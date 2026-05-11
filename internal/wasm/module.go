@@ -705,7 +705,12 @@ func validateConstExpression(globals []GlobalType, numFuncs uint32, expr *Consta
 		return err
 	}
 	if typ != expectedType {
-		return fmt.Errorf("const expression type mismatch expected %s but got %s", ValueTypeName(expectedType), ValueTypeName(typ))
+		// For reference types, fall through to the rich isRefSubtypeOf
+		// check so that e.g. (ref i31) initialises an anyref-typed
+		// global (i31 ≤ any in the wasm-gc hierarchy).
+		if !(isReferenceValueType(typ) && isReferenceValueType(expectedType) && isRefSubtypeOf(typ, expectedType)) {
+			return fmt.Errorf("const expression type mismatch expected %s but got %s", ValueTypeName(expectedType), ValueTypeName(typ))
+		}
 	}
 	return nil
 }

@@ -13,6 +13,11 @@ type Table struct {
 	Min  uint32
 	Max  *uint32
 	Type RefType
+	// Init is an optional constant expression that initialises every
+	// table slot at instantiation time. Used by wasm-gc tables that
+	// declare a non-defaultable (non-nullable) reference type. nil for
+	// classic Wasm-2.0 tables.
+	Init *ConstantExpression
 }
 
 // RefType is either RefTypeFuncref or RefTypeExternref as of WebAssembly core 2.0.
@@ -185,7 +190,7 @@ func (m *Module) validateTable(enabledFeatures api.CoreFeatures, tables []Table,
 			}
 
 			t := tables[elem.TableIndex]
-			if t.Type != elem.Type {
+			if !isRefSubtypeOf(elem.Type, t.Type) {
 				return fmt.Errorf("element type mismatch: table has %s but element has %s",
 					RefTypeName(t.Type), RefTypeName(elem.Type),
 				)
@@ -247,10 +252,23 @@ func (m *ModuleInstance) buildTables(module *Module, skipBoundCheck bool) (err e
 	for i := range module.TableSection {
 		tsec := &module.TableSection[i]
 		// The module defining the table is the one that sets its Min/Max etc.
-		m.Tables[idx] = &TableInstance{
+		ti := &TableInstance{
 			References: make([]Reference, tsec.Min), Min: tsec.Min, Max: tsec.Max,
 			Type: tsec.Type,
 		}
+		// wasm-gc tables may have an init expression that initialises
+		// every slot to a non-default value (required for tables of
+		// non-nullable reference types).
+		if tsec.Init != nil {
+			initResults := evaluateConstExprInModuleInstance(tsec.Init, m)
+			if len(initResults) > 0 {
+				ref := Reference(initResults[0])
+				for j := range ti.References {
+					ti.References[j] = ref
+				}
+			}
+		}
+		m.Tables[idx] = ti
 		idx++
 	}
 

@@ -42,6 +42,10 @@ var (
 	// array access (array.get / array.set / array.fill / array.copy /
 	// array.init_data / array.init_elem).
 	ErrRuntimeOutOfBoundsArrayAccess = New("out of bounds array access")
+
+	// ErrRuntimeCastFailure indicates that a ref.cast / ref.cast_null
+	// trapped because the source ref did not match the target heap type.
+	ErrRuntimeCastFailure = New("cast failure")
 )
 
 // Error is returned by a wasm.Engine during the execution of Wasm functions, and they indicate that the Wasm runtime

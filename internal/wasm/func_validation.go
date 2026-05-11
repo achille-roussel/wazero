@@ -1243,7 +1243,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 						return fmt.Errorf("table of index %d not found", tableIndex)
 					}
 
-					if m.ElementSection[elementIndex].Type != tables[tableIndex].Type {
+					if !isRefSubtypeOf(m.ElementSection[elementIndex].Type, tables[tableIndex].Type) {
 						return fmt.Errorf("type mismatch for table.init: element type %s does not match table type %s",
 							RefTypeName(m.ElementSection[elementIndex].Type),
 							RefTypeName(tables[tableIndex].Type),
@@ -2644,10 +2644,19 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if sub == OpcodeGCRefTest || sub == OpcodeGCRefTestNull {
 					valueTypeStack.push(ValueTypeI32)
 				} else {
-					// ref.cast pushes a ref back (we lose nullability info
-					// at the byte-stack level; Phase 4 residual handles
-					// the rich tracking later).
-					valueTypeStack.push(ValueTypeAnyref)
+					// ref.cast pushes a ref of the target type back. Use
+					// the abstract shorthand byte for the kind (concrete
+					// types use the funcref sentinel per our convention;
+					// nullability info is lost at the byte-stack level).
+					var castByte ValueType
+					if kind == HeapTypeKindConcrete {
+						castByte = ValueTypeFuncref
+					} else if b, sok := kind.AbstractShorthandByte(); sok {
+						castByte = b
+					} else {
+						castByte = ValueTypeAnyref
+					}
+					valueTypeStack.push(castByte)
 				}
 			case OpcodeGCBrOnCast, OpcodeGCBrOnCastFail:
 				// Read the cast flags byte, the label index, and BOTH the
