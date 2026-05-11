@@ -76,7 +76,10 @@ type (
 		tryTableEnterAddress *byte
 		// tryTableLeaveAddress is the address of try_table leave trampoline.
 		tryTableLeaveAddress *byte
-		listenerTrampolines  listenerTrampolines
+		// callIndirectSubtypeCheckAddress is the address of the wasm-gc
+		// subtype-aware call_indirect / call_ref runtime-check trampoline.
+		callIndirectSubtypeCheckAddress *byte
+		listenerTrampolines             listenerTrampolines
 	}
 
 	listenerTrampolines = map[*wasm.FunctionType]struct {
@@ -764,7 +767,7 @@ func (e *engine) NewModuleEngine(m *wasm.Module, mi *wasm.ModuleInstance) (wasm.
 }
 
 func (e *engine) compileSharedFunctions() {
-	var sizes [12]int
+	var sizes [13]int
 	var trampolines []byte
 
 	addTrampoline := func(i int, buf []byte) {
@@ -864,6 +867,14 @@ func (e *engine) compileSharedFunctions() {
 			Results: []ssa.Type{},
 		}, false))
 
+	e.be.Init()
+	addTrampoline(12,
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeCallIndirectSubtypeCheck, &ssa.Signature{
+			// exec context, actualTypeID (i32), expectedTypeID (i32)
+			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32},
+			Results: []ssa.Type{},
+		}, false))
+
 	fns := &sharedFunctions{
 		executable:          mmapExecutable(trampolines),
 		listenerTrampolines: make(listenerTrampolines),
@@ -894,6 +905,8 @@ func (e *engine) compileSharedFunctions() {
 	fns.tryTableEnterAddress = &fns.executable[offset]
 	offset += sizes[10]
 	fns.tryTableLeaveAddress = &fns.executable[offset]
+	offset += sizes[11]
+	fns.callIndirectSubtypeCheckAddress = &fns.executable[offset]
 
 	if wazevoapi.PerfMapEnabled {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.memoryGrowAddress)), uint64(sizes[0]), "memory_grow_trampoline")
@@ -908,6 +921,7 @@ func (e *engine) compileSharedFunctions() {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.throwTrampolineAddress)), uint64(sizes[9]), "throw_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.tryTableEnterAddress)), uint64(sizes[10]), "try_table_enter_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.tryTableLeaveAddress)), uint64(sizes[11]), "try_table_leave_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.callIndirectSubtypeCheckAddress)), uint64(sizes[12]), "call_indirect_subtype_check_trampoline")
 	}
 
 	e.sharedFunctions = fns

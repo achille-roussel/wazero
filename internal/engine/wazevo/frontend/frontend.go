@@ -28,8 +28,9 @@ type Compiler struct {
 	memoryNotifySig        ssa.Signature
 	checkModuleExitCodeSig ssa.Signature
 	tableGrowSig           ssa.Signature
-	refFuncSig             ssa.Signature
-	memmoveSig             ssa.Signature
+	refFuncSig                  ssa.Signature
+	callIndirectSubtypeCheckSig ssa.Signature
+	memmoveSig                  ssa.Signature
 	ensureTermination      bool
 
 	// Followings are reset by per function.
@@ -238,8 +239,14 @@ func (c *Compiler) declareSignatures(listenerOn bool) {
 	}
 	c.ssaBuilder.DeclareSignature(&c.refFuncSig)
 
+	c.callIndirectSubtypeCheckSig = ssa.Signature{
+		ID:     c.refFuncSig.ID + 1,
+		Params: []ssa.Type{ssa.TypeI64 /* exec context */, ssa.TypeI32 /* actualTypeID */, ssa.TypeI32 /* expectedTypeID */},
+	}
+	c.ssaBuilder.DeclareSignature(&c.callIndirectSubtypeCheckSig)
+
 	c.memmoveSig = ssa.Signature{
-		ID: c.refFuncSig.ID + 1,
+		ID: c.callIndirectSubtypeCheckSig.ID + 1,
 		// dst, src, and the byte count.
 		Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
 	}

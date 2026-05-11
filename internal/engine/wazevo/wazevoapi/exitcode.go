@@ -49,6 +49,12 @@ const (
 	// ExitCodeTryTableLeave is an exit code for leaving a try_table block.
 	// The dispatch loop pops the most recent try handler.
 	ExitCodeTryTableLeave
+	// ExitCodeCallIndirectSubtypeCheck handles the wasm-gc subtype-aware
+	// runtime check for call_indirect / call_ref. The trampoline passes
+	// (actualTypeID, expectedTypeID) on the goCallStack; the Go handler
+	// consults Store.IsSubtype and either returns OK (subtype match) or
+	// panics with ErrRuntimeIndirectCallTypeMismatch.
+	ExitCodeCallIndirectSubtypeCheck
 	exitCodeMax
 )
 
@@ -115,6 +121,8 @@ func (e ExitCode) String() string {
 		return "try_table_enter"
 	case ExitCodeTryTableLeave:
 		return "try_table_leave"
+	case ExitCodeCallIndirectSubtypeCheck:
+		return "call_indirect_subtype_check"
 	}
 	panic("TODO")
 }

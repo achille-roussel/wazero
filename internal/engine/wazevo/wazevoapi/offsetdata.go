@@ -70,6 +70,10 @@ const (
 	// ExecutionContextOffsetCaughtExceptionClauseIdx is the matched catch clause index
 	// written by handleException and read by compiled handler dispatch code.
 	ExecutionContextOffsetCaughtExceptionClauseIdx Offset = 1232
+	// ExecutionContextOffsetCallIndirectSubtypeCheckTrampolineAddress
+	// is the trampoline address for the wasm-gc subtype-aware
+	// call_indirect / call_ref runtime check.
+	ExecutionContextOffsetCallIndirectSubtypeCheckTrampolineAddress Offset = 1240
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

@@ -3877,13 +3877,22 @@ func (c *Compiler) prepareCallIndirect(typeIndex, tableIndex uint32) (ssa.Value,
 	builder.InsertInstruction(loadExpectedTypeID)
 	expectedTypeID := loadExpectedTypeID.Return()
 
-	// Check if the type ID matches.
-	checkTypeID := builder.AllocateInstruction()
-	checkTypeID.AsIcmp(actualTypeID, expectedTypeID, ssa.IntegerCmpCondNotEqual)
-	builder.InsertInstruction(checkTypeID)
-	exitIfNotMatch := builder.AllocateInstruction()
-	exitIfNotMatch.AsExitIfTrueWithCode(c.execCtxPtrValue, checkTypeID.Return(), wazevoapi.ExitCodeIndirectCallTypeMismatch)
-	builder.InsertInstruction(exitIfNotMatch)
+	// Subtype-aware type check: call the wasm-gc subtype-check trampoline
+	// with (actualTypeID, expectedTypeID). The trampoline forwards to Go,
+	// which consults Store.IsSubtype and panics on mismatch. For pre-GC
+	// modules the call_indirect-style targets are all exact-match, so this
+	// adds one Go round-trip per call_indirect. A future optimisation can
+	// inline the fast path (actualTypeID == expectedTypeID skip).
+	subtypeCheckTrampolineAddr := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue,
+			wazevoapi.ExecutionContextOffsetCallIndirectSubtypeCheckTrampolineAddress.U32(),
+			ssa.TypeI64,
+		).Insert(builder).Return()
+	c.storeCallerModuleContext()
+	subtypeCheckArgs := c.allocateVarLengthValues(3, c.execCtxPtrValue, actualTypeID, expectedTypeID)
+	builder.AllocateInstruction().
+		AsCallIndirect(subtypeCheckTrampolineAddr, &c.callIndirectSubtypeCheckSig, subtypeCheckArgs).
+		Insert(builder)
 
 	// Now ready to call the function. Load the executable and moduleContextOpaquePtr from the function instance.
 	loadExecutablePtr := builder.AllocateInstruction()

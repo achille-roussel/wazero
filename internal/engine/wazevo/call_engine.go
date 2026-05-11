@@ -136,6 +136,11 @@ type (
 		// when an exception is caught. Compiled code loads this from execCtx
 		// after the trampoline call to decide which handler to dispatch to.
 		caughtExceptionClauseIdx int64
+		// callIndirectSubtypeCheckTrampolineAddress holds the address of the
+		// wasm-gc subtype-aware call_indirect / call_ref check trampoline.
+		// The trampoline writes (actualTypeID, expectedTypeID) onto the
+		// goCallStack and exits with ExitCodeCallIndirectSubtypeCheck.
+		callIndirectSubtypeCheckTrampolineAddress *byte
 	}
 )
 
@@ -631,6 +636,23 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			// Pop the most recent try handler.
 			if len(c.tryHandlers) > 0 {
 				c.tryHandlers = c.tryHandlers[:len(c.tryHandlers)-1]
+			}
+			c.execCtx.exitCode = wazevoapi.ExitCodeOK
+			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
+		case wazevoapi.ExitCodeCallIndirectSubtypeCheck:
+			// wasm-gc subtype-aware runtime check for call_indirect /
+			// call_ref. The trampoline passes (actualTypeID, expectedTypeID)
+			// on the goCallStack. We consult Store.IsSubtype and either
+			// resume (subtype match) or panic with the type-mismatch trap.
+			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
+			actualTypeID := wasm.FunctionTypeID(uint32(s[0]))
+			expectedTypeID := wasm.FunctionTypeID(uint32(s[1]))
+			if actualTypeID != expectedTypeID {
+				mod := c.callerModuleInstance()
+				if !mod.GetStore().IsSubtype(actualTypeID, expectedTypeID) {
+					panic(wasmruntime.ErrRuntimeIndirectCallTypeMismatch)
+				}
 			}
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
