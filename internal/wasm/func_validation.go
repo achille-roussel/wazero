@@ -3327,15 +3327,6 @@ func (s *valueTypeStack) popReferenceType() error {
 
 func (s *valueTypeStack) push(v ValueType) {
 	s.stack = append(s.stack, v)
-	// Keep refs in lockstep with stack. Validators rely on
-	// refs[i] mirroring stack[i] for any i where rich info exists,
-	// so we always pad with nil for non-ref pushes once refs has
-	// been touched at all (post-allocation). For pure non-GC modules
-	// that never push rich info, len(refs) stays 0 and this is a
-	// no-op.
-	if len(s.refs) > 0 || cap(s.refs) > 0 {
-		s.refs = append(s.refs, nil)
-	}
 	if sp := len(s.stack); sp > s.maximumStackPointer {
 		s.maximumStackPointer = sp
 	}
@@ -3348,20 +3339,15 @@ func (s *valueTypeStack) push(v ValueType) {
 // nullability is implicit in the byte).
 func (s *valueTypeStack) pushRef(v ValueType, ref *ValueTypeRef) {
 	s.stack = append(s.stack, v)
-	// Trim or pad refs to len(stack)-1 so the new entry lands at
-	// the correct position. This handles both fresh (refs empty)
-	// and stale (refs longer than expected, from a prior function's
-	// validation) cases.
-	wantLen := len(s.stack) - 1
-	if len(s.refs) > wantLen {
-		s.refs = s.refs[:wantLen]
-	}
 	if ref != nil {
-		for len(s.refs) < wantLen {
+		// Ensure refs has same length as stack; pad with nils.
+		for len(s.refs) < len(s.stack)-1 {
 			s.refs = append(s.refs, nil)
 		}
 		s.refs = append(s.refs, ref)
-	} else if len(s.refs) >= wantLen {
+	} else if len(s.refs) >= len(s.stack)-1 {
+		// Only pad refs if it's already being maintained (we don't
+		// want to allocate for non-GC modules).
 		s.refs = append(s.refs, nil)
 	}
 	if sp := len(s.stack); sp > s.maximumStackPointer {
