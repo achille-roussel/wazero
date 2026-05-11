@@ -103,8 +103,8 @@ func TestNarrowAndExtendI8(t *testing.T) {
 	// Narrowing keeps only the low 8 bits.
 	require.Equal(t, uint8(0), NarrowI8(0))
 	require.Equal(t, uint8(1), NarrowI8(1))
-	require.Equal(t, uint8(0xFF), NarrowI8(-1))     // -1 narrows to 0xFF
-	require.Equal(t, uint8(0xFF), NarrowI8(0x1FF))  // high bits dropped
+	require.Equal(t, uint8(0xFF), NarrowI8(-1))    // -1 narrows to 0xFF
+	require.Equal(t, uint8(0xFF), NarrowI8(0x1FF)) // high bits dropped
 	require.Equal(t, uint8(0x42), NarrowI8(0x12342))
 
 	// Sign-extension treats the byte as int8 and widens to int32.
@@ -151,8 +151,8 @@ func TestPackedRoundTrip(t *testing.T) {
 		{0, 0, 0},
 		{1, 1, 1},
 		{-1, -1, -1},
-		{0x1F0, -16, 0x1F0},                    // i8 narrow drops 0x1, sign-extends 0xF0
-		{0x10000, 0, 0},                        // i16 narrow drops 0x1, sign-extends 0x0000 = 0
+		{0x1F0, -16, 0x1F0},                      // i8 narrow drops 0x1, sign-extends 0xF0
+		{0x10000, 0, 0},                          // i16 narrow drops 0x1, sign-extends 0x0000 = 0
 		{int32(0x12345678), int32(0x78), 0x5678}, // both narrowings
 	}
 	for _, tt := range tests {

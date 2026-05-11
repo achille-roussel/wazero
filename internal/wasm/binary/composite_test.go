@@ -33,8 +33,8 @@ func TestDecodeTypeSection_RecGroup(t *testing.T) {
 	// One rec group of two func types.
 	// 0x4E rec, count=2, then two 0x60 func types.
 	in := []byte{
-		0x01,                   // type-section count
-		0x4E, 0x02,             // rec, group-size=2
+		0x01,       // type-section count
+		0x4E, 0x02, // rec, group-size=2
 		0x60, 0x00, 0x01, 0x7F, // func ()->[i32]
 		0x60, 0x01, 0x7E, 0x00, // func [i64]->[]
 	}
@@ -54,9 +54,9 @@ func TestDecodeTypeSection_SubFinalNoSupers(t *testing.T) {
 	// 0x4F sub final with 0 supertypes wrapping a func type — same as
 	// shorthand 0x60, but expressed explicitly.
 	in := []byte{
-		0x01,                         // type-section count
-		0x4F, 0x00,                   // sub final, 0 supertypes
-		0x60, 0x00, 0x01, 0x7F,       // func ()->[i32]
+		0x01,       // type-section count
+		0x4F, 0x00, // sub final, 0 supertypes
+		0x60, 0x00, 0x01, 0x7F, // func ()->[i32]
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -71,10 +71,10 @@ func TestDecodeTypeSection_SubWithSuper(t *testing.T) {
 	// 0x50 sub (non-final) with one supertype index 0, struct body with one
 	// mutable i32 field.
 	in := []byte{
-		0x02,                         // type-section count
-		0x60, 0x00, 0x00,             // type 0: func ()->[]
-		0x50, 0x01, 0x00,             // sub, 1 supertype = type index 0
-		0x5F, 0x01, 0x7F, 0x01,       // struct { mut i32 }
+		0x02,             // type-section count
+		0x60, 0x00, 0x00, // type 0: func ()->[]
+		0x50, 0x01, 0x00, // sub, 1 supertype = type index 0
+		0x5F, 0x01, 0x7F, 0x01, // struct { mut i32 }
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -92,8 +92,8 @@ func TestDecodeTypeSection_SubWithSuper(t *testing.T) {
 func TestDecodeTypeSection_StructShorthand(t *testing.T) {
 	// 0x5F struct shorthand with two fields: const i32, mut i64.
 	in := []byte{
-		0x01,                                   // type-section count
-		0x5F, 0x02, 0x7F, 0x00, 0x7E, 0x01,     // struct { i32, mut i64 }
+		0x01,                               // type-section count
+		0x5F, 0x02, 0x7F, 0x00, 0x7E, 0x01, // struct { i32, mut i64 }
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -125,8 +125,8 @@ func TestDecodeTypeSection_StructWithPackedFields(t *testing.T) {
 
 func TestDecodeTypeSection_EmptyStruct(t *testing.T) {
 	in := []byte{
-		0x01,             // type-section count
-		0x5F, 0x00,       // struct { }
+		0x01,       // type-section count
+		0x5F, 0x00, // struct { }
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -139,8 +139,8 @@ func TestDecodeTypeSection_EmptyStruct(t *testing.T) {
 func TestDecodeTypeSection_ArrayShorthand(t *testing.T) {
 	// 0x5E array shorthand with mutable i32 element.
 	in := []byte{
-		0x01,                   // type-section count
-		0x5E, 0x7F, 0x01,       // array (mut i32)
+		0x01,             // type-section count
+		0x5E, 0x7F, 0x01, // array (mut i32)
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -154,8 +154,8 @@ func TestDecodeTypeSection_ArrayShorthand(t *testing.T) {
 func TestDecodeTypeSection_ArrayPacked(t *testing.T) {
 	// Array of const-i8.
 	in := []byte{
-		0x01,                   // type-section count
-		0x5E, 0x78, 0x00,       // array (i8)
+		0x01,             // type-section count
+		0x5E, 0x78, 0x00, // array (i8)
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -169,10 +169,10 @@ func TestDecodeTypeSection_ArrayPacked(t *testing.T) {
 func TestDecodeTypeSection_MixedRecGroup(t *testing.T) {
 	// One rec group containing a struct and an array.
 	in := []byte{
-		0x01,                   // type-section count
-		0x4E, 0x02,             // rec, group-size=2
+		0x01,       // type-section count
+		0x4E, 0x02, // rec, group-size=2
 		0x5F, 0x01, 0x7F, 0x01, // struct { mut i32 }
-		0x5E, 0x7E, 0x00,       // array (i64)
+		0x5E, 0x7E, 0x00, // array (i64)
 	}
 	r := bytes.NewReader(in)
 	got, err := decodeTypeSection(gcFeatures, r)
@@ -189,9 +189,9 @@ func TestDecodeTypeSection_MixedRecGroup(t *testing.T) {
 func TestDecodeTypeSection_TooManySupers(t *testing.T) {
 	// Sub form with 2 supertype indices — MVP allows at most 1.
 	in := []byte{
-		0x01,                         // type-section count
-		0x50, 0x02, 0x00, 0x01,       // sub, 2 supertypes
-		0x60, 0x00, 0x00,             // func ()->[]
+		0x01,                   // type-section count
+		0x50, 0x02, 0x00, 0x01, // sub, 2 supertypes
+		0x60, 0x00, 0x00, // func ()->[]
 	}
 	r := bytes.NewReader(in)
 	_, err := decodeTypeSection(gcFeatures, r)
@@ -200,8 +200,8 @@ func TestDecodeTypeSection_TooManySupers(t *testing.T) {
 
 func TestDecodeTypeSection_InvalidLeadingByte(t *testing.T) {
 	in := []byte{
-		0x01,    // type-section count
-		0x00,    // invalid sub-type form
+		0x01, // type-section count
+		0x00, // invalid sub-type form
 	}
 	r := bytes.NewReader(in)
 	_, err := decodeTypeSection(gcFeatures, r)
@@ -210,8 +210,8 @@ func TestDecodeTypeSection_InvalidLeadingByte(t *testing.T) {
 
 func TestDecodeTypeSection_InvalidMutability(t *testing.T) {
 	in := []byte{
-		0x01,                         // type-section count
-		0x5F, 0x01, 0x7F, 0x02,       // struct { i32 with bad mutability byte 0x02 }
+		0x01,                   // type-section count
+		0x5F, 0x01, 0x7F, 0x02, // struct { i32 with bad mutability byte 0x02 }
 	}
 	r := bytes.NewReader(in)
 	_, err := decodeTypeSection(gcFeatures, r)

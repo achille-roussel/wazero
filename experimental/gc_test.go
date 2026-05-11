@@ -179,6 +179,7 @@ func TestGC_I31RefEq(t *testing.T) {
 		require.Equal(t, int32(1), api.DecodeI32(res[0]))
 	})
 }
+
 func TestGC_RefAsNonNull(t *testing.T) {
 	ctx := context.Background()
 
@@ -687,8 +688,8 @@ func TestGC_BrOnNullAndNonNull(t *testing.T) {
 		wasm.OpcodeLocalGet, 0x00,
 		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCRefI31),
 		wasm.OpcodeBrOnNonNull, 0x00, // non-null => branches with ref on stack
-		wasm.OpcodeUnreachable,        // null path — never reached for non-null i31
-		wasm.OpcodeEnd,                // block end — receives ref via the branch
+		wasm.OpcodeUnreachable, // null path — never reached for non-null i31
+		wasm.OpcodeEnd,         // block end — receives ref via the branch
 		// outside the block: i31.get_s
 		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCI31GetS),
 		wasm.OpcodeEnd,
@@ -813,7 +814,7 @@ func TestGC_ArrayBulk(t *testing.T) {
 	// makeFilledAndRead(i32 length, i32 fillVal, i32 idx) -> i32:
 	//   array.new_default $T length; idx=0 count=length array.fill fillVal; array.get idx
 	makeFilledAndRead := []byte{
-		wasm.OpcodeLocalGet, 0x00,                                     // length
+		wasm.OpcodeLocalGet, 0x00, // length
 		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCArrayNewDefault), 0x00, // array
 		// Now stack: [arrayRef]; duplicate it via a different approach:
 		// since we need the array for fill AND for get, build the array twice.
@@ -850,12 +851,14 @@ func TestGC_ArrayBulk(t *testing.T) {
 			// 0: array (mut i32)
 			{Form: wasm.CompositeFormArray, ArrayField: wasm.FieldType{ValueType: wasm.ValueTypeI32, Mutable: true}},
 			// 1: func (i32, i32, i32, i32) -> i32
-			{Form: wasm.CompositeFormFunc,
+			{
+				Form:    wasm.CompositeFormFunc,
 				Params:  []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32},
 				Results: []wasm.ValueType{wasm.ValueTypeI32},
 			},
 			// 2: func (i32, i32, i32) -> i32
-			{Form: wasm.CompositeFormFunc,
+			{
+				Form:    wasm.CompositeFormFunc,
 				Params:  []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32, wasm.ValueTypeI32},
 				Results: []wasm.ValueType{wasm.ValueTypeI32},
 			},
@@ -919,10 +922,10 @@ func TestGC_BrOnCast(t *testing.T) {
 		wasm.OpcodeLocalGet, 0x00,
 		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCRefI31),
 		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCBrOnCast),
-		0x00,       // flags (src non-null, dst non-null)
-		0x00,       // labelidx
-		0x6E,       // src heaptype: any
-		0x6C,       // dst heaptype: i31
+		0x00, // flags (src non-null, dst non-null)
+		0x00, // labelidx
+		0x6E, // src heaptype: any
+		0x6C, // dst heaptype: i31
 		wasm.OpcodeUnreachable,
 		wasm.OpcodeEnd,
 		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCI31GetS),

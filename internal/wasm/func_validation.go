@@ -3292,6 +3292,7 @@ func classifyRef(b ValueType, ref *ValueTypeRef) (nullable bool, kind HeapTypeKi
 	}
 	return true, HeapTypeKindUnknown, 0
 }
+
 // It uses IsValueTypeSubtypeOf so checks honour nullability and concrete
 // TypeIdx info when present on either side.
 func (s *valueTypeStack) popAndVerifyTypeRich(expected ValueType, expectedRef *ValueTypeRef) error {
