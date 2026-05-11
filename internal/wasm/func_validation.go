@@ -2529,9 +2529,44 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			}
 			// On fall-through the ref is consumed; do NOT push back.
 		} else if op == OpcodeCallRef || op == OpcodeReturnCallRef {
-			// Typed function-reference opcodes (also gated on CoreFeaturesGC).
-			// Same Phase 5 caveat as above.
-			return fmt.Errorf("typed function-reference instruction %s (0x%x) is not yet supported by the interpreter", InstructionName(op), op)
+			// call_ref / return_call_ref t: pop a funcref of type $t,
+			// pop the function's params, push the function's results.
+			pc++
+			typeIdx, n, err := leb128.LoadUint32(body[pc:])
+			if err != nil {
+				return fmt.Errorf("read call_ref type index: %v", err)
+			}
+			pc += n - 1
+			if int(typeIdx) >= len(m.TypeSection) {
+				return fmt.Errorf("call_ref type index %d out of range", typeIdx)
+			}
+			ft := &m.TypeSection[typeIdx]
+			if ft.Form != CompositeFormFunc {
+				return fmt.Errorf("call_ref type %d is not a function type", typeIdx)
+			}
+			// Pop the funcref (validator accepts any ref type loosely;
+			// runtime checks the type ID).
+			if err := valueTypeStack.popReferenceType(); err != nil {
+				return fmt.Errorf("call_ref: cannot pop funcref: %v", err)
+			}
+			// Pop params in reverse declaration order.
+			for i := len(ft.Params) - 1; i >= 0; i-- {
+				if err := valueTypeStack.popAndVerifyType(ft.Params[i]); err != nil {
+					return fmt.Errorf("call_ref: cannot pop param[%d]: %v", i, err)
+				}
+			}
+			// return_call_ref doesn't push results (it's a tail call); the
+			// function's results match the caller's results, validated
+			// elsewhere. The simplest treatment in our minimal Phase 5 is
+			// to push the function's results — matching the existing
+			// tail-call validator pattern.
+			for _, r := range ft.Results {
+				valueTypeStack.push(r)
+			}
+			if op == OpcodeReturnCallRef {
+				// Mark the rest of the block as unreachable.
+				valueTypeStack.unreachable()
+			}
 		} else {
 			return fmt.Errorf("invalid instruction 0x%x", op)
 		}

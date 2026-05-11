@@ -68,14 +68,15 @@ func TestValidateFunction_TruncatedGCPrefix(t *testing.T) {
 }
 
 func TestValidateFunction_TypedFuncRefOpcodeMessage(t *testing.T) {
+	// Placeholder for remaining typed-funcref opcodes that have not yet
+	// been implemented. The currently-implemented ones (ref.eq,
+	// ref.as_non_null, br_on_null, br_on_non_null, call_ref,
+	// return_call_ref) have been removed from this list.
 	tests := []struct {
 		name      string
 		op        Opcode
 		expectSub string
-	}{
-		{"call_ref", OpcodeCallRef, "call_ref"},
-		{"return_call_ref", OpcodeReturnCallRef, "return_call_ref"},
-	}
+	}{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateGCBody(t, []byte{tt.op, OpcodeEnd})

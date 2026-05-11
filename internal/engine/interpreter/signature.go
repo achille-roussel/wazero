@@ -283,6 +283,10 @@ func (c *compiler) wasmOpcodeSignature(op wasm.Opcode, index uint32) (*signature
 		// effect depends on the target label type. Mirror the br_if /
 		// Throw pattern.
 		return signature_None_None, nil
+	case wasm.OpcodeCallRef, wasm.OpcodeReturnCallRef:
+		// Dynamic; the compiler tracks the function-type params/results
+		// based on the type-index immediate.
+		return signature_None_None, nil
 	case wasm.OpcodeGCPrefix:
 		// 0xfb-prefixed sub-opcodes have varying signatures. The
 		// caller passes the sub-opcode in index (loaded from the

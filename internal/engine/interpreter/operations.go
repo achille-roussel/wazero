@@ -501,6 +501,10 @@ func (o operationKind) String() (ret string) {
 		ret = "operationKindBrOnNull"
 	case operationKindBrOnNonNull:
 		ret = "operationKindBrOnNonNull"
+	case operationKindCallRef:
+		ret = "operationKindCallRef"
+	case operationKindReturnCallRef:
+		ret = "operationKindReturnCallRef"
 	default:
 		panic(fmt.Errorf("unknown operation %d", o))
 	}
@@ -901,6 +905,15 @@ const (
 	// we fall through.
 	operationKindBrOnNonNull
 
+	// operationKindCallRef is the Kind for call_ref t. U1 = module-local
+	// type index. Pops a funcref, traps on null, type-checks against the
+	// type's engine FunctionTypeID, then calls.
+	operationKindCallRef
+
+	// operationKindReturnCallRef is the Kind for return_call_ref t —
+	// like CallRef but a tail call.
+	operationKindReturnCallRef
+
 	// operationKindEnd is always placed at the bottom of this iota definition to be used in the test.
 	operationKindEnd
 )
@@ -1262,6 +1275,8 @@ func (o unionOperation) String() string {
 		return fmt.Sprintf("%s heapKind=%d nullable=%v typeID=%d", o.Kind, o.B1, o.B3, o.U1)
 	case operationKindBrOnNull, operationKindBrOnNonNull:
 		return fmt.Sprintf("%s thenLabel=%d elseLabel=%d drop=%#x", o.Kind, o.U1, o.U2, o.U3)
+	case operationKindCallRef, operationKindReturnCallRef:
+		return fmt.Sprintf("%s typeIdx=%d", o.Kind, o.U1)
 
 	default:
 		panic(fmt.Sprintf("TODO: %v", o.Kind))
@@ -3181,4 +3196,16 @@ func newOperationBrOnNonNull(thenTarget, elseTarget label, thenDrop inclusiveRan
 		U2:   uint64(elseTarget),
 		U3:   thenDrop.AsU64(),
 	}
+}
+
+// newOperationCallRef constructs the operation for call_ref. typeIdx is
+// the module-local type index for type-checking the popped funcref.
+func newOperationCallRef(typeIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindCallRef, U1: uint64(typeIdx)}
+}
+
+// newOperationReturnCallRef constructs the operation for return_call_ref —
+// the tail-call variant of call_ref.
+func newOperationReturnCallRef(typeIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindReturnCallRef, U1: uint64(typeIdx)}
 }
