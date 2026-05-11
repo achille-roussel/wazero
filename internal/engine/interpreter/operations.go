@@ -505,6 +505,12 @@ func (o operationKind) String() (ret string) {
 		ret = "operationKindCallRef"
 	case operationKindReturnCallRef:
 		ret = "operationKindReturnCallRef"
+	case operationKindArrayNewFixed:
+		ret = "operationKindArrayNewFixed"
+	case operationKindArrayFill:
+		ret = "operationKindArrayFill"
+	case operationKindArrayCopy:
+		ret = "operationKindArrayCopy"
 	default:
 		panic(fmt.Errorf("unknown operation %d", o))
 	}
@@ -914,6 +920,15 @@ const (
 	// like CallRef but a tail call.
 	operationKindReturnCallRef
 
+	// operationKindArrayNewFixed is the Kind for array.new_fixed t N.
+	// U1 = type index. U2 = element count N.
+	operationKindArrayNewFixed
+	// operationKindArrayFill is the Kind for array.fill t. U1 = type index.
+	operationKindArrayFill
+	// operationKindArrayCopy is the Kind for array.copy. U1 = dst type
+	// index, U2 = src type index.
+	operationKindArrayCopy
+
 	// operationKindEnd is always placed at the bottom of this iota definition to be used in the test.
 	operationKindEnd
 )
@@ -1277,6 +1292,12 @@ func (o unionOperation) String() string {
 		return fmt.Sprintf("%s thenLabel=%d elseLabel=%d drop=%#x", o.Kind, o.U1, o.U2, o.U3)
 	case operationKindCallRef, operationKindReturnCallRef:
 		return fmt.Sprintf("%s typeIdx=%d", o.Kind, o.U1)
+	case operationKindArrayNewFixed:
+		return fmt.Sprintf("%s typeIdx=%d count=%d", o.Kind, o.U1, o.U2)
+	case operationKindArrayFill:
+		return fmt.Sprintf("%s typeIdx=%d", o.Kind, o.U1)
+	case operationKindArrayCopy:
+		return fmt.Sprintf("%s dstTypeIdx=%d srcTypeIdx=%d", o.Kind, o.U1, o.U2)
 
 	default:
 		panic(fmt.Sprintf("TODO: %v", o.Kind))
@@ -3208,4 +3229,16 @@ func newOperationCallRef(typeIdx uint32) unionOperation {
 // the tail-call variant of call_ref.
 func newOperationReturnCallRef(typeIdx uint32) unionOperation {
 	return unionOperation{Kind: operationKindReturnCallRef, U1: uint64(typeIdx)}
+}
+
+func newOperationArrayNewFixed(typeIdx, count uint32) unionOperation {
+	return unionOperation{Kind: operationKindArrayNewFixed, U1: uint64(typeIdx), U2: uint64(count)}
+}
+
+func newOperationArrayFill(typeIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindArrayFill, U1: uint64(typeIdx)}
+}
+
+func newOperationArrayCopy(dstTypeIdx, srcTypeIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindArrayCopy, U1: uint64(dstTypeIdx), U2: uint64(srcTypeIdx)}
 }
