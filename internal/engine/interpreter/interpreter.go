@@ -5572,7 +5572,13 @@ func refMatches(v uint64, kind wasm.HeapTypeKind, nullable bool, typeIdx uint32,
 	// the value is a heap struct/array. Otherwise it's likely a
 	// function pointer (the *FunctionType at offset 0 doesn't
 	// coincidentally equal a resolved TypeID).
-	objTypeID := *(*wasm.FunctionTypeID)(unsafe.Pointer(uintptr(v)))
+	//
+	// Use the same double-pointer reinterpretation pattern as
+	// functionFromUintptr to avoid `checkptr: pointer arithmetic
+	// result points to invalid allocation` under -race.
+	var ptr uintptr = uintptr(v)
+	fidPtr := *(**wasm.FunctionTypeID)(unsafe.Pointer(&ptr))
+	objTypeID := *fidPtr
 	store := mi.GetStore()
 	if !store.IsResolvedType(objTypeID) {
 		// Not a heap struct/array (offset 0 didn't read a known
