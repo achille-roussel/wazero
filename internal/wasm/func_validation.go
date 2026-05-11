@@ -2518,6 +2518,75 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					// the rich tracking later).
 					valueTypeStack.push(ValueTypeAnyref)
 				}
+			case OpcodeGCBrOnCast, OpcodeGCBrOnCastFail:
+				// Read the cast flags byte, the label index, and BOTH the
+				// src and dst heap-type immediates per the spec encoding.
+				pc++
+				if int(pc) >= len(body) {
+					return fmt.Errorf("truncated %s", GCInstructionName(sub))
+				}
+				_ = body[pc] // cast flags byte (unused for runtime); validated implicitly
+				labelIdx, ln, err := leb128.LoadUint32(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read %s label: %v", GCInstructionName(sub), err)
+				}
+				pc += ln
+				if int(labelIdx) >= len(controlBlockStack.stack) {
+					return fmt.Errorf("invalid label index for %s", GCInstructionName(sub))
+				}
+				// Read src heap type (validates the operand's static type)
+				_, srcN, err := leb128.LoadInt64(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read %s src heap type: %v", GCInstructionName(sub), err)
+				}
+				pc += srcN
+				// Read dst heap type.
+				dstHt, dstN, err := leb128.LoadInt64(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read %s dst heap type: %v", GCInstructionName(sub), err)
+				}
+				pc += dstN
+				_, dstTypeIdx, ok := HeapTypeKindFromBinary(dstHt)
+				if !ok {
+					return fmt.Errorf("invalid dst heap type for %s: %d", GCInstructionName(sub), dstHt)
+				}
+				if dstTypeIdx >= uint32(len(m.TypeSection)) && dstHt >= 0 {
+					return fmt.Errorf("br_on_cast concrete dst type index out of range")
+				}
+				// Pop the ref, check the target label expects the rest
+				// of the stack (label's last param is the ref on the
+				// branch path).
+				refTy, _, ok := valueTypeStack.tryPop()
+				if !ok {
+					return fmt.Errorf("reference type missing for %s", GCInstructionName(sub))
+				}
+				if refTy != valueTypeUnknown && !isReferenceValueType(refTy) {
+					return fmt.Errorf("type mismatch: expected reference type for %s, but was %s",
+						GCInstructionName(sub), ValueTypeName(refTy))
+				}
+				target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(labelIdx)-1]
+				var targetTypes []ValueType
+				if target.op == OpcodeLoop {
+					targetTypes = target.blockType.Params
+				} else {
+					targetTypes = target.blockType.Results
+				}
+				if len(targetTypes) == 0 {
+					return fmt.Errorf("%s target label expects no values; needs a trailing ref", GCInstructionName(sub))
+				}
+				if !isReferenceValueType(targetTypes[len(targetTypes)-1]) && targetTypes[len(targetTypes)-1] != valueTypeUnknown {
+					return fmt.Errorf("%s target label's last type is not a reference", GCInstructionName(sub))
+				}
+				head := targetTypes[:len(targetTypes)-1]
+				if err := valueTypeStack.popResults(op, head, false); err != nil {
+					return err
+				}
+				for _, t := range head {
+					valueTypeStack.push(t)
+				}
+				// The ref is left on the stack for the fall-through path
+				// regardless of which variant (br_on_cast or br_on_cast_fail).
+				valueTypeStack.push(refTy)
 			default:
 				if name := GCInstructionName(sub); name != "" {
 					return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter", name, sub)

@@ -638,6 +638,9 @@ func (e *engine) lowerIR(ir *compilationResult, ret *compiledFunction) error {
 		case operationKindBrOnNull, operationKindBrOnNonNull:
 			e.setLabelAddress(&op.U1, label(op.U1), labelAddressResolutions)
 			e.setLabelAddress(&op.U2, label(op.U2), labelAddressResolutions)
+		case operationKindBrOnCast, operationKindBrOnCastFail:
+			e.setLabelAddress(&op.U1, label(op.U1), labelAddressResolutions)
+			e.setLabelAddress(&op.U2, label(op.U2), labelAddressResolutions)
 		case operationKindBrTable:
 			for j := 0; j < len(op.Us); j += 2 {
 				target := op.Us[j]
@@ -4865,6 +4868,30 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				ce.pushValue(v)
 				frame.pc++
+
+			case operationKindBrOnCast:
+				// br_on_cast: pop ref, push back, if matches branch.
+				v := ce.popValue()
+				matches := refMatches(v, wasm.HeapTypeKind(op.B1), op.B3, uint32(op.Us[0]), f.moduleInstance)
+				ce.pushValue(v)
+				if matches {
+					ce.drop(op.U3)
+					frame.pc = op.U1
+				} else {
+					frame.pc = op.U2
+				}
+
+			case operationKindBrOnCastFail:
+				// br_on_cast_fail: pop ref, push back, if NOT matches branch.
+				v := ce.popValue()
+				matches := refMatches(v, wasm.HeapTypeKind(op.B1), op.B3, uint32(op.Us[0]), f.moduleInstance)
+				ce.pushValue(v)
+				if !matches {
+					ce.drop(op.U3)
+					frame.pc = op.U1
+				} else {
+					frame.pc = op.U2
+				}
 
 			case operationKindBrOnNull:
 				// Pop a ref. If null, drop + branch to thenLabel.

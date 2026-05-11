@@ -1989,6 +1989,50 @@ operatorSwitch:
 			} else {
 				c.emit(newOperationRefCast(byte(kind), nullable, typeIdx))
 			}
+		case wasm.OpcodeGCBrOnCast, wasm.OpcodeGCBrOnCastFail:
+			// flags, labelidx, src heaptype, dst heaptype
+			c.pc++
+			flags := c.body[c.pc]
+			c.pc++
+			labelIdx, ln, err := leb128.LoadUint32(c.body[c.pc:])
+			if err != nil {
+				return fmt.Errorf("read br_on_cast label: %v", err)
+			}
+			c.pc += ln
+			_, srcN, err := leb128.LoadInt64(c.body[c.pc:])
+			if err != nil {
+				return fmt.Errorf("read br_on_cast src heap type: %v", err)
+			}
+			c.pc += srcN
+			dstHt, dstN, err := leb128.LoadInt64(c.body[c.pc:])
+			if err != nil {
+				return fmt.Errorf("read br_on_cast dst heap type: %v", err)
+			}
+			c.pc += dstN - 1
+			dstKind, dstTypeIdx, _ := wasm.HeapTypeKindFromBinary(dstHt)
+			dstNullable := flags&wasm.BrOnCastFlagDstNullable != 0
+			if c.unreachableState.on {
+				break operatorSwitch
+			}
+			// stackPop the ref (which is re-pushed for the fall-through).
+			c.stackPop()
+			targetFrame := c.controlFrames.get(int(labelIdx))
+			targetFrame.ensureContinuation()
+			drop := c.getFrameDropRange(targetFrame, false)
+			target := targetFrame.asLabel()
+			c.result.LabelCallers[target]++
+			continuationLabel := newLabel(labelKindHeader, c.nextFrameID())
+			c.result.LabelCallers[continuationLabel]++
+			if index == wasm.OpcodeGCBrOnCast {
+				c.emit(newOperationBrOnCast(target, continuationLabel, drop,
+					byte(dstKind), dstNullable, dstTypeIdx))
+			} else {
+				c.emit(newOperationBrOnCastFail(target, continuationLabel, drop,
+					byte(dstKind), dstNullable, dstTypeIdx))
+			}
+			// Fall-through: ref is on the stack regardless.
+			c.stackPush(unsignedTypeI64)
+			c.emit(newOperationLabel(continuationLabel))
 		default:
 			return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter",
 				wasm.GCInstructionName(index), index)
