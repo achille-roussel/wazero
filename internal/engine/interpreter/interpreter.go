@@ -4582,40 +4582,38 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 
 		case operationKindRefI31:
 				raw := ce.popValue()
-				// ref.i31 narrows the low 31 bits and produces a non-null i31ref.
-				i31 := wasm.NewI31Ref(uint32(raw))
-				ce.keepAlive(i31)
-				ce.pushValue(uint64(uintptr(unsafe.Pointer(i31))))
+				// ref.i31 narrows the low 31 bits and produces a non-null
+				// i31ref. The tagged-uintptr encoding (bit 0 = 1, value in
+				// bits 1..31) is sufficient — no heap allocation needed.
+				ce.pushValue(uint64(wasm.PackI31(uint32(raw))))
 				frame.pc++
 
 			case operationKindI31GetS:
 				v := ce.popValue()
-				if v == 0 {
-					// i31.get_s traps on a null i31 ref.
+				// i31.get_s traps if the operand is the null reference or
+				// a non-i31 reference. A real-pointer ref reaching this
+				// instruction is a validator error so we treat anything
+				// without the tag bit as null/trap.
+				if !wasm.IsTaggedI31(uintptr(v)) {
 					panic(wasmruntime.ErrRuntimeNullReference)
 				}
-				i31 := *(**wasm.I31Ref)(unsafe.Pointer(&v))
-				ce.pushValue(uint64(uint32(i31.SignedI32())))
+				ce.pushValue(uint64(uint32(wasm.UnpackI31Signed(uintptr(v)))))
 				frame.pc++
 
 			case operationKindI31GetU:
 				v := ce.popValue()
-				if v == 0 {
+				if !wasm.IsTaggedI31(uintptr(v)) {
 					panic(wasmruntime.ErrRuntimeNullReference)
 				}
-				i31 := *(**wasm.I31Ref)(unsafe.Pointer(&v))
-				ce.pushValue(uint64(i31.UnsignedI32()))
+				ce.pushValue(uint64(wasm.UnpackI31Unsigned(uintptr(v))))
 				frame.pc++
 
 			case operationKindRefEq:
 				// ref.eq pops two refs and pushes 1 iff they are equal.
-				// For non-i31 references we use pointer equality.
-				//
-				// TODO(phase 5b): the spec mandates VALUE equality for i31
-				// pairs; with our current uintptr representation we cannot
-				// distinguish *I31Ref pointers from other ref kinds at
-				// runtime. Once a parallel ref stack lands we'll dispatch
-				// on the Go type at the slot to special-case *I31Ref.
+				// With the tagged-uintptr i31 encoding, value-equal i31s
+				// produce identical bit patterns, so uint64 equality also
+				// gives the spec-mandated value equality for i31 pairs.
+				// Pointer pairs continue to compare by pointer identity.
 				b := ce.popValue()
 				a := ce.popValue()
 				if a == b {

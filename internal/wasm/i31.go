@@ -64,3 +64,45 @@ func (r *I31Ref) Equals(other *I31Ref) bool {
 	}
 	return r.bits == other.bits
 }
+
+// -----------------------------------------------------------------------
+// Tagged-uintptr i31 encoding used by the interpreter's operand stack.
+//
+// Layout:
+//   bit 0:      tag — 1 if this is an i31 ref, 0 if it is a pointer (or null)
+//   bits 1..31: the 31-bit i31 value
+//   bits 32-63: zero
+//
+// The null i31 ref is encoded as uintptr 0 (no tag bit, no value). Real
+// heap pointers always have bit 0 clear because Go's allocator aligns
+// objects to at least 8 bytes on the supported 64-bit platforms — so the
+// tag bit is unambiguous.
+
+// PackI31 returns the tagged-uintptr representation of an i31 value. The
+// 32-bit input is narrowed to its low 31 bits per the spec for ref.i31.
+func PackI31(v uint32) uintptr {
+	return uintptr(((v & I31RefMask) << 1) | 1)
+}
+
+// IsTaggedI31 reports whether a tagged uintptr is an i31 ref (and not the
+// null reference or a real pointer).
+func IsTaggedI31(t uintptr) bool {
+	return t&1 == 1
+}
+
+// UnpackI31Signed extracts an i31 value as a sign-extended i32. Callers
+// must verify t is a tagged i31 (via IsTaggedI31) first; on a null or
+// non-i31 input the result is undefined.
+func UnpackI31Signed(t uintptr) int32 {
+	b := uint32(t>>1) & I31RefMask
+	if b&0x40000000 != 0 {
+		return int32(b | 0x80000000)
+	}
+	return int32(b)
+}
+
+// UnpackI31Unsigned extracts an i31 value as a zero-extended u32. As with
+// UnpackI31Signed, callers verify the tag first.
+func UnpackI31Unsigned(t uintptr) uint32 {
+	return uint32(t>>1) & I31RefMask
+}

@@ -103,8 +103,82 @@ func TestGC_I31(t *testing.T) {
 	}
 }
 
-// TestGC_RefAsNonNull verifies that ref.as_non_null passes a non-null
-// reference through unchanged and traps on the null reference.
+// TestGC_I31RefEq verifies that ref.eq on two i31 refs compares by VALUE
+// (per spec), not by pointer identity. With the tagged-uintptr encoding,
+// two independent ref.i31 invocations with the same input produce
+// identical bit patterns, so uint64 equality gives the right answer.
+func TestGC_I31RefEq(t *testing.T) {
+	ctx := context.Background()
+
+	// sameValue(i32) -> i32: ref.eq(ref.i31(x), ref.i31(x))  -> 1
+	// diffValue(i32, i32) -> i32: ref.eq(ref.i31(x), ref.i31(y))
+	sameValue := []byte{
+		wasm.OpcodeLocalGet, 0x00,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCRefI31),
+		wasm.OpcodeLocalGet, 0x00,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCRefI31),
+		wasm.OpcodeRefEq,
+		wasm.OpcodeEnd,
+	}
+	diffValue := []byte{
+		wasm.OpcodeLocalGet, 0x00,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCRefI31),
+		wasm.OpcodeLocalGet, 0x01,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCRefI31),
+		wasm.OpcodeRefEq,
+		wasm.OpcodeEnd,
+	}
+
+	mod := &wasm.Module{
+		TypeSection: []wasm.FunctionType{
+			{Form: wasm.CompositeFormFunc, Params: []wasm.ValueType{wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}},
+			{Form: wasm.CompositeFormFunc, Params: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, Results: []wasm.ValueType{wasm.ValueTypeI32}},
+		},
+		FunctionSection: []wasm.Index{0, 1},
+		CodeSection: []wasm.Code{
+			{Body: sameValue},
+			{Body: diffValue},
+		},
+		ExportSection: []wasm.Export{
+			{Name: "sameValue", Type: wasm.ExternTypeFunc, Index: 0},
+			{Name: "diffValue", Type: wasm.ExternTypeFunc, Index: 1},
+		},
+	}
+	bin := binaryencoding.EncodeModule(mod)
+
+	cfg := wazero.NewRuntimeConfigInterpreter().
+		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesGC)
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+
+	instance, err := r.Instantiate(ctx, bin)
+	require.NoError(t, err)
+
+	t.Run("ref.eq(i31(42), i31(42)) = 1 (value-equal)", func(t *testing.T) {
+		res, err := instance.ExportedFunction("sameValue").Call(ctx, 42)
+		require.NoError(t, err)
+		require.Equal(t, int32(1), api.DecodeI32(res[0]))
+	})
+
+	t.Run("ref.eq(i31(42), i31(43)) = 0", func(t *testing.T) {
+		res, err := instance.ExportedFunction("diffValue").Call(ctx, 42, 43)
+		require.NoError(t, err)
+		require.Equal(t, int32(0), api.DecodeI32(res[0]))
+	})
+
+	t.Run("ref.eq(i31(0), i31(0)) = 1 (zero is a valid non-null i31)", func(t *testing.T) {
+		res, err := instance.ExportedFunction("sameValue").Call(ctx, 0)
+		require.NoError(t, err)
+		require.Equal(t, int32(1), api.DecodeI32(res[0]))
+	})
+
+	t.Run("ref.eq(i31(-1), i31(-1)) = 1 (sign preserved across packing)", func(t *testing.T) {
+		// Both refs encode the same 31-bit pattern (0x7FFFFFFF), so eq is true.
+		res, err := instance.ExportedFunction("sameValue").Call(ctx, uint64(uint32(0xFFFFFFFF)))
+		require.NoError(t, err)
+		require.Equal(t, int32(1), api.DecodeI32(res[0]))
+	})
+}
 func TestGC_RefAsNonNull(t *testing.T) {
 	ctx := context.Background()
 
