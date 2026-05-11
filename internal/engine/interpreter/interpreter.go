@@ -5551,11 +5551,34 @@ func refMatches(v uint64, kind wasm.HeapTypeKind, nullable bool, typeIdx uint32,
 		}
 		return false
 	}
-	// Heap pointer. Read the TypeID from the first field of the pointed-to
-	// object. WasmStruct and WasmArray both place TypeID first.
+	// Real heap pointer. The value could be:
+	//   - *WasmStruct / *WasmArray (first field is FunctionTypeID)
+	//   - *function (first field is *FunctionType, NOT a TypeID)
+	// We disambiguate by attempting the struct/array decode first
+	// (offset 0 → FunctionTypeID). If the store recognises that ID,
+	// the value is a heap struct/array. Otherwise it's likely a
+	// function pointer (the *FunctionType at offset 0 doesn't
+	// coincidentally equal a resolved TypeID).
 	objTypeID := *(*wasm.FunctionTypeID)(unsafe.Pointer(uintptr(v)))
 	store := mi.GetStore()
 	if !store.IsResolvedType(objTypeID) {
+		// Treat as function ref: load *function and read its typeID.
+		// Func / NoFunc kinds match; abstract Any / Eq / Struct /
+		// Array / I31 do not (functions are in their own hierarchy).
+		// Concrete kinds need a subtype check against the function's
+		// canonical TypeID.
+		tf := functionFromUintptr(uintptr(v))
+		switch kind {
+		case wasm.HeapTypeKindFunc:
+			return true
+		case wasm.HeapTypeKindNoFunc:
+			return false
+		case wasm.HeapTypeKindConcrete:
+			if int(typeIdx) >= len(mi.TypeIDs) {
+				return false
+			}
+			return store.IsSubtype(tf.typeID, mi.TypeIDs[typeIdx])
+		}
 		return false
 	}
 	objForm := store.TypeForm(objTypeID)
