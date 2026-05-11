@@ -52,7 +52,11 @@ func decodeValueTypesWithRefInfo(r *bytes.Reader, num uint32) ([]wasm.ValueType,
 		switch b {
 		case wasm.ValueTypeI32, wasm.ValueTypeF32, wasm.ValueTypeI64, wasm.ValueTypeF64,
 			wasm.ValueTypeExternref, wasm.ValueTypeFuncref, wasm.ValueTypeV128,
-			wasm.ValueTypeExnref:
+			wasm.ValueTypeExnref,
+			// wasm-gc nullable abstract heap-type shorthand bytes.
+			wasm.ValueTypeAnyref, wasm.ValueTypeEqref, wasm.ValueTypeI31ref,
+			wasm.ValueTypeStructref, wasm.ValueTypeArrayref, wasm.ValueTypeNullref,
+			wasm.ValueTypeNoFuncref, wasm.ValueTypeNoExternref, wasm.ValueTypeNoExnref:
 			types = append(types, b)
 		case wasm.RefPrefixNullable, wasm.RefPrefixNonNullable:
 			nullable := b == wasm.RefPrefixNullable

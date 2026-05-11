@@ -55,11 +55,25 @@ func decodeConstantExpression(r *bytes.Reader, enabledFeatures api.CoreFeatures,
 			if err := enabledFeatures.RequireEnabled(api.CoreFeatureBulkMemoryOperations); err != nil {
 				return fmt.Errorf("ref.null is not supported as %w", err)
 			}
-			reftype, err := r.ReadByte()
-			if err != nil {
-				return fmt.Errorf("read reference type for ref.null: %w", err)
-			} else if reftype != wasm.RefTypeFuncref && reftype != wasm.RefTypeExternref {
-				return fmt.Errorf("invalid type for ref.null: 0x%x", reftype)
+			// With wasm-gc enabled, the immediate is an s33 heap type
+			// supporting both abstract shorthand bytes and concrete
+			// type indices. Without GC, fall back to the byte-only
+			// funcref/externref decode for backwards compatibility.
+			if enabledFeatures.IsEnabled(experimental.CoreFeaturesGC) {
+				ht, _, hterr := leb128.DecodeInt33AsInt64(r)
+				if hterr != nil {
+					return fmt.Errorf("read ref.null heap type: %w", hterr)
+				}
+				if _, _, ok := wasm.HeapTypeKindFromBinary(ht); !ok {
+					return fmt.Errorf("invalid heap type for ref.null: %d", ht)
+				}
+			} else {
+				reftype, rerr := r.ReadByte()
+				if rerr != nil {
+					return fmt.Errorf("read reference type for ref.null: %w", rerr)
+				} else if reftype != wasm.RefTypeFuncref && reftype != wasm.RefTypeExternref {
+					return fmt.Errorf("invalid type for ref.null: 0x%x", reftype)
+				}
 			}
 		case wasm.OpcodeRefFunc:
 			if err := enabledFeatures.RequireEnabled(api.CoreFeatureBulkMemoryOperations); err != nil {
@@ -67,6 +81,42 @@ func decodeConstantExpression(r *bytes.Reader, enabledFeatures api.CoreFeatures,
 			}
 			// Parsing index.
 			_, _, err = leb128.DecodeUint32(r)
+		case wasm.OpcodeGCPrefix:
+			if err := enabledFeatures.RequireEnabled(experimental.CoreFeaturesGC); err != nil {
+				return fmt.Errorf("GC instructions are not supported as %w", err)
+			}
+			sub, _, suberr := leb128.DecodeUint32(r)
+			if suberr != nil {
+				return fmt.Errorf("read GC sub-opcode for const expression: %w", suberr)
+			}
+			switch wasm.OpcodeGC(sub) {
+			case wasm.OpcodeGCStructNew, wasm.OpcodeGCStructNewDefault,
+				wasm.OpcodeGCArrayNew, wasm.OpcodeGCArrayNewDefault,
+				wasm.OpcodeGCArrayNewData, wasm.OpcodeGCArrayNewElem:
+				// typeidx (or for new_data/new_elem: typeidx + dataidx/elemidx)
+				if _, _, err = leb128.DecodeUint32(r); err != nil {
+					return fmt.Errorf("read GC typeidx immediate: %w", err)
+				}
+				switch wasm.OpcodeGC(sub) {
+				case wasm.OpcodeGCArrayNewData, wasm.OpcodeGCArrayNewElem:
+					if _, _, err = leb128.DecodeUint32(r); err != nil {
+						return fmt.Errorf("read GC data/elem index: %w", err)
+					}
+				}
+			case wasm.OpcodeGCArrayNewFixed:
+				// typeidx, length
+				if _, _, err = leb128.DecodeUint32(r); err != nil {
+					return fmt.Errorf("read array.new_fixed typeidx: %w", err)
+				}
+				if _, _, err = leb128.DecodeUint32(r); err != nil {
+					return fmt.Errorf("read array.new_fixed length: %w", err)
+				}
+			case wasm.OpcodeGCRefI31, wasm.OpcodeGCAnyConvertExtern, wasm.OpcodeGCExternConvertAny:
+				// No immediates.
+			default:
+				return fmt.Errorf("%v for const expression GC sub-op: %#x",
+					ErrInvalidByte, sub)
+			}
 		case wasm.OpcodeVecPrefix:
 			if err := enabledFeatures.RequireEnabled(api.CoreFeatureSIMD); err != nil {
 				return fmt.Errorf("vector instructions are not supported as %w", err)

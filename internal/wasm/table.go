@@ -131,6 +131,12 @@ func (m *Module) validateTable(enabledFeatures api.CoreFeatures, tables []Table,
 	funcCount := m.ImportFunctionCount + m.SectionElementCount(SectionIDFunction)
 	globalsCount := m.ImportGlobalCount + m.SectionElementCount(SectionIDGlobal)
 
+	validateGCCtx := &gcConstExprCtx{
+		Types:        m.TypeSection,
+		KeepAlive:    func(any) {},
+		ValidateOnly: true,
+	}
+
 	// Now, we have to figure out which table elements can be resolved before instantiation and also fail early if there
 	// are any imported globals that are known to be invalid by their declarations.
 	for i := range m.ElementSection {
@@ -155,6 +161,7 @@ func (m *Module) validateTable(enabledFeatures api.CoreFeatures, tables []Table,
 					}
 					return 0, nil
 				},
+				validateGCCtx,
 			)
 			if err != nil {
 				return err
@@ -208,6 +215,7 @@ func (m *Module) validateTable(enabledFeatures api.CoreFeatures, tables []Table,
 				func(funcIndex Index) (Reference, error) {
 					return 0, nil
 				},
+				validateGCCtx,
 			)
 			if err != nil {
 				return fmt.Errorf("%s[%d] couldn't evaluate offset expression: %w", SectionIDName(SectionIDElement), idx, err)

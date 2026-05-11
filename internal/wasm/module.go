@@ -335,6 +335,21 @@ func (m *Module) validateTypeSection(enabledFeatures api.CoreFeatures) error {
 	// import between internal/wasm and experimental.
 	gcFeature := api.CoreFeatureSIMD << 5
 
+	numTypes := uint32(len(m.TypeSection))
+	validateRef := func(typeIdx, fieldHint int, ref *ValueTypeRef) error {
+		if ref == nil || ref.HeapKind != HeapTypeKindConcrete {
+			return nil
+		}
+		if ref.TypeIdx < 0 || uint32(ref.TypeIdx) >= numTypes {
+			if fieldHint >= 0 {
+				return fmt.Errorf("type[%d] field[%d]: unknown type %d",
+					typeIdx, fieldHint, ref.TypeIdx)
+			}
+			return fmt.Errorf("type[%d]: unknown type %d", typeIdx, ref.TypeIdx)
+		}
+		return nil
+	}
+
 	for i := range m.TypeSection {
 		t := &m.TypeSection[i]
 		switch t.Form {
@@ -352,9 +367,35 @@ func (m *Module) validateTypeSection(enabledFeatures api.CoreFeatures) error {
 			if err := enabledFeatures.RequireEnabled(gcFeature); err != nil {
 				return fmt.Errorf("type[%d] declares a supertype, but %w", i, err)
 			}
-			if *t.SuperTypeIndex >= uint32(len(m.TypeSection)) {
+			if *t.SuperTypeIndex >= numTypes {
 				return fmt.Errorf("type[%d] supertype index %d out of range",
 					i, *t.SuperTypeIndex)
+			}
+		}
+		// Validate that any concrete type-index reference inside this
+		// type's structure refers to a defined type. Required to make
+		// assert_invalid "unknown type" cases trigger.
+		switch t.Form {
+		case CompositeFormFunc:
+			for j, ref := range t.ParamRefInfos {
+				if err := validateRef(i, j, ref); err != nil {
+					return err
+				}
+			}
+			for j, ref := range t.ResultRefInfos {
+				if err := validateRef(i, j, ref); err != nil {
+					return err
+				}
+			}
+		case CompositeFormStruct:
+			for j := range t.Fields {
+				if err := validateRef(i, j, t.Fields[j].RefInfo); err != nil {
+					return err
+				}
+			}
+		case CompositeFormArray:
+			if err := validateRef(i, -1, t.ArrayField.RefInfo); err != nil {
+				return err
 			}
 		}
 	}
@@ -398,9 +439,14 @@ func (m *Module) validateGlobals(globals []GlobalType, numFuncts, maxGlobals uin
 	// Global initialization constant expression can only reference the imported globals.
 	// See the note on https://www.w3.org/TR/2019/REC-wasm-core-1-20191205/#constant-expressions%E2%91%A0
 	importedGlobals := globals[:m.ImportGlobalCount]
+	validateGCCtx := &gcConstExprCtx{
+		Types:        m.TypeSection,
+		KeepAlive:    func(any) {},
+		ValidateOnly: true,
+	}
 	for i := range m.GlobalSection {
 		g := &m.GlobalSection[i]
-		if err := validateConstExpression(importedGlobals, numFuncts, &g.Init, g.Type.ValType); err != nil {
+		if err := validateConstExpression(importedGlobals, numFuncts, &g.Init, g.Type.ValType, validateGCCtx); err != nil {
 			return err
 		}
 	}
@@ -477,6 +523,15 @@ func (m *Module) declaredFunctionIndexes(enabledFeatures api.CoreFeatures) (ret 
 		}
 	}
 
+	// Provide a validation-only gc context so GC opcodes in global
+	// initializers don't reject during the pre-instantiation scan.
+	// We don't actually need the values here — only func indices.
+	validateGCCtx := &gcConstExprCtx{
+		Types:        m.TypeSection,
+		KeepAlive:    func(any) {},
+		ValidateOnly: true,
+	}
+
 	for i := range m.GlobalSection {
 		g := &m.GlobalSection[i]
 
@@ -490,6 +545,7 @@ func (m *Module) declaredFunctionIndexes(enabledFeatures api.CoreFeatures) (ret 
 				ret[funcIndex] = struct{}{}
 				return 0, nil
 			},
+			validateGCCtx,
 		)
 
 		if initErr != nil {
@@ -511,6 +567,7 @@ func (m *Module) declaredFunctionIndexes(enabledFeatures api.CoreFeatures) (ret 
 					ret[funcIndex] = struct{}{}
 					return 0, nil
 				},
+				validateGCCtx,
 			)
 		}
 	}
@@ -553,7 +610,7 @@ func (m *Module) validateMemory(memory *Memory, globals []GlobalType, _ api.Core
 	for i := range m.DataSection {
 		d := &m.DataSection[i]
 		if !d.IsPassive() {
-			if err := validateConstExpression(importedGlobals, 0, &d.OffsetExpression, ValueTypeI32); err != nil {
+			if err := validateConstExpression(importedGlobals, 0, &d.OffsetExpression, ValueTypeI32, nil); err != nil {
 				return fmt.Errorf("calculate offset: %w", err)
 			}
 		}
@@ -627,7 +684,7 @@ func (m *Module) validateExports(enabledFeatures api.CoreFeatures, functions []I
 	return nil
 }
 
-func validateConstExpression(globals []GlobalType, numFuncs uint32, expr *ConstantExpression, expectedType ValueType) (err error) {
+func validateConstExpression(globals []GlobalType, numFuncs uint32, expr *ConstantExpression, expectedType ValueType, gcCtx *gcConstExprCtx) (err error) {
 	_, typ, err := evaluateConstExpr(
 		expr,
 		func(globalIndex Index) (ValueType, uint64, uint64, error) {
@@ -642,6 +699,7 @@ func validateConstExpression(globals []GlobalType, numFuncs uint32, expr *Consta
 			}
 			return 0, nil
 		},
+		gcCtx,
 	)
 	if err != nil {
 		return err
@@ -675,6 +733,19 @@ func (m *ModuleInstance) buildGlobals(module *Module, funcRefResolver func(funcI
 
 	me := m.Engine
 	engineOwnGlobal := me.OwnsGlobals()
+
+	// Always provide a wasm-gc constant-expression context so that
+	// GC opcodes (which may be present in any module compiled against
+	// the GC proposal) can resolve type info and keep allocations
+	// alive. Modules without GC ops simply never consult the context.
+	gcCtx := &gcConstExprCtx{
+		Types:            module.TypeSection,
+		TypeIDs:          m.TypeIDs,
+		DataInstances:    m.DataInstances,
+		ElementInstances: m.ElementInstances,
+		KeepAlive:        func(v any) { m.GCRoots = append(m.GCRoots, v) },
+	}
+
 	for i := Index(0); i < Index(len(module.GlobalSection)); i++ {
 		gs := &module.GlobalSection[i]
 		g := &GlobalInstance{}
@@ -684,7 +755,7 @@ func (m *ModuleInstance) buildGlobals(module *Module, funcRefResolver func(funcI
 		}
 		m.Globals[i+module.ImportGlobalCount] = g
 		g.Type = gs.Type
-		g.initialize(importedGlobals, &gs.Init, funcRefResolver)
+		g.initialize(importedGlobals, &gs.Init, funcRefResolver, gcCtx)
 	}
 }
 
@@ -1378,12 +1449,51 @@ func isReferenceValueType(vt ValueType) bool {
 	return false
 }
 
-// isRefSubtypeOf returns true if actual is assignment-compatible with expected.
-// Currently, non-nullable ref types are desugared to nullable at decode time,
-// so this reduces to equality. When non-nullable ref types are properly supported,
-// this function should allow non-nullable to match nullable and vice versa.
+// isRefSubtypeOf reports whether the byte-level operand-stack ValueType
+// `actual` is assignment-compatible with `expected`. Both sides must
+// already be reference-typed bytes.
+//
+// At the byte level we recognise:
+//   - exact equality (the legacy Wasm 2.0 / EH path),
+//   - subtype relationships within the wasm-gc abstract heap-type
+//     hierarchy (`i31 / struct / array <: eq <: any`, etc.),
+//   - and a special "funcref" sentinel meaning "any concrete-ref byte"
+//     within the any hierarchy. We use this sentinel for the result of
+//     struct.new / array.new / array.new_default / array.new_fixed /
+//     array.new_data / array.new_elem, which produce non-abstract
+//     (ref $T) values that can't be distinguished from each other at
+//     the byte level. The sentinel matches any byte in the any
+//     hierarchy (anyref / eqref / i31ref / structref / arrayref /
+//     nullref / noneref); it does NOT match func / extern / exn refs.
+//
+// Precise subtype enforcement that needs concrete TypeIdx-aware checks
+// goes through IsValueTypeSubtypeOf with rich ValueTypeRef info.
 func isRefSubtypeOf(actual, expected ValueType) bool {
-	return actual == expected
+	if actual == expected {
+		return true
+	}
+	if !isReferenceValueType(actual) || !isReferenceValueType(expected) {
+		return false
+	}
+	aKind, aOK := HeapTypeKindFromAbstractByte(actual)
+	eKind, eOK := HeapTypeKindFromAbstractByte(expected)
+	// Funcref sentinel for concrete refs: matches anything in the any
+	// hierarchy but not func/extern/exn. We detect "concrete-ref
+	// sentinel" by `actual == funcref` AND expected being in the any
+	// hierarchy. The reverse direction (expected = funcref, actual in
+	// any hierarchy) also holds for the same reason: a value produced
+	// by e.g. ref.null any can satisfy a (ref $T) parameter whose byte
+	// is the funcref sentinel.
+	if actual == ValueTypeFuncref && eOK && eKind.IsAbstractSubtypeOf(HeapTypeKindAny) {
+		return true
+	}
+	if expected == ValueTypeFuncref && aOK && aKind.IsAbstractSubtypeOf(HeapTypeKindAny) {
+		return true
+	}
+	if !aOK || !eOK {
+		return false
+	}
+	return aKind.IsAbstractSubtypeOf(eKind)
 }
 
 // isStrictRefSubtypeOf returns true if actual is a strict subtype of expected.

@@ -29,6 +29,10 @@ func decodeCode(r *bytes.Reader, codeSectionStart uint64, ret *wasm.Code) (err e
 	// Validate the locals.
 	bytesRead = 0
 	var sum uint64
+	// extraBytesPerEntry tracks the additional bytes used by the s33
+	// heap type encoding for (ref t) / (ref null t) locals — the
+	// single-byte shorthand path uses 0 here.
+	extraBytesPerEntry := make([]int, ls)
 	for i := uint32(0); i < ls; i++ {
 		num, n, err := leb128.DecodeUint32(r)
 		if err != nil {
@@ -53,6 +57,14 @@ func decodeCode(r *bytes.Reader, codeSectionStart uint64, ret *wasm.Code) (err e
 			wasm.ValueTypeAnyref, wasm.ValueTypeEqref, wasm.ValueTypeI31ref,
 			wasm.ValueTypeStructref, wasm.ValueTypeArrayref, wasm.ValueTypeNullref,
 			wasm.ValueTypeNoFuncref, wasm.ValueTypeNoExternref, wasm.ValueTypeNoExnref:
+		case wasm.RefPrefixNullable, wasm.RefPrefixNonNullable:
+			// (ref t) / (ref null t): consume the s33 heap type.
+			_, hn, hterr := leb128.DecodeInt33AsInt64(r)
+			if hterr != nil {
+				return fmt.Errorf("read ref heap type for local: %w", hterr)
+			}
+			bytesRead += uint64(hn)
+			extraBytesPerEntry[i] = int(hn)
 		default:
 			return fmt.Errorf("invalid local type: 0x%x", vt)
 		}
@@ -83,8 +95,29 @@ func decodeCode(r *bytes.Reader, codeSectionStart uint64, ret *wasm.Code) (err e
 			return fmt.Errorf("read type of local: %v", err)
 		}
 
+		// For (ref t) / (ref null t) locals, the byte representation
+		// recorded in localTypes is the funcref sentinel (matching
+		// the convention used by decodeValueTypesWithRefInfo); the
+		// heap-type s33 bytes are consumed but not preserved at the
+		// byte-level operand stack — precise type info is carried in
+		// FunctionType refinfo for parameters and results, locals
+		// remain byte-shaped (a future cleanup can add a refinfo
+		// sidecar on Code if needed).
+		recordByte := b
+		if b == wasm.RefPrefixNullable || b == wasm.RefPrefixNonNullable {
+			_, hn, hterr := leb128.DecodeInt33AsInt64(r)
+			if hterr != nil {
+				return fmt.Errorf("read ref heap type for local: %w", hterr)
+			}
+			remaining -= int64(hn)
+			if remaining < 0 {
+				return io.EOF
+			}
+			recordByte = wasm.ValueTypeFuncref
+		}
+
 		for j := uint32(0); j < num; j++ {
-			localTypes = append(localTypes, b)
+			localTypes = append(localTypes, recordByte)
 		}
 	}
 

@@ -129,6 +129,13 @@ type (
 		// Source is a pointer to the Module from which this ModuleInstance derives.
 		Source *Module
 
+		// GCRoots keeps Go pointers to wasm-gc heap objects (WasmStruct,
+		// WasmArray, i31Ref) that live inside global / element-segment
+		// slots. These slots store the ref as a uintptr cast — Go's GC
+		// cannot trace those uintptrs, so without this list the objects
+		// would be eligible for collection while still referenced.
+		GCRoots []any
+
 		// CloseNotifier is an experimental hook called once on close.
 		CloseNotifier experimental.CloseNotifier
 	}
@@ -261,6 +268,7 @@ func (m *ModuleInstance) validateData(data []DataSegment) (err error) {
 				func(funcIndex Index) (Reference, error) {
 					return m.Engine.FunctionInstanceReference(funcIndex), nil
 				},
+				nil,
 			)
 			if err != nil {
 				return fmt.Errorf("%s[%d] failed to evaluate offset expression: %w", SectionIDName(SectionIDData), i, err)
@@ -560,7 +568,7 @@ func errorInvalidImport(i *Import, err error) error {
 //
 // Global initialization constant expression can only reference the imported globals.
 // See the note on https://www.w3.org/TR/2019/REC-wasm-core-1-20191205/#constant-expressions%E2%91%A0
-func (g *GlobalInstance) initialize(importedGlobals []*GlobalInstance, expr *ConstantExpression, funcRefResolver func(funcIndex Index) Reference) {
+func (g *GlobalInstance) initialize(importedGlobals []*GlobalInstance, expr *ConstantExpression, funcRefResolver func(funcIndex Index) Reference, gcCtx *gcConstExprCtx) {
 	result, _, _ := evaluateConstExpr(
 		expr,
 		func(globalIndex Index) (ValueType, uint64, uint64, error) {
@@ -570,6 +578,7 @@ func (g *GlobalInstance) initialize(importedGlobals []*GlobalInstance, expr *Con
 		func(funcIndex Index) (Reference, error) {
 			return funcRefResolver(funcIndex), nil
 		},
+		gcCtx,
 	)
 	switch len(result) {
 	case 1:

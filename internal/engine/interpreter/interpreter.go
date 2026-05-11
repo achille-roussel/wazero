@@ -4740,7 +4740,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				a := *(**wasm.WasmArray)(unsafe.Pointer(&v))
 				if idx >= a.Len() {
-					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
 				}
 				schema := f.moduleInstance.Source.TypeSection[typeIdx].ArrayField
 				// Re-use struct read kinds for the variant tag in decodeFieldValueRead.
@@ -4766,7 +4766,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				a := *(**wasm.WasmArray)(unsafe.Pointer(&v))
 				if idx >= a.Len() {
-					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
 				}
 				schema := f.moduleInstance.Source.TypeSection[typeIdx].ArrayField
 				if err := a.Set(idx, encodeFieldValue(schema, raw)); err != nil {
@@ -4808,7 +4808,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				a := *(**wasm.WasmArray)(unsafe.Pointer(&v))
 				if uint64(idx)+uint64(count) > uint64(a.Len()) {
-					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
 				}
 				schema := f.moduleInstance.Source.TypeSection[typeIdx].ArrayField
 				stored := encodeFieldValue(schema, rawVal)
@@ -4832,7 +4832,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				dst := *(**wasm.WasmArray)(unsafe.Pointer(&dstV))
 				if uint64(srcIdx)+uint64(count) > uint64(src.Len()) ||
 					uint64(dstIdx)+uint64(count) > uint64(dst.Len()) {
-					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
 				}
 				// Handle overlap-safe copy with two-direction iteration.
 				if src == dst && srcIdx < dstIdx {
@@ -4886,7 +4886,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				elems := make([]any, count)
 				for i := uint32(0); i < count; i++ {
-					elems[i] = uint64(elem[srcOff+i])
+					elems[i] = uintptr(elem[srcOff+i])
 				}
 				a := wasm.NewWasmArrayWith(f.moduleInstance.TypeIDs[typeIdx], elems)
 				ce.keepAlive(a)
@@ -4910,8 +4910,10 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				if !ok {
 					panic(fmt.Errorf("array.init_data on unsupported element type"))
 				}
-				if uint64(dstOff)+uint64(count) > uint64(a.Len()) ||
-					uint64(srcOff)+uint64(count)*uint64(elemSize) > uint64(len(data)) {
+				if uint64(dstOff)+uint64(count) > uint64(a.Len()) {
+					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+				}
+				if uint64(srcOff)+uint64(count)*uint64(elemSize) > uint64(len(data)) {
 					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
 				}
 				for i := uint32(0); i < count; i++ {
@@ -4934,12 +4936,14 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				a := *(**wasm.WasmArray)(unsafe.Pointer(&arrV))
 				elem := f.moduleInstance.ElementInstances[segIdx]
-				if uint64(dstOff)+uint64(count) > uint64(a.Len()) ||
-					uint64(srcOff)+uint64(count) > uint64(len(elem)) {
+				if uint64(dstOff)+uint64(count) > uint64(a.Len()) {
+					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+				}
+				if uint64(srcOff)+uint64(count) > uint64(len(elem)) {
 					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
 				}
 				for i := uint32(0); i < count; i++ {
-					if err := a.Set(dstOff+i, uint64(elem[srcOff+i])); err != nil {
+					if err := a.Set(dstOff+i, uintptr(elem[srcOff+i])); err != nil {
 						panic(err)
 					}
 				}
@@ -5411,9 +5415,12 @@ func encodeFieldValue(f wasm.FieldType, raw uint64) any {
 	case wasm.ValueTypeF64:
 		return math.Float64frombits(raw)
 	}
-	// Other types (v128, refs) are not yet supported by the heap layer
-	// in this minimal Phase 5 commit; the validator rejected them
-	// upstream via fieldOperandType, so we should not reach here.
+	if isRefFieldType(f.ValueType) {
+		return uintptr(raw)
+	}
+	// Other types (v128) are not yet supported by the heap layer in this
+	// minimal commit; the validator rejected them upstream via
+	// fieldOperandType, so we should not reach here.
 	panic(fmt.Sprintf("unsupported struct/array field type %#x", f.ValueType))
 }
 
@@ -5446,7 +5453,27 @@ func decodeFieldValueRead(f wasm.FieldType, stored any, readKind operationKind) 
 	case wasm.ValueTypeF64:
 		return math.Float64bits(stored.(float64))
 	}
+	if isRefFieldType(f.ValueType) {
+		if stored == nil {
+			return 0
+		}
+		return uint64(stored.(uintptr))
+	}
 	panic(fmt.Sprintf("unsupported struct/array field type %#x", f.ValueType))
+}
+
+// isRefFieldType reports whether vt is a reference-typed shorthand byte
+// (including the funcref sentinel used for concrete refs).
+func isRefFieldType(vt wasm.ValueType) bool {
+	switch vt {
+	case wasm.ValueTypeFuncref, wasm.ValueTypeExternref, wasm.ValueTypeExnref,
+		wasm.ValueTypeAnyref, wasm.ValueTypeEqref, wasm.ValueTypeI31ref,
+		wasm.ValueTypeStructref, wasm.ValueTypeArrayref,
+		wasm.ValueTypeNullref, wasm.ValueTypeNoFuncref,
+		wasm.ValueTypeNoExternref, wasm.ValueTypeNoExnref:
+		return true
+	}
+	return false
 }
 
 // refMatches implements the runtime subtype check used by ref.test and

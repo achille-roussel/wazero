@@ -218,11 +218,14 @@ func decodeStorageType(r *bytes.Reader, ret *wasm.FieldType) error {
 	if err := r.UnreadByte(); err != nil {
 		return err
 	}
-	vts, err := decodeValueTypes(r, 1)
+	vts, refs, err := decodeValueTypesWithRefInfo(r, 1)
 	if err != nil {
 		return fmt.Errorf("decode field value-type: %w", err)
 	}
 	ret.Packed = wasm.PackedTypeNone
 	ret.ValueType = vts[0]
+	if len(refs) > 0 {
+		ret.RefInfo = refs[0]
+	}
 	return nil
 }

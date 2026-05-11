@@ -247,7 +247,7 @@ func TestModule_allDeclarations(t *testing.T) {
 func TestValidateConstExpression(t *testing.T) {
 	t.Run("invalid opcode", func(t *testing.T) {
 		expr := NewConstantExpressionFromOpcode(OpcodeNop, nil)
-		err := validateConstExpression(nil, 0, &expr, valueTypeUnknown)
+		err := validateConstExpression(nil, 0, &expr, valueTypeUnknown, nil)
 		require.Error(t, err)
 	})
 	for _, vt := range []ValueType{ValueTypeI32, ValueTypeI64, ValueTypeF32, ValueTypeF64} {
@@ -265,7 +265,7 @@ func TestValidateConstExpression(t *testing.T) {
 					expr = NewConstantExpressionFromOpcode(OpcodeF64Const, u64.LeBytes(api.EncodeF64(math.MaxFloat64)))
 				}
 
-				err := validateConstExpression(nil, 0, &expr, vt)
+				err := validateConstExpression(nil, 0, &expr, vt, nil)
 				require.NoError(t, err)
 			})
 			t.Run("invalid", func(t *testing.T) {
@@ -281,7 +281,7 @@ func TestValidateConstExpression(t *testing.T) {
 				case ValueTypeF64:
 					expr = NewConstantExpressionFromOpcode(OpcodeF64Const, nil)
 				}
-				err := validateConstExpression(nil, 0, &expr, vt)
+				err := validateConstExpression(nil, 0, &expr, vt, nil)
 				require.Error(t, err)
 			})
 		})
@@ -289,26 +289,26 @@ func TestValidateConstExpression(t *testing.T) {
 	t.Run("ref types", func(t *testing.T) {
 		t.Run("ref.func", func(t *testing.T) {
 			expr := NewConstantExpressionFromOpcode(OpcodeRefFunc, []byte{5})
-			err := validateConstExpression(nil, 10, &expr, ValueTypeFuncref)
+			err := validateConstExpression(nil, 10, &expr, ValueTypeFuncref, nil)
 			require.NoError(t, err)
-			err = validateConstExpression(nil, 2, &expr, ValueTypeFuncref)
+			err = validateConstExpression(nil, 2, &expr, ValueTypeFuncref, nil)
 			require.EqualError(t, err, "ref.func index out of range [5] with length 1")
 		})
 		t.Run("ref.null", func(t *testing.T) {
 			expr := NewConstantExpressionFromOpcode(OpcodeRefNull, []byte{ValueTypeFuncref})
 			err := validateConstExpression(nil, 0,
 				&expr,
-				ValueTypeFuncref)
+				ValueTypeFuncref, nil)
 			require.NoError(t, err)
 			expr = NewConstantExpressionFromOpcode(OpcodeRefNull, []byte{ValueTypeExternref})
 			err = validateConstExpression(nil, 0,
 				&expr,
-				ValueTypeExternref)
+				ValueTypeExternref, nil)
 			require.NoError(t, err)
 			expr = NewConstantExpressionFromOpcode(OpcodeRefNull, []byte{0xff})
 			err = validateConstExpression(nil, 0,
 				&expr,
-				ValueTypeExternref)
+				ValueTypeExternref, nil)
 			require.EqualError(t, err, "invalid type for ref.null: 0xff")
 		})
 	})
@@ -316,14 +316,14 @@ func TestValidateConstExpression(t *testing.T) {
 		t.Run("failed to read global index", func(t *testing.T) {
 			// Empty data for global index is invalid.
 			expr := NewConstantExpressionFromOpcode(OpcodeGlobalGet, make([]byte, 0))
-			err := validateConstExpression(nil, 0, &expr, valueTypeUnknown)
+			err := validateConstExpression(nil, 0, &expr, valueTypeUnknown, nil)
 			require.Error(t, err)
 		})
 		t.Run("global index out of range", func(t *testing.T) {
 			// Data holds the index in leb128 and this time the value exceeds len(globals) (=0).
 			expr := NewConstantExpressionFromOpcode(OpcodeGlobalGet, []byte{1})
 			var globals []GlobalType
-			err := validateConstExpression(globals, 0, &expr, valueTypeUnknown)
+			err := validateConstExpression(globals, 0, &expr, valueTypeUnknown, nil)
 			require.Error(t, err)
 		})
 
@@ -336,7 +336,7 @@ func TestValidateConstExpression(t *testing.T) {
 					expr := NewConstantExpressionFromOpcode(OpcodeGlobalGet, []byte{0})
 					globals := []GlobalType{{ValType: valueTypeUnknown}}
 
-					err := validateConstExpression(globals, 0, &expr, vt)
+					err := validateConstExpression(globals, 0, &expr, vt, nil)
 					require.Error(t, err)
 				})
 			}
@@ -350,7 +350,7 @@ func TestValidateConstExpression(t *testing.T) {
 					expr := NewConstantExpressionFromOpcode(OpcodeGlobalGet, []byte{0})
 					globals := []GlobalType{{ValType: vt}}
 
-					err := validateConstExpression(globals, 0, &expr, vt)
+					err := validateConstExpression(globals, 0, &expr, vt, nil)
 					require.NoError(t, err)
 				})
 			}

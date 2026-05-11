@@ -65,10 +65,29 @@ func decodeElementRefType(r *bytes.Reader) (ret wasm.RefType, err error) {
 		err = fmt.Errorf("read element ref type: %w", err)
 		return
 	}
-	if ret != wasm.RefTypeFuncref && ret != wasm.RefTypeExternref {
-		return 0, errors.New("ref type must be funcref or externref for element as of WebAssembly 2.0")
+	switch ret {
+	case wasm.RefTypeFuncref, wasm.RefTypeExternref:
+		return
+	// wasm-gc accepts the broader abstract heap-type shorthand bytes
+	// as element types.
+	case wasm.ValueTypeAnyref, wasm.ValueTypeEqref, wasm.ValueTypeI31ref,
+		wasm.ValueTypeStructref, wasm.ValueTypeArrayref, wasm.ValueTypeNullref,
+		wasm.ValueTypeNoFuncref, wasm.ValueTypeNoExternref, wasm.ValueTypeNoExnref,
+		wasm.ValueTypeExnref:
+		return
+	case wasm.RefPrefixNullable, wasm.RefPrefixNonNullable:
+		// (ref ht) / (ref null ht) — consume the s33 heap type and
+		// return funcref as the byte-level sentinel. The full rich
+		// type info isn't preserved here because the wasm.RefType
+		// alias is byte-sized; the element-segment validation
+		// downstream uses the segment's init exprs for the precise
+		// type when needed.
+		if _, _, lerr := leb128.DecodeInt33AsInt64(r); lerr != nil {
+			return 0, fmt.Errorf("read element ref heap type: %w", lerr)
+		}
+		return wasm.RefTypeFuncref, nil
 	}
-	return
+	return 0, errors.New("ref type must be funcref or externref for element as of WebAssembly 2.0")
 }
 
 const (

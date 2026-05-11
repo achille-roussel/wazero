@@ -323,6 +323,11 @@ func (c command) expectedError() (err error) {
 		err = wasmruntime.ErrRuntimeUnreachable
 	case "uncaught exception":
 		err = wasmruntime.ErrRuntimeUncaughtException
+	case "out of bounds array access":
+		err = wasmruntime.ErrRuntimeOutOfBoundsArrayAccess
+	case "null structure reference", "null array reference",
+		"null function reference", "null reference":
+		err = wasmruntime.ErrRuntimeNullReference
 	default:
 		if strings.HasPrefix(c.Text, "uninitialized") {
 			err = wasmruntime.ErrRuntimeInvalidTableAccess
@@ -443,8 +448,15 @@ func RunCase(t *testing.T, testDataFS embed.FS, f string, ctx context.Context, c
 								laneTypes[i] = expV.LaneType
 							}
 							// When value is nil for ref types, it means "any ref" — skip comparison.
-							if expV.Value == nil && (expV.ValType == "funcref" || expV.ValType == "externref" || expV.ValType == "exnref") {
-								skipIndices[i] = true
+							// wasm-gc adds anyref/eqref/i31ref/structref/arrayref/nullref/nofuncref/noexternref/noexnref;
+							// these all use the same "any matching ref" wildcard semantics in spec tests.
+							if expV.Value == nil {
+								switch expV.ValType {
+								case "funcref", "externref", "exnref",
+									"anyref", "eqref", "i31ref", "structref", "arrayref",
+									"nullref", "nullfuncref", "nullexternref", "nullexnref":
+									skipIndices[i] = true
+								}
 							}
 						}
 						matched, valuesMsg := valuesEq(results, exps, fn.Definition().ResultTypes(), laneTypes, skipIndices)

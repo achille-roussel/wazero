@@ -37,6 +37,11 @@ var (
 	ErrRuntimeUncaughtException = New("uncaught exception")
 	// ErrRuntimeNullReference indicates a null reference was used where a non-null reference was expected.
 	ErrRuntimeNullReference = New("null reference")
+
+	// ErrRuntimeOutOfBoundsArrayAccess indicates an out-of-bounds wasm-gc
+	// array access (array.get / array.set / array.fill / array.copy /
+	// array.init_data / array.init_elem).
+	ErrRuntimeOutOfBoundsArrayAccess = New("out of bounds array access")
 )
 
 // Error is returned by a wasm.Engine during the execution of Wasm functions, and they indicate that the Wasm runtime

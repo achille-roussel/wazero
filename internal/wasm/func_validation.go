@@ -2217,9 +2217,13 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					}
 				}
 				// Push a struct ref. Without rich type-stack tracking we
-				// push the generic structref byte; Phase 4 residual will
-				// extend with the concrete type index sidecar.
-				valueTypeStack.push(ValueTypeStructref)
+				// push the funcref sentinel: struct.new produces a
+				// concrete (ref $T), and our byte-only stack uses
+				// funcref for any concrete-ref position. Precise
+				// subtype checks (e.g. ref.test against the actual
+				// struct type) go through Store.IsSubtype using the
+				// runtime TypeID, not the operand-stack byte.
+				valueTypeStack.push(ValueTypeFuncref)
 			case OpcodeGCStructGet, OpcodeGCStructGetS, OpcodeGCStructGetU:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2321,7 +2325,9 @@ func (m *Module) validateFunctionWithMaxStackValues(
 						return fmt.Errorf("array.new: cannot pop element: %v", err)
 					}
 				}
-				valueTypeStack.push(ValueTypeArrayref)
+				// push the funcref sentinel: array.new produces a
+				// concrete (ref $T). See struct.new for rationale.
+				valueTypeStack.push(ValueTypeFuncref)
 			case OpcodeGCArrayGet, OpcodeGCArrayGetS, OpcodeGCArrayGetU:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2418,7 +2424,9 @@ func (m *Module) validateFunctionWithMaxStackValues(
 						return fmt.Errorf("array.new_fixed: cannot pop element[%d]: %v", count-1-i, err)
 					}
 				}
-				valueTypeStack.push(ValueTypeArrayref)
+				// push the funcref sentinel: array.new_fixed produces
+				// a concrete (ref $T). See struct.new for rationale.
+				valueTypeStack.push(ValueTypeFuncref)
 			case OpcodeGCArrayFill:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2515,7 +2523,10 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
 					return fmt.Errorf("array.new_data/elem: cannot pop src offset: %v", err)
 				}
-				valueTypeStack.push(ValueTypeArrayref)
+				// push the funcref sentinel: array.new_data /
+				// array.new_elem produce a concrete (ref $T). See
+				// struct.new for rationale.
+				valueTypeStack.push(ValueTypeFuncref)
 			case OpcodeGCArrayInitData, OpcodeGCArrayInitElem:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -3260,8 +3271,13 @@ func fieldOperandType(f FieldType) (ValueType, error) {
 	case ValueTypeI32, ValueTypeI64, ValueTypeF32, ValueTypeF64, ValueTypeV128:
 		return f.ValueType, nil
 	}
+	// Reference-typed fields are stored as opaque uintptr values; the
+	// validator only needs the byte to make stack types comparable, so
+	// return it directly. Precise subtype enforcement is handled in
+	// IsValueTypeSubtypeOf once rich ValueTypeRef plumbing reaches the
+	// per-instruction validators.
 	if isReferenceValueType(f.ValueType) {
-		return 0, fmt.Errorf("ref-typed struct/array fields are not yet supported by the interpreter")
+		return f.ValueType, nil
 	}
 	return 0, fmt.Errorf("unsupported struct/array field type %#x", f.ValueType)
 }
