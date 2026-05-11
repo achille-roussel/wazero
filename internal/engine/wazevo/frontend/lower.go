@@ -3681,6 +3681,29 @@ func (c *Compiler) lowerCurrentOpcode() {
 			blockType:                    bt,
 		})
 
+	case wasm.OpcodeRefEq:
+		// wasm-gc ref.eq: pop two refs, push 1 if equal, 0 otherwise.
+		// For Option A (uintptr representation), refs compare by their
+		// uint64 bit pattern: heap pointers are unique per allocation,
+		// i31 refs encode the value in the same uint64 (so two i31s
+		// with the same payload compare equal), and null is 0.
+		if state.unreachable {
+			break
+		}
+		y, x := state.pop(), state.pop()
+		eq := builder.AllocateInstruction().AsIcmp(x, y, ssa.IntegerCmpCondEqual).Insert(builder).Return()
+		state.push(eq)
+
+	case wasm.OpcodeGCPrefix:
+		state.pc++
+		gcOpUint, num, err := leb128.LoadUint32(c.wasmFunctionBody[state.pc:])
+		if err != nil {
+			panic(fmt.Sprintf("failed to read wasm-gc opcode: %v", err))
+		}
+		state.pc += int(num - 1)
+		gcOp := wasm.OpcodeGC(gcOpUint)
+		c.lowerGC(gcOp)
+
 	default:
 		panic("TODO: unsupported in wazevo yet: " + wasm.InstructionName(op))
 	}
@@ -3700,6 +3723,73 @@ func (c *Compiler) lowerReturn(builder ssa.Builder) {
 
 	instr.AsReturn(results)
 	builder.InsertInstruction(instr)
+}
+
+// lowerGC dispatches the GC sub-opcode following the 0xfb prefix.
+// Phase 3 implements only i31 (a stack-only abstract heap type, no
+// allocation required). Heap allocation and access ops land in later
+// phases; this function will grow accordingly.
+func (c *Compiler) lowerGC(gcOp wasm.OpcodeGC) {
+	state := c.state()
+	builder := c.ssaBuilder
+	switch gcOp {
+	case wasm.OpcodeGCRefI31:
+		// ref.i31(v: i32) -> (ref i31). Tagged uintptr encoding:
+		//   tagged = ((v & 0x7FFFFFFF) << 2) | 0b01
+		// (see internal/wasm/i31.go for the spec). Inline as four
+		// SSA instructions.
+		if state.unreachable {
+			break
+		}
+		v := state.pop()
+		mask := builder.AllocateInstruction().AsIconst32(0x7FFFFFFF).Insert(builder).Return()
+		masked := builder.AllocateInstruction().AsBand(v, mask).Insert(builder).Return()
+		ext := builder.AllocateInstruction().AsUExtend(masked, 32, 64).Insert(builder).Return()
+		shamt := builder.AllocateInstruction().AsIconst64(2).Insert(builder).Return()
+		shifted := builder.AllocateInstruction().AsIshl(ext, shamt).Insert(builder).Return()
+		one := builder.AllocateInstruction().AsIconst64(1).Insert(builder).Return()
+		tagged := builder.AllocateInstruction()
+		tagged.AsBor(shifted, one)
+		builder.InsertInstruction(tagged)
+		state.push(tagged.Return())
+
+	case wasm.OpcodeGCI31GetS:
+		// i31.get_s((ref i31)) -> i32. Sign-extended from bit 30.
+		//   payload = (tagged >> 2) & 0x7FFFFFFF        (low 31 bits)
+		//   sign-extend bit 30 into bit 31:
+		//     result = ((payload << 1) Sshr 1)          on i32
+		// Inline as five SSA instructions.
+		if state.unreachable {
+			break
+		}
+		ref := state.pop()
+		shamt2 := builder.AllocateInstruction().AsIconst64(2).Insert(builder).Return()
+		shifted := builder.AllocateInstruction().AsUshr(ref, shamt2).Insert(builder).Return()
+		// Truncate to i32 (low 32 bits, which contains the 31-bit payload at bits 0..30, bit 31 = 0).
+		low32 := builder.AllocateInstruction().AsIreduce(shifted, ssa.TypeI32).Insert(builder).Return()
+		// Sign-extend bit 30: ((low32 << 1) Sshr 1).
+		shamt1 := builder.AllocateInstruction().AsIconst32(1).Insert(builder).Return()
+		leftShifted := builder.AllocateInstruction().AsIshl(low32, shamt1).Insert(builder).Return()
+		result := builder.AllocateInstruction().AsSshr(leftShifted, shamt1).Insert(builder).Return()
+		state.push(result)
+
+	case wasm.OpcodeGCI31GetU:
+		// i31.get_u((ref i31)) -> i32. Zero-extended from bit 30.
+		//   result = (tagged >> 2) & 0x7FFFFFFF
+		if state.unreachable {
+			break
+		}
+		ref := state.pop()
+		shamt2 := builder.AllocateInstruction().AsIconst64(2).Insert(builder).Return()
+		shifted := builder.AllocateInstruction().AsUshr(ref, shamt2).Insert(builder).Return()
+		low32 := builder.AllocateInstruction().AsIreduce(shifted, ssa.TypeI32).Insert(builder).Return()
+		mask := builder.AllocateInstruction().AsIconst32(0x7FFFFFFF).Insert(builder).Return()
+		result := builder.AllocateInstruction().AsBand(low32, mask).Insert(builder).Return()
+		state.push(result)
+
+	default:
+		panic("TODO: unsupported wasm-gc instruction in wazevo: " + wasm.GCInstructionName(gcOp))
+	}
 }
 
 func (c *Compiler) lowerExtMul(v1, v2 ssa.Value, from, to ssa.VecLane, signed, low bool) ssa.Value {
