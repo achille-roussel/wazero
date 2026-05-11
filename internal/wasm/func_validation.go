@@ -2490,6 +2490,66 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if err := valueTypeStack.popReferenceType(); err != nil {
 					return fmt.Errorf("array.copy: cannot pop dst ref: %v", err)
 				}
+			case OpcodeGCArrayNewData, OpcodeGCArrayNewElem:
+				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read array.new_data/elem type index: %v", err)
+				}
+				pc += n
+				segIdx, n2, err := leb128.LoadUint32(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read array.new_data/elem segment index: %v", err)
+				}
+				pc += n2
+				if typeIdx >= uint32(len(m.TypeSection)) {
+					return fmt.Errorf("array.new_data/elem type index %d out of range", typeIdx)
+				}
+				if m.TypeSection[typeIdx].Form != CompositeFormArray {
+					return fmt.Errorf("array.new_data/elem type %d is not an array", typeIdx)
+				}
+				_ = segIdx // segment index validity is checked at instantiation
+				// Pop count (i32), src offset (i32). Push array ref.
+				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
+					return fmt.Errorf("array.new_data/elem: cannot pop count: %v", err)
+				}
+				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
+					return fmt.Errorf("array.new_data/elem: cannot pop src offset: %v", err)
+				}
+				valueTypeStack.push(ValueTypeArrayref)
+			case OpcodeGCArrayInitData, OpcodeGCArrayInitElem:
+				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read array.init_data/elem type index: %v", err)
+				}
+				pc += n
+				_, n2, err := leb128.LoadUint32(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read array.init_data/elem segment index: %v", err)
+				}
+				pc += n2
+				if typeIdx >= uint32(len(m.TypeSection)) {
+					return fmt.Errorf("array.init_data/elem type index %d out of range", typeIdx)
+				}
+				at := &m.TypeSection[typeIdx]
+				if at.Form != CompositeFormArray {
+					return fmt.Errorf("array.init_data/elem type %d is not an array", typeIdx)
+				}
+				if !at.ArrayField.Mutable {
+					return fmt.Errorf("array.init_data/elem on immutable array %d", typeIdx)
+				}
+				// pop count, src offset, dst offset, array ref
+				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
+					return fmt.Errorf("array.init_data/elem: cannot pop count: %v", err)
+				}
+				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
+					return fmt.Errorf("array.init_data/elem: cannot pop src offset: %v", err)
+				}
+				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
+					return fmt.Errorf("array.init_data/elem: cannot pop dst offset: %v", err)
+				}
+				if err := valueTypeStack.popReferenceType(); err != nil {
+					return fmt.Errorf("array.init_data/elem: cannot pop array ref: %v", err)
+				}
 			case OpcodeGCRefTest, OpcodeGCRefTestNull, OpcodeGCRefCast, OpcodeGCRefCastNull:
 				// Read the heap-type immediate (signed LEB; the abstract
 				// heap-type bytes sit in the negative range, concrete type

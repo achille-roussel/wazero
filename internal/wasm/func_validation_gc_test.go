@@ -23,21 +23,13 @@ func validateGCBody(t *testing.T, body []byte) error {
 }
 
 func TestValidateFunction_GCOpcodeMessage(t *testing.T) {
-	// Placeholder for "not yet supported" messages on remaining GC
-	// sub-opcodes (array.new_data / array.new_elem / array.init_data /
-	// array.init_elem and br_on_cast / br_on_cast_fail). All other
-	// sub-opcodes are now implemented.
+	// All GC sub-opcodes are now implemented. The placeholder test
+	// remains as documentation; it exercises no live cases.
 	tests := []struct {
 		name      string
 		body      []byte
 		expectSub string
-	}{
-		{
-			name:      "array.new_data",
-			body:      []byte{OpcodeGCPrefix, byte(OpcodeGCArrayNewData), OpcodeEnd},
-			expectSub: "array.new_data",
-		},
-	}
+	}{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateGCBody(t, tt.body)
