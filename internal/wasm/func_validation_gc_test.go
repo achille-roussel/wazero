@@ -29,14 +29,6 @@ func TestValidateFunction_GCOpcodeMessage(t *testing.T) {
 		expectSub string // substring that the error should contain
 	}{
 		{
-			name: "struct.new",
-			// 0xfb 0x00 (struct.new) ... end. The body validator pops/pushes
-			// happen first; we don't need correct types because the error
-			// is detected before further validation. Just emit the prefix.
-			body:      []byte{OpcodeGCPrefix, byte(OpcodeGCStructNew), OpcodeEnd},
-			expectSub: "struct.new",
-		},
-		{
 			name:      "array.len",
 			body:      []byte{OpcodeGCPrefix, byte(OpcodeGCArrayLen), OpcodeEnd},
 			expectSub: "array.len",

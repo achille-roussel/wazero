@@ -467,6 +467,18 @@ func (o operationKind) String() (ret string) {
 		ret = "operationKindAnyConvertExtern"
 	case operationKindExternConvertAny:
 		ret = "operationKindExternConvertAny"
+	case operationKindStructNew:
+		ret = "operationKindStructNew"
+	case operationKindStructNewDefault:
+		ret = "operationKindStructNewDefault"
+	case operationKindStructGet:
+		ret = "operationKindStructGet"
+	case operationKindStructGetS:
+		ret = "operationKindStructGetS"
+	case operationKindStructGetU:
+		ret = "operationKindStructGetU"
+	case operationKindStructSet:
+		ret = "operationKindStructSet"
 	default:
 		panic(fmt.Errorf("unknown operation %d", o))
 	}
@@ -821,6 +833,19 @@ const (
 	// push it as an externref. The runtime representation is identical so this is a no-op.
 	operationKindExternConvertAny
 
+	// operationKindStructNew is the Kind for struct.new: U1=typeIdx, U2=fieldCount.
+	operationKindStructNew
+	// operationKindStructNewDefault is the Kind for struct.new_default: U1=typeIdx, U2=fieldCount.
+	operationKindStructNewDefault
+	// operationKindStructGet is the Kind for struct.get: U1=typeIdx, U2=fieldIdx.
+	operationKindStructGet
+	// operationKindStructGetS is the Kind for struct.get_s on packed fields.
+	operationKindStructGetS
+	// operationKindStructGetU is the Kind for struct.get_u on packed fields.
+	operationKindStructGetU
+	// operationKindStructSet is the Kind for struct.set: U1=typeIdx, U2=fieldIdx.
+	operationKindStructSet
+
 	// operationKindEnd is always placed at the bottom of this iota definition to be used in the test.
 	operationKindEnd
 )
@@ -1165,6 +1190,12 @@ func (o unionOperation) String() string {
 	case operationKindRefI31, operationKindI31GetS, operationKindI31GetU, operationKindRefEq,
 		operationKindRefAsNonNull, operationKindAnyConvertExtern, operationKindExternConvertAny:
 		return o.Kind.String()
+
+	case operationKindStructNew, operationKindStructNewDefault:
+		return fmt.Sprintf("%s typeIdx=%d fieldCount=%d", o.Kind, o.U1, o.U2)
+	case operationKindStructGet, operationKindStructGetS, operationKindStructGetU,
+		operationKindStructSet:
+		return fmt.Sprintf("%s typeIdx=%d fieldIdx=%d", o.Kind, o.U1, o.U2)
 
 	default:
 		panic(fmt.Sprintf("TODO: %v", o.Kind))
@@ -2982,4 +3013,35 @@ func newOperationAnyConvertExtern() unionOperation {
 // Runtime representation is identical to anyref, so this is a no-op pass-through.
 func newOperationExternConvertAny() unionOperation {
 	return unionOperation{Kind: operationKindExternConvertAny}
+}
+
+// newOperationStructNew constructs the operation for struct.new with the
+// given module-local type index and the cached field count for runtime.
+func newOperationStructNew(typeIdx, fieldCount uint32) unionOperation {
+	return unionOperation{Kind: operationKindStructNew, U1: uint64(typeIdx), U2: uint64(fieldCount)}
+}
+
+// newOperationStructNewDefault constructs the operation for struct.new_default.
+func newOperationStructNewDefault(typeIdx, fieldCount uint32) unionOperation {
+	return unionOperation{Kind: operationKindStructNewDefault, U1: uint64(typeIdx), U2: uint64(fieldCount)}
+}
+
+// newOperationStructGet constructs the operation for struct.get.
+func newOperationStructGet(typeIdx, fieldIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindStructGet, U1: uint64(typeIdx), U2: uint64(fieldIdx)}
+}
+
+// newOperationStructGetS constructs the operation for struct.get_s on a packed field.
+func newOperationStructGetS(typeIdx, fieldIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindStructGetS, U1: uint64(typeIdx), U2: uint64(fieldIdx)}
+}
+
+// newOperationStructGetU constructs the operation for struct.get_u on a packed field.
+func newOperationStructGetU(typeIdx, fieldIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindStructGetU, U1: uint64(typeIdx), U2: uint64(fieldIdx)}
+}
+
+// newOperationStructSet constructs the operation for struct.set.
+func newOperationStructSet(typeIdx, fieldIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindStructSet, U1: uint64(typeIdx), U2: uint64(fieldIdx)}
 }
