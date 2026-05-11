@@ -159,6 +159,9 @@ type (
 		// Sized to handle typical wasm-gc producers; allocations exceeding
 		// this size trap with a clear error.
 		gcScratchBuffer [256]uint64
+		// gcAccessTrampolineAddress is the address of the wasm-gc unified
+		// heap-access trampoline. See GCAccessMode for the modes dispatch.
+		gcAccessTrampolineAddress *byte
 	}
 )
 
@@ -724,6 +727,20 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
+		case wazevoapi.ExitCodeGCAccess:
+			// wasm-gc unified heap-access dispatcher. See GCAccessMode
+			// for the per-mode arg layout.
+			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
+			mode := wazevoapi.GCAccessMode(uint32(s[0]))
+			typeIdx := wasm.Index(uint32(s[1]))
+			auxIdx := uint32(s[2])
+			arg1, arg2, arg3, arg4, arg5 := s[3], s[4], s[5], s[6], s[7]
+			mod := c.callerModuleInstance()
+			result := performGCAccess(c, mod, mode, typeIdx, auxIdx, arg1, arg2, arg3, arg4, arg5)
+			s[0] = result
+			c.execCtx.exitCode = wazevoapi.ExitCodeOK
+			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		default:
 			panic("BUG")
 		}
@@ -778,6 +795,191 @@ func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
 
 func (c *callEngine) callerModuleInstance() *wasm.ModuleInstance {
 	return moduleInstanceFromOpaquePtr(c.execCtx.callerModuleContextPtr)
+}
+
+// performGCAccess dispatches the wasm-gc heap-access ops. See
+// wazevoapi.GCAccessMode for per-mode arg layout.
+func performGCAccess(c *callEngine, mod *wasm.ModuleInstance,
+	mode wazevoapi.GCAccessMode, typeIdx wasm.Index, auxIdx uint32,
+	arg1, arg2, arg3, arg4, arg5 uint64,
+) uint64 {
+	switch mode {
+	case wazevoapi.GCAccessStructGet:
+		fieldIdx := int(auxIdx)
+		signedness := wasm.FieldReadKind(arg1)
+		refRaw := arg2
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		ws := wasmStructFromUintptr(refRaw)
+		fieldSchema := mod.Source.TypeSection[typeIdx].Fields[fieldIdx]
+		return wasm.DecodeFieldValueRead(fieldSchema, ws.Get(fieldIdx), signedness)
+	case wazevoapi.GCAccessStructSet:
+		fieldIdx := int(auxIdx)
+		refRaw := arg2
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		ws := wasmStructFromUintptr(refRaw)
+		fieldSchema := mod.Source.TypeSection[typeIdx].Fields[fieldIdx]
+		if err := ws.Set(fieldIdx, wasm.EncodeFieldValue(fieldSchema, arg3)); err != nil {
+			panic(err)
+		}
+		return 0
+	case wazevoapi.GCAccessArrayGet:
+		signedness := wasm.FieldReadKind(arg1)
+		refRaw := arg2
+		idx := uint32(arg3)
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		wa := wasmArrayFromUintptr(refRaw)
+		if idx >= wa.Len() {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		schema := mod.Source.TypeSection[typeIdx].ArrayField
+		return wasm.DecodeFieldValueRead(schema, wa.Get(idx), signedness)
+	case wazevoapi.GCAccessArraySet:
+		refRaw := arg2
+		idx := uint32(arg3)
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		wa := wasmArrayFromUintptr(refRaw)
+		if idx >= wa.Len() {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		schema := mod.Source.TypeSection[typeIdx].ArrayField
+		if err := wa.Set(idx, wasm.EncodeFieldValue(schema, arg4)); err != nil {
+			panic(err)
+		}
+		return 0
+	case wazevoapi.GCAccessArrayLen:
+		refRaw := arg2
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		return uint64(wasmArrayFromUintptr(refRaw).Len())
+	case wazevoapi.GCAccessArrayFill:
+		refRaw := arg2
+		offset := uint32(arg3)
+		valueRaw := arg4
+		count := uint32(arg5)
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		wa := wasmArrayFromUintptr(refRaw)
+		if uint64(offset)+uint64(count) > uint64(wa.Len()) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		schema := mod.Source.TypeSection[typeIdx].ArrayField
+		v := wasm.EncodeFieldValue(schema, valueRaw)
+		for i := uint32(0); i < count; i++ {
+			if err := wa.Set(offset+i, v); err != nil {
+				panic(err)
+			}
+		}
+		return 0
+	case wazevoapi.GCAccessArrayCopy:
+		dstRefRaw := arg1
+		dstOff := uint32(arg2)
+		srcRefRaw := arg3
+		srcOff := uint32(arg4)
+		count := uint32(arg5)
+		if dstRefRaw == 0 || srcRefRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		dst := wasmArrayFromUintptr(dstRefRaw)
+		src := wasmArrayFromUintptr(srcRefRaw)
+		if uint64(dstOff)+uint64(count) > uint64(dst.Len()) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		if uint64(srcOff)+uint64(count) > uint64(src.Len()) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		// Overlap-safe iteration.
+		if dst == src && dstOff > srcOff {
+			for i := int64(count) - 1; i >= 0; i-- {
+				if err := dst.Set(dstOff+uint32(i), src.Get(srcOff+uint32(i))); err != nil {
+					panic(err)
+				}
+			}
+		} else {
+			for i := uint32(0); i < count; i++ {
+				if err := dst.Set(dstOff+i, src.Get(srcOff+i)); err != nil {
+					panic(err)
+				}
+			}
+		}
+		return 0
+	case wazevoapi.GCAccessArrayInitData:
+		dataIdx := auxIdx
+		refRaw := arg2
+		offset := uint32(arg3)
+		srcOff := uint32(arg4)
+		count := uint32(arg5)
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		wa := wasmArrayFromUintptr(refRaw)
+		if uint64(offset)+uint64(count) > uint64(wa.Len()) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		schema := mod.Source.TypeSection[typeIdx].ArrayField
+		elemSize, ok := wasm.ArrayDataElemSize(schema)
+		if !ok {
+			panic(fmt.Errorf("array.init_data on unsupported element type"))
+		}
+		data := mod.DataInstances[dataIdx]
+		if uint64(srcOff)+uint64(count)*uint64(elemSize) > uint64(len(data)) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+		}
+		for i := uint32(0); i < count; i++ {
+			off := srcOff + i*elemSize
+			if err := wa.Set(offset+i, wasm.ReadDataElement(schema, data, off)); err != nil {
+				panic(err)
+			}
+		}
+		return 0
+	case wazevoapi.GCAccessArrayInitElem:
+		elemIdx := auxIdx
+		refRaw := arg2
+		offset := uint32(arg3)
+		srcOff := uint32(arg4)
+		count := uint32(arg5)
+		if refRaw == 0 {
+			panic(wasmruntime.ErrRuntimeNullReference)
+		}
+		wa := wasmArrayFromUintptr(refRaw)
+		if uint64(offset)+uint64(count) > uint64(wa.Len()) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
+		}
+		elem := mod.ElementInstances[elemIdx]
+		if uint64(srcOff)+uint64(count) > uint64(len(elem)) {
+			panic(wasmruntime.ErrRuntimeInvalidTableAccess)
+		}
+		for i := uint32(0); i < count; i++ {
+			if err := wa.Set(offset+i, uintptr(elem[srcOff+i])); err != nil {
+				panic(err)
+			}
+		}
+		return 0
+	}
+	panic(fmt.Errorf("wasm-gc: unknown GCAccessMode %d", mode))
+}
+
+// wasmStructFromUintptr recovers a *wasm.WasmStruct from a uintptr
+// using the safe double-pointer reinterpretation pattern (same as
+// functionFromUintptr — avoids checkptr arithmetic violations).
+func wasmStructFromUintptr(p uint64) *wasm.WasmStruct {
+	var ptr uintptr = uintptr(p)
+	return *(**wasm.WasmStruct)(unsafe.Pointer(&ptr))
+}
+
+// wasmArrayFromUintptr recovers a *wasm.WasmArray from a uintptr.
+func wasmArrayFromUintptr(p uint64) *wasm.WasmArray {
+	var ptr uintptr = uintptr(p)
+	return *(**wasm.WasmArray)(unsafe.Pointer(&ptr))
 }
 
 // allocateWasmArray builds a *wasm.WasmArray according to the

@@ -85,6 +85,10 @@ const (
 	// vectors (e.g. struct.new field values) from native code to the
 	// Go-side allocator. 256 uint64 entries = 2048 bytes.
 	ExecutionContextOffsetGCScratchBuffer Offset = 1264
+	// ExecutionContextOffsetGCAccessTrampolineAddress is the address of
+	// the wasm-gc unified heap-access trampoline. Placed AFTER the
+	// scratch buffer (1264 + 2048 = 3312).
+	ExecutionContextOffsetGCAccessTrampolineAddress Offset = 3312
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

@@ -3868,9 +3868,231 @@ func (c *Compiler) lowerGC(gcOp wasm.OpcodeGC) {
 		result := builder.AllocateInstruction().AsBand(low32, mask).Insert(builder).Return()
 		state.push(result)
 
+	case wasm.OpcodeGCStructGet, wasm.OpcodeGCStructGetS, wasm.OpcodeGCStructGetU:
+		typeIdx := c.readI32u()
+		fieldIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		var signedness wasm.FieldReadKind
+		switch gcOp {
+		case wasm.OpcodeGCStructGetS:
+			signedness = wasm.FieldReadSignExtend
+		case wasm.OpcodeGCStructGetU:
+			signedness = wasm.FieldReadZeroExtend
+		default:
+			signedness = wasm.FieldReadDirect
+		}
+		ref := state.pop()
+		ret := c.lowerGCAccess(wazevoapi.GCAccessStructGet, typeIdx, fieldIdx,
+			c.iconst64(uint64(signedness)), ref, c.iconst64(0), c.iconst64(0), c.iconst64(0))
+		// The trampoline returns the field value as i64; reduce to the
+		// field's actual SSA type via a truncation if needed.
+		fieldSchema := c.m.TypeSection[typeIdx].Fields[fieldIdx]
+		state.push(c.narrowFromI64(ret, fieldSchema))
+
+	case wasm.OpcodeGCStructSet:
+		typeIdx := c.readI32u()
+		fieldIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		val := state.pop()
+		ref := state.pop()
+		fieldSchema := c.m.TypeSection[typeIdx].Fields[fieldIdx]
+		val64 := c.widenToI64Field(val, fieldSchema)
+		c.lowerGCAccess(wazevoapi.GCAccessStructSet, typeIdx, fieldIdx,
+			c.iconst64(0), ref, val64, c.iconst64(0), c.iconst64(0))
+
+	case wasm.OpcodeGCArrayGet, wasm.OpcodeGCArrayGetS, wasm.OpcodeGCArrayGetU:
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		var signedness wasm.FieldReadKind
+		switch gcOp {
+		case wasm.OpcodeGCArrayGetS:
+			signedness = wasm.FieldReadSignExtend
+		case wasm.OpcodeGCArrayGetU:
+			signedness = wasm.FieldReadZeroExtend
+		default:
+			signedness = wasm.FieldReadDirect
+		}
+		idx := state.pop()
+		ref := state.pop()
+		idx64 := c.uextendI32To64(idx)
+		ret := c.lowerGCAccess(wazevoapi.GCAccessArrayGet, typeIdx, 0,
+			c.iconst64(uint64(signedness)), ref, idx64, c.iconst64(0), c.iconst64(0))
+		elemSchema := c.m.TypeSection[typeIdx].ArrayField
+		state.push(c.narrowFromI64(ret, elemSchema))
+
+	case wasm.OpcodeGCArraySet:
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		val := state.pop()
+		idx := state.pop()
+		ref := state.pop()
+		idx64 := c.uextendI32To64(idx)
+		elemSchema := c.m.TypeSection[typeIdx].ArrayField
+		val64 := c.widenToI64Field(val, elemSchema)
+		c.lowerGCAccess(wazevoapi.GCAccessArraySet, typeIdx, 0,
+			c.iconst64(0), ref, idx64, val64, c.iconst64(0))
+
+	case wasm.OpcodeGCArrayLen:
+		if state.unreachable {
+			break
+		}
+		ref := state.pop()
+		ret := c.lowerGCAccess(wazevoapi.GCAccessArrayLen, 0, 0,
+			c.iconst64(0), ref, c.iconst64(0), c.iconst64(0), c.iconst64(0))
+		// Length is uint32; truncate the i64 return value to i32.
+		low32 := c.ssaBuilder.AllocateInstruction().AsIreduce(ret, ssa.TypeI32).Insert(c.ssaBuilder).Return()
+		state.push(low32)
+
+	case wasm.OpcodeGCArrayFill:
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		count := state.pop()
+		val := state.pop()
+		offset := state.pop()
+		ref := state.pop()
+		elemSchema := c.m.TypeSection[typeIdx].ArrayField
+		val64 := c.widenToI64Field(val, elemSchema)
+		offset64 := c.uextendI32To64(offset)
+		count64 := c.uextendI32To64(count)
+		c.lowerGCAccess(wazevoapi.GCAccessArrayFill, typeIdx, 0,
+			c.iconst64(0), ref, offset64, val64, count64)
+
+	case wasm.OpcodeGCArrayCopy:
+		dstTypeIdx := c.readI32u()
+		srcTypeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		count := state.pop()
+		srcOff := state.pop()
+		srcRef := state.pop()
+		dstOff := state.pop()
+		dstRef := state.pop()
+		dstOff64 := c.uextendI32To64(dstOff)
+		srcOff64 := c.uextendI32To64(srcOff)
+		count64 := c.uextendI32To64(count)
+		c.lowerGCAccess(wazevoapi.GCAccessArrayCopy, dstTypeIdx, srcTypeIdx,
+			dstRef, dstOff64, srcRef, srcOff64, count64)
+
+	case wasm.OpcodeGCArrayInitData:
+		typeIdx := c.readI32u()
+		dataIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		count := state.pop()
+		srcOff := state.pop()
+		offset := state.pop()
+		ref := state.pop()
+		offset64 := c.uextendI32To64(offset)
+		srcOff64 := c.uextendI32To64(srcOff)
+		count64 := c.uextendI32To64(count)
+		c.lowerGCAccess(wazevoapi.GCAccessArrayInitData, typeIdx, dataIdx,
+			c.iconst64(0), ref, offset64, srcOff64, count64)
+
+	case wasm.OpcodeGCArrayInitElem:
+		typeIdx := c.readI32u()
+		elemIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		count := state.pop()
+		srcOff := state.pop()
+		offset := state.pop()
+		ref := state.pop()
+		offset64 := c.uextendI32To64(offset)
+		srcOff64 := c.uextendI32To64(srcOff)
+		count64 := c.uextendI32To64(count)
+		c.lowerGCAccess(wazevoapi.GCAccessArrayInitElem, typeIdx, elemIdx,
+			c.iconst64(0), ref, offset64, srcOff64, count64)
+
 	default:
 		panic("TODO: unsupported wasm-gc instruction in wazevo: " + wasm.GCInstructionName(gcOp))
 	}
+}
+
+// lowerGCAccess emits a CallIndirect to the unified GC access
+// trampoline with the given mode + args.
+func (c *Compiler) lowerGCAccess(mode wazevoapi.GCAccessMode, typeIdx, auxIdx uint32,
+	arg1, arg2, arg3, arg4, arg5 ssa.Value,
+) ssa.Value {
+	builder := c.ssaBuilder
+	c.storeCallerModuleContext()
+	trampolineAddr := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue,
+			wazevoapi.ExecutionContextOffsetGCAccessTrampolineAddress.U32(),
+			ssa.TypeI64,
+		).Insert(builder).Return()
+	modeVal := builder.AllocateInstruction().AsIconst32(uint32(mode)).Insert(builder).Return()
+	typeIdxVal := builder.AllocateInstruction().AsIconst32(typeIdx).Insert(builder).Return()
+	auxIdxVal := builder.AllocateInstruction().AsIconst32(auxIdx).Insert(builder).Return()
+	args := c.allocateVarLengthValues(9, c.execCtxPtrValue, modeVal, typeIdxVal, auxIdxVal, arg1, arg2, arg3, arg4, arg5)
+	return builder.AllocateInstruction().
+		AsCallIndirect(trampolineAddr, &c.gcAccessSig, args).
+		Insert(builder).Return()
+}
+
+// narrowFromI64 truncates / bitcasts an i64 trampoline return value
+// down to the SSA type the field schema dictates (i32, i64, f32, f64).
+// Ref-typed fields stay i64.
+func (c *Compiler) narrowFromI64(v ssa.Value, f wasm.FieldType) ssa.Value {
+	builder := c.ssaBuilder
+	if f.Packed == wasm.PackedTypeI8 || f.Packed == wasm.PackedTypeI16 {
+		// Packed reads already produced a 32-bit value in the low bits
+		// (sign-extended or zero-extended in Go-side); truncate to i32.
+		return builder.AllocateInstruction().AsIreduce(v, ssa.TypeI32).Insert(builder).Return()
+	}
+	switch f.ValueType {
+	case wasm.ValueTypeI32:
+		return builder.AllocateInstruction().AsIreduce(v, ssa.TypeI32).Insert(builder).Return()
+	case wasm.ValueTypeI64:
+		return v
+	case wasm.ValueTypeF32:
+		// Truncate to i32 then bitcast to f32.
+		asI32 := builder.AllocateInstruction().AsIreduce(v, ssa.TypeI32).Insert(builder).Return()
+		return builder.AllocateInstruction().AsBitcast(asI32, ssa.TypeF32).Insert(builder).Return()
+	case wasm.ValueTypeF64:
+		return builder.AllocateInstruction().AsBitcast(v, ssa.TypeF64).Insert(builder).Return()
+	}
+	if wasm.IsRefFieldType(f.ValueType) {
+		return v
+	}
+	panic(fmt.Sprintf("narrowFromI64: unsupported field type %#x", f.ValueType))
+}
+
+// widenToI64Field widens an SSA value matching the field schema's
+// declared type up to i64 so it fits the trampoline signature.
+func (c *Compiler) widenToI64Field(v ssa.Value, f wasm.FieldType) ssa.Value {
+	builder := c.ssaBuilder
+	if f.Packed == wasm.PackedTypeI8 || f.Packed == wasm.PackedTypeI16 {
+		// Caller pushed an i32; widen to i64.
+		return builder.AllocateInstruction().AsUExtend(v, 32, 64).Insert(builder).Return()
+	}
+	switch f.ValueType {
+	case wasm.ValueTypeI32:
+		return builder.AllocateInstruction().AsUExtend(v, 32, 64).Insert(builder).Return()
+	case wasm.ValueTypeI64:
+		return v
+	case wasm.ValueTypeF32:
+		asI32 := builder.AllocateInstruction().AsBitcast(v, ssa.TypeI32).Insert(builder).Return()
+		return builder.AllocateInstruction().AsUExtend(asI32, 32, 64).Insert(builder).Return()
+	case wasm.ValueTypeF64:
+		return builder.AllocateInstruction().AsBitcast(v, ssa.TypeI64).Insert(builder).Return()
+	}
+	if wasm.IsRefFieldType(f.ValueType) {
+		return v
+	}
+	panic(fmt.Sprintf("widenToI64Field: unsupported field type %#x", f.ValueType))
 }
 
 // iconst64 emits an SSA i64 constant and returns its value.

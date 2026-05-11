@@ -84,7 +84,10 @@ type (
 		allocStructAddress *byte
 		// allocArrayAddress is the address of the wasm-gc array
 		// allocator trampoline.
-		allocArrayAddress   *byte
+		allocArrayAddress *byte
+		// gcAccessAddress is the address of the wasm-gc unified
+		// heap-access trampoline (struct.get/set, array.get/set/...).
+		gcAccessAddress     *byte
 		listenerTrampolines listenerTrampolines
 	}
 
@@ -771,7 +774,7 @@ func (e *engine) NewModuleEngine(m *wasm.Module, mi *wasm.ModuleInstance) (wasm.
 }
 
 func (e *engine) compileSharedFunctions() {
-	var sizes [15]int
+	var sizes [16]int
 	var trampolines []byte
 
 	addTrampoline := func(i int, buf []byte) {
@@ -900,6 +903,16 @@ func (e *engine) compileSharedFunctions() {
 			Results: []ssa.Type{ssa.TypeI64},
 		}, false))
 
+	e.be.Init()
+	addTrampoline(15,
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeGCAccess, &ssa.Signature{
+			// exec context, mode (i32), typeIdx (i32), auxIdx (i32),
+			// arg1, arg2, arg3, arg4, arg5 (all i64) → result (i64)
+			// Mode dispatch via wazevoapi.GCAccessMode constants.
+			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32, ssa.TypeI32, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
+			Results: []ssa.Type{ssa.TypeI64},
+		}, false))
+
 	fns := &sharedFunctions{
 		executable:          mmapExecutable(trampolines),
 		listenerTrampolines: make(listenerTrampolines),
@@ -936,6 +949,8 @@ func (e *engine) compileSharedFunctions() {
 	fns.allocStructAddress = &fns.executable[offset]
 	offset += sizes[13]
 	fns.allocArrayAddress = &fns.executable[offset]
+	offset += sizes[14]
+	fns.gcAccessAddress = &fns.executable[offset]
 
 	if wazevoapi.PerfMapEnabled {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.memoryGrowAddress)), uint64(sizes[0]), "memory_grow_trampoline")
@@ -953,6 +968,7 @@ func (e *engine) compileSharedFunctions() {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.callIndirectSubtypeCheckAddress)), uint64(sizes[12]), "call_indirect_subtype_check_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.allocStructAddress)), uint64(sizes[13]), "alloc_struct_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.allocArrayAddress)), uint64(sizes[14]), "alloc_array_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.gcAccessAddress)), uint64(sizes[15]), "gc_access_trampoline")
 	}
 
 	e.sharedFunctions = fns

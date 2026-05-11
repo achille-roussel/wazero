@@ -126,24 +126,34 @@ func TestGC_I31_Compiler(t *testing.T) {
 	}
 }
 
-// TestGC_StructNewDefault_Compiler builds and runs a module that
-// allocates a default-initialised struct via struct.new_default. Since
-// struct.get isn't implemented yet (Phase 5), the test simply
-// confirms allocation runs without trapping and returns control
-// successfully. The struct is dropped from the stack.
-func TestGC_StructNewDefault_Compiler(t *testing.T) {
+// TestGC_StructGetSet_Compiler exercises struct.new, struct.set,
+// and struct.get end-to-end on the compiler engine.
+func TestGC_StructGetSet_Compiler(t *testing.T) {
 	ctx := context.Background()
 
-	// allocate() -> i32:
-	//   s := struct.new_default $S
-	//   drop
-	//   return 42
+	// roundtrip(i32, i64) -> (i32, i64):
+	//   s := struct.new $S(local.get 0, local.get 1)
+	//   (struct.get $S 0 s, struct.get $S 1 s)
 	body := []byte{
-		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCStructNewDefault), 0x00, // struct.new_default 0
-		wasm.OpcodeDrop,
-		wasm.OpcodeI32Const, 42,
+		wasm.OpcodeLocalGet, 0x00,
+		wasm.OpcodeLocalGet, 0x01,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCStructNew), 0x00, // struct.new 0
+		wasm.OpcodeLocalSet, 0x02, // store the ref to local 2 (struct ref)
+		wasm.OpcodeLocalGet, 0x02,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCStructGet), 0x00, 0x00, // struct.get 0 0
+		wasm.OpcodeLocalGet, 0x02,
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCStructGet), 0x00, 0x01, // struct.get 0 1
 		wasm.OpcodeEnd,
 	}
+
+	// Locals[0] = i32 (param 0), [1] = i64 (param 1), [2] = (ref null $S).
+	// The third local is encoded as 1 count of (ref null $S) which is
+	// stored as funcref byte in the binary encoder. To keep this test
+	// simple, we use an `anyref` local.
+	codeBody := []byte{
+		0x01, 0x01, wasm.ValueTypeAnyref, // 1 local group: 1 anyref local
+	}
+	codeBody = append(codeBody, body...)
 
 	mod := &wasm.Module{
 		TypeSection: []wasm.FunctionType{
@@ -151,20 +161,25 @@ func TestGC_StructNewDefault_Compiler(t *testing.T) {
 			{
 				Form: wasm.CompositeFormStruct,
 				Fields: []wasm.FieldType{
-					{ValueType: wasm.ValueTypeI32},
-					{ValueType: wasm.ValueTypeI64},
+					{ValueType: wasm.ValueTypeI32, Mutable: true},
+					{ValueType: wasm.ValueTypeI64, Mutable: true},
 				},
 				Final: true,
 			},
-			// type[1]: () -> i32
-			{Form: wasm.CompositeFormFunc, Results: []wasm.ValueType{wasm.ValueTypeI32}, Final: true},
+			// type[1]: (i32, i64) -> (i32, i64)
+			{
+				Form:    wasm.CompositeFormFunc,
+				Params:  []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI64},
+				Results: []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI64},
+				Final:   true,
+			},
 		},
 		FunctionSection: []wasm.Index{1},
 		CodeSection: []wasm.Code{
-			{Body: body},
+			{LocalTypes: []wasm.ValueType{wasm.ValueTypeAnyref}, Body: body},
 		},
 		ExportSection: []wasm.Export{
-			{Name: "allocate", Type: wasm.ExternTypeFunc, Index: 0},
+			{Name: "roundtrip", Type: wasm.ExternTypeFunc, Index: 0},
 		},
 	}
 	bin := binaryencoding.EncodeModule(mod)
@@ -177,7 +192,8 @@ func TestGC_StructNewDefault_Compiler(t *testing.T) {
 	instance, err := r.Instantiate(ctx, bin)
 	require.NoError(t, err)
 
-	res, err := instance.ExportedFunction("allocate").Call(ctx)
+	res, err := instance.ExportedFunction("roundtrip").Call(ctx, uint64(42), uint64(99))
 	require.NoError(t, err)
-	require.Equal(t, uint32(42), uint32(res[0]))
+	require.Equal(t, uint64(42), uint64(uint32(res[0])))
+	require.Equal(t, uint64(99), res[1])
 }

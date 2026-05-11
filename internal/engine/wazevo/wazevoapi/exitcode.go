@@ -68,6 +68,14 @@ const (
 	// (for new_fixed) the gcScratchBuffer. Returns the allocated
 	// pointer on the goCallStack.
 	ExitCodeAllocateArray
+	// ExitCodeGCAccess unifies the wasm-gc heap-access operations:
+	// struct.get / struct.set / array.get / array.set / array.len /
+	// array.fill / array.copy / array.init_data / array.init_elem.
+	// The trampoline passes (mode, typeIdx, auxIdx, arg1..arg5); the
+	// Go-side handler dispatches on `mode` (see GCAccessMode constants).
+	// Read ops return their value on the goCallStack slot 0; write ops
+	// return nothing.
+	ExitCodeGCAccess
 	exitCodeMax
 )
 
@@ -140,6 +148,8 @@ func (e ExitCode) String() string {
 		return "allocate_struct"
 	case ExitCodeAllocateArray:
 		return "allocate_array"
+	case ExitCodeGCAccess:
+		return "gc_access"
 	}
 	panic("TODO")
 }
@@ -167,6 +177,48 @@ func GoFunctionIndexFromExitCode(exitCode ExitCode) int {
 func TryTableIDFromExitCode(exitCode ExitCode) int {
 	return GoFunctionIndexFromExitCode(exitCode)
 }
+
+// GCAccessMode selects which wasm-gc heap-access operation the
+// ExitCodeGCAccess handler should perform.
+type GCAccessMode uint32
+
+const (
+	// GCAccessStructGet: read field. fieldIdx in auxIdx. signedness
+	// (FieldReadKind) in arg1 low bits.
+	// args: arg2 = ref
+	// returns: field value
+	GCAccessStructGet GCAccessMode = iota
+	// GCAccessStructSet: write field.
+	// args: arg2 = ref, arg3 = value
+	GCAccessStructSet
+	// GCAccessArrayGet: read element.
+	// args: signedness in arg1, ref in arg2, idx in arg3 (low 32 bits)
+	// returns: element value
+	GCAccessArrayGet
+	// GCAccessArraySet: write element.
+	// args: ref in arg2, idx in arg3 (low 32 bits), value in arg4
+	GCAccessArraySet
+	// GCAccessArrayLen: read length.
+	// args: ref in arg2
+	// returns: length (u32)
+	GCAccessArrayLen
+	// GCAccessArrayFill: fill range with value.
+	// args: ref in arg2, offset in arg3, value in arg4, count in arg5
+	GCAccessArrayFill
+	// GCAccessArrayCopy: copy from one array to another. dst typeIdx
+	// is `typeIdx`, src typeIdx is `auxIdx`.
+	// args: dstRef in arg1, dstOff in arg2, srcRef in arg3, srcOff
+	// in arg4, count in arg5
+	GCAccessArrayCopy
+	// GCAccessArrayInitData: init range from data segment. dataIdx
+	// in auxIdx.
+	// args: ref in arg2, offset in arg3, srcOff in arg4, count in arg5
+	GCAccessArrayInitData
+	// GCAccessArrayInitElem: init range from element segment.
+	// elemIdx in auxIdx.
+	// args: ref in arg2, offset in arg3, srcOff in arg4, count in arg5
+	GCAccessArrayInitElem
+)
 
 // CatchClauseInstance is a runtime catch clause with resolved tag index.
 type CatchClauseInstance struct {

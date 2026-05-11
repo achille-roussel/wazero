@@ -223,6 +223,7 @@ func (m *moduleEngine) NewFunction(index wasm.Index) api.Function {
 	ce.execCtx.callIndirectSubtypeCheckTrampolineAddress = sharedFunctions.callIndirectSubtypeCheckAddress
 	ce.execCtx.allocStructTrampolineAddress = sharedFunctions.allocStructAddress
 	ce.execCtx.allocArrayTrampolineAddress = sharedFunctions.allocArrayAddress
+	ce.execCtx.gcAccessTrampolineAddress = sharedFunctions.gcAccessAddress
 	ce.execCtx.memmoveAddress = memmovPtr
 	ce.init()
 	return ce

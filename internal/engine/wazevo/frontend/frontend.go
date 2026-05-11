@@ -32,6 +32,7 @@ type Compiler struct {
 	callIndirectSubtypeCheckSig ssa.Signature
 	allocStructSig              ssa.Signature
 	allocArraySig               ssa.Signature
+	gcAccessSig                 ssa.Signature
 	memmoveSig                  ssa.Signature
 	ensureTermination      bool
 
@@ -263,8 +264,17 @@ func (c *Compiler) declareSignatures(listenerOn bool) {
 	}
 	c.ssaBuilder.DeclareSignature(&c.allocArraySig)
 
-	c.memmoveSig = ssa.Signature{
+	c.gcAccessSig = ssa.Signature{
 		ID: c.allocArraySig.ID + 1,
+		// exec context, mode (i32), typeIdx (i32), auxIdx (i32),
+		// arg1, arg2, arg3, arg4, arg5 (all i64) → result (i64)
+		Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32, ssa.TypeI32, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
+		Results: []ssa.Type{ssa.TypeI64},
+	}
+	c.ssaBuilder.DeclareSignature(&c.gcAccessSig)
+
+	c.memmoveSig = ssa.Signature{
+		ID: c.gcAccessSig.ID + 1,
 		// dst, src, and the byte count.
 		Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
 	}
@@ -505,8 +515,16 @@ func WasmTypeToSSAType(vt wasm.ValueType) ssa.Type {
 		return ssa.TypeI32
 	case wasm.ValueTypeI64,
 		// externref, funcref, and exnref are represented as I64 since we only support 64-bit platforms.
+		// wasm-gc abstract heap-type shorthand bytes (anyref / eqref /
+		// i31ref / structref / arrayref / nullref / nofuncref /
+		// noexternref / noexnref) and concrete-ref placeholders are
+		// also opaque uintptrs at runtime.
 		wasm.ValueTypeExternref, wasm.ValueTypeFuncref,
-		wasm.ValueTypeExnref:
+		wasm.ValueTypeExnref,
+		wasm.ValueTypeAnyref, wasm.ValueTypeEqref, wasm.ValueTypeI31ref,
+		wasm.ValueTypeStructref, wasm.ValueTypeArrayref,
+		wasm.ValueTypeNullref, wasm.ValueTypeNoFuncref,
+		wasm.ValueTypeNoExternref, wasm.ValueTypeNoExnref:
 		return ssa.TypeI64
 	case wasm.ValueTypeF32:
 		return ssa.TypeF32

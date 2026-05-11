@@ -84,4 +84,5 @@ func Test_ExecutionContextOffsets(t *testing.T) {
 	require.Equal(t, wazevoapi.Offset(unsafe.Offsetof(execCtx.allocStructTrampolineAddress)), wazevoapi.ExecutionContextOffsetAllocStructTrampolineAddress)
 	require.Equal(t, wazevoapi.Offset(unsafe.Offsetof(execCtx.allocArrayTrampolineAddress)), wazevoapi.ExecutionContextOffsetAllocArrayTrampolineAddress)
 	require.Equal(t, wazevoapi.Offset(unsafe.Offsetof(execCtx.gcScratchBuffer)), wazevoapi.ExecutionContextOffsetGCScratchBuffer)
+	require.Equal(t, wazevoapi.Offset(unsafe.Offsetof(execCtx.gcAccessTrampolineAddress)), wazevoapi.ExecutionContextOffsetGCAccessTrampolineAddress)
 }
