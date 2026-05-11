@@ -55,6 +55,19 @@ const (
 	// consults Store.IsSubtype and either returns OK (subtype match) or
 	// panics with ErrRuntimeIndirectCallTypeMismatch.
 	ExitCodeCallIndirectSubtypeCheck
+	// ExitCodeAllocateStruct allocates a *wasm.WasmStruct of the given
+	// module-local typeIdx. When fieldCount > 0, the field values are
+	// read from executionContext.gcScratchBuffer[0..fieldCount]; when 0,
+	// the struct is zero-initialised via DefaultFieldValue. Returns the
+	// allocated pointer on the goCallStack.
+	ExitCodeAllocateStruct
+	// ExitCodeAllocateArray allocates a *wasm.WasmArray of the given
+	// module-local typeIdx. The allocation mode is encoded in the upper
+	// bits of the exit code (new / new_default / new_fixed / new_data /
+	// new_elem). Mode-specific args come from the goCallStack and
+	// (for new_fixed) the gcScratchBuffer. Returns the allocated
+	// pointer on the goCallStack.
+	ExitCodeAllocateArray
 	exitCodeMax
 )
 
@@ -123,6 +136,10 @@ func (e ExitCode) String() string {
 		return "try_table_leave"
 	case ExitCodeCallIndirectSubtypeCheck:
 		return "call_indirect_subtype_check"
+	case ExitCodeAllocateStruct:
+		return "allocate_struct"
+	case ExitCodeAllocateArray:
+		return "allocate_array"
 	}
 	panic("TODO")
 }

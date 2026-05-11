@@ -49,6 +49,12 @@ type (
 		// pendingException holds the most recently caught exception, so handler
 		// code can read its params after re-entry.
 		pendingException *wasm.Exception
+		// gcKeepAlive holds *wasm.WasmStruct / *wasm.WasmArray (and any
+		// other wasm-gc heap objects) allocated during this call. Refs
+		// on the operand stack are stored as raw uintptrs which Go's GC
+		// cannot trace; this slice keeps them reachable for the lifetime
+		// of the call. Append-only; cleared at end-of-call.
+		gcKeepAlive []any
 	}
 
 	// tryHandler records the state at a try_table entry for exception handling.
@@ -141,6 +147,18 @@ type (
 		// The trampoline writes (actualTypeID, expectedTypeID) onto the
 		// goCallStack and exits with ExitCodeCallIndirectSubtypeCheck.
 		callIndirectSubtypeCheckTrampolineAddress *byte
+		// allocStructTrampolineAddress holds the address of the wasm-gc
+		// struct allocator trampoline.
+		allocStructTrampolineAddress *byte
+		// allocArrayTrampolineAddress holds the address of the wasm-gc
+		// array allocator trampoline.
+		allocArrayTrampolineAddress *byte
+		// gcScratchBuffer is a fixed-size buffer used by wasm-gc operations
+		// to pass variable-length argument vectors (e.g. struct.new field
+		// values) between native code and the Go-side allocator handlers.
+		// Sized to handle typical wasm-gc producers; allocations exceeding
+		// this size trap with a clear error.
+		gcScratchBuffer [256]uint64
 	}
 )
 
@@ -657,6 +675,55 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
+		case wazevoapi.ExitCodeAllocateStruct:
+			// wasm-gc struct.new / struct.new_default. Trampoline passes
+			// (typeIdx, fieldCount). When fieldCount > 0, the operand
+			// values for the fields are in gcScratchBuffer[0..fieldCount].
+			// When fieldCount == 0, fields are default-initialised.
+			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
+			typeIdx := wasm.Index(uint32(s[0]))
+			fieldCount := int(uint32(s[1]))
+			mod := c.callerModuleInstance()
+			schema := &mod.Source.TypeSection[typeIdx]
+			fields := make([]any, len(schema.Fields))
+			if fieldCount == 0 {
+				for i, f := range schema.Fields {
+					fields[i] = wasm.DefaultFieldValue(f)
+				}
+			} else {
+				if fieldCount > len(c.execCtx.gcScratchBuffer) {
+					panic(fmt.Errorf("wasm-gc struct.new field count %d exceeds scratch buffer size %d", fieldCount, len(c.execCtx.gcScratchBuffer)))
+				}
+				if fieldCount != len(schema.Fields) {
+					panic(fmt.Errorf("wasm-gc struct.new field count %d does not match type field count %d", fieldCount, len(schema.Fields)))
+				}
+				for i := 0; i < fieldCount; i++ {
+					fields[i] = wasm.EncodeFieldValue(schema.Fields[i], c.execCtx.gcScratchBuffer[i])
+				}
+			}
+			ws := wasm.NewWasmStructWith(mod.TypeIDs[typeIdx], fields)
+			c.gcKeepAlive = append(c.gcKeepAlive, ws)
+			s[0] = uint64(uintptr(unsafe.Pointer(ws)))
+			c.execCtx.exitCode = wazevoapi.ExitCodeOK
+			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
+		case wazevoapi.ExitCodeAllocateArray:
+			// wasm-gc array.new / array.new_default / array.new_fixed /
+			// array.new_data / array.new_elem. Trampoline passes
+			// (typeIdx, mode, arg1, arg2, arg3); semantics depend on mode.
+			s := goCallStackView(c.execCtx.stackPointerBeforeGoCall)
+			typeIdx := wasm.Index(uint32(s[0]))
+			mode := uint32(s[1])
+			arg1, arg2, arg3 := s[2], s[3], s[4]
+			mod := c.callerModuleInstance()
+			schema := &mod.Source.TypeSection[typeIdx]
+			elemField := schema.ArrayField
+			wa := allocateWasmArray(c, mod, schema, elemField, typeIdx, mode, arg1, arg2, arg3)
+			c.gcKeepAlive = append(c.gcKeepAlive, wa)
+			s[0] = uint64(uintptr(unsafe.Pointer(wa)))
+			c.execCtx.exitCode = wazevoapi.ExitCodeOK
+			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
+				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)
 		default:
 			panic("BUG")
 		}
@@ -711,6 +778,77 @@ func (c *callEngine) doHandleException(exn *wasm.Exception) bool {
 
 func (c *callEngine) callerModuleInstance() *wasm.ModuleInstance {
 	return moduleInstanceFromOpaquePtr(c.execCtx.callerModuleContextPtr)
+}
+
+// allocateWasmArray builds a *wasm.WasmArray according to the
+// allocation mode and args passed by the ExitCodeAllocateArray
+// trampoline. See the exit-code comment for mode semantics.
+func allocateWasmArray(c *callEngine, mod *wasm.ModuleInstance, schema *wasm.FunctionType, elemField wasm.FieldType,
+	typeIdx wasm.Index, mode uint32, arg1, arg2, arg3 uint64,
+) *wasm.WasmArray {
+	_ = schema // currently unused; kept for future expansion (e.g. validation hooks)
+	switch mode {
+	case 0: // array.new(init, length)
+		initRaw := arg1
+		length := uint32(arg2)
+		init := wasm.EncodeFieldValue(elemField, initRaw)
+		elems := make([]any, length)
+		for i := uint32(0); i < length; i++ {
+			elems[i] = init
+		}
+		return wasm.NewWasmArrayWith(mod.TypeIDs[typeIdx], elems)
+	case 1: // array.new_default(length)
+		length := uint32(arg1)
+		def := wasm.DefaultFieldValue(elemField)
+		elems := make([]any, length)
+		for i := uint32(0); i < length; i++ {
+			elems[i] = def
+		}
+		return wasm.NewWasmArrayWith(mod.TypeIDs[typeIdx], elems)
+	case 2: // array.new_fixed(length) — values in gcScratchBuffer[0..length]
+		length := uint32(arg1)
+		if int(length) > len(c.execCtx.gcScratchBuffer) {
+			panic(fmt.Errorf("wasm-gc array.new_fixed length %d exceeds scratch buffer size %d", length, len(c.execCtx.gcScratchBuffer)))
+		}
+		elems := make([]any, length)
+		for i := uint32(0); i < length; i++ {
+			elems[i] = wasm.EncodeFieldValue(elemField, c.execCtx.gcScratchBuffer[i])
+		}
+		return wasm.NewWasmArrayWith(mod.TypeIDs[typeIdx], elems)
+	case 3: // array.new_data(dataIdx, srcOffset, length)
+		dataIdx := uint32(arg1)
+		srcOff := uint32(arg2)
+		length := uint32(arg3)
+		data := mod.DataInstances[dataIdx]
+		elemSize, ok := wasm.ArrayDataElemSize(elemField)
+		if !ok {
+			panic(fmt.Errorf("array.new_data on unsupported element type"))
+		}
+		total := uint64(length) * uint64(elemSize)
+		if uint64(srcOff)+total > uint64(len(data)) {
+			panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+		}
+		elems := make([]any, length)
+		for i := uint32(0); i < length; i++ {
+			off := srcOff + i*elemSize
+			elems[i] = wasm.ReadDataElement(elemField, data, off)
+		}
+		return wasm.NewWasmArrayWith(mod.TypeIDs[typeIdx], elems)
+	case 4: // array.new_elem(elemIdx, srcOffset, length)
+		elemIdx := uint32(arg1)
+		srcOff := uint32(arg2)
+		length := uint32(arg3)
+		elem := mod.ElementInstances[elemIdx]
+		if uint64(srcOff)+uint64(length) > uint64(len(elem)) {
+			panic(wasmruntime.ErrRuntimeInvalidTableAccess)
+		}
+		elems := make([]any, length)
+		for i := uint32(0); i < length; i++ {
+			elems[i] = uintptr(elem[srcOff+i])
+		}
+		return wasm.NewWasmArrayWith(mod.TypeIDs[typeIdx], elems)
+	}
+	panic(fmt.Errorf("wasm-gc: unknown array allocation mode %d", mode))
 }
 
 const callStackCeiling = uintptr(50000000) // in uint64 (8 bytes) == 400000000 bytes in total == 400mb.

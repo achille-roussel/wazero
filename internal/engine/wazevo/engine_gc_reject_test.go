@@ -2,19 +2,19 @@ package wazevo
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/tetratelabs/wazero/internal/testing/require"
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
 
-// TestEngine_CompileModule_RejectsGCTypes asserts that the optimizing
-// compiler refuses to compile any module containing struct or array
-// composite types in its type section. The runtime is expected to surface
-// this so callers fall back to the interpreter rather than silently
-// miscompile.
-func TestEngine_CompileModule_RejectsGCTypes(t *testing.T) {
+// TestEngine_CompileModule_AcceptsGCTypes asserts that the optimising
+// compiler now accepts modules whose type section contains struct or
+// array composite types. Phase 4 of the wasm-gc port adds the
+// allocation machinery; instructions not yet implemented (struct.get,
+// array.set, ref.test/cast, …) panic at compile time inside lowerGC
+// with a clear "TODO: unsupported wasm-gc instruction" message.
+func TestEngine_CompileModule_AcceptsGCTypes(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
@@ -67,15 +67,14 @@ func TestEngine_CompileModule_RejectsGCTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := NewEngine(ctx, 0, nil).(*engine)
 			err := e.CompileModule(ctx, tt.mod, nil, false)
-			require.Error(t, err)
-			require.True(t, strings.Contains(err.Error(), "wasm-gc"), "error should mention wasm-gc: %v", err)
+			require.NoError(t, err)
 		})
 	}
 }
 
-// TestEngine_CompileModule_AcceptsFuncOnly asserts that a module whose
-// type section contains only ordinary function types still compiles
-// (regression guard around the GC rejection check).
+// TestEngine_CompileModule_AcceptsFuncOnly is a regression guard for
+// pre-wasm-gc modules: a module whose type section contains only
+// ordinary function types still compiles cleanly.
 func TestEngine_CompileModule_AcceptsFuncOnly(t *testing.T) {
 	ctx := context.Background()
 	e := NewEngine(ctx, 0, nil).(*engine)

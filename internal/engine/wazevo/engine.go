@@ -79,7 +79,13 @@ type (
 		// callIndirectSubtypeCheckAddress is the address of the wasm-gc
 		// subtype-aware call_indirect / call_ref runtime-check trampoline.
 		callIndirectSubtypeCheckAddress *byte
-		listenerTrampolines             listenerTrampolines
+		// allocStructAddress is the address of the wasm-gc struct
+		// allocator trampoline.
+		allocStructAddress *byte
+		// allocArrayAddress is the address of the wasm-gc array
+		// allocator trampoline.
+		allocArrayAddress   *byte
+		listenerTrampolines listenerTrampolines
 	}
 
 	listenerTrampolines = map[*wasm.FunctionType]struct {
@@ -147,16 +153,14 @@ func NewEngine(ctx context.Context, _ api.CoreFeatures, fc filecache.Cache) wasm
 
 // CompileModule implements wasm.Engine.
 func (e *engine) CompileModule(ctx context.Context, module *wasm.Module, listeners []experimental.FunctionListener, ensureTermination bool) (err error) {
-	// The optimizing compiler does not yet support WebAssembly GC (struct
-	// and array composite types and the GC instructions). Reject such
-	// modules with a clear error so they fall back to the interpreter
-	// instead of being silently miscompiled.
-	for i := range module.TypeSection {
-		switch module.TypeSection[i].Form {
-		case wasm.CompositeFormStruct, wasm.CompositeFormArray:
-			return fmt.Errorf("wasm-gc modules (struct/array types) are not supported by the optimizing compiler; use the interpreter engine")
-		}
-	}
+	// The optimising compiler supports wasm-gc incrementally; allocation
+	// instructions (struct.new / array.new variants), i31 ops, ref.eq,
+	// and the subtype-aware call_indirect are wired up. Operations not
+	// yet implemented (struct.get/set, array.get/set, ref.test/cast,
+	// br_on_cast/_fail, call_ref, return_call_ref, etc.) currently
+	// panic at compile time inside lowerGC's default case, providing a
+	// clear "TODO: unsupported wasm-gc instruction" message rather than
+	// silent miscompilation.
 
 	if wazevoapi.PerfMapEnabled {
 		wazevoapi.PerfMap.Lock()
@@ -767,7 +771,7 @@ func (e *engine) NewModuleEngine(m *wasm.Module, mi *wasm.ModuleInstance) (wasm.
 }
 
 func (e *engine) compileSharedFunctions() {
-	var sizes [13]int
+	var sizes [15]int
 	var trampolines []byte
 
 	addTrampoline := func(i int, buf []byte) {
@@ -875,6 +879,27 @@ func (e *engine) compileSharedFunctions() {
 			Results: []ssa.Type{},
 		}, false))
 
+	e.be.Init()
+	addTrampoline(13,
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeAllocateStruct, &ssa.Signature{
+			// exec context, typeIdx (i32), fieldCount (i32) → struct ptr
+			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32},
+			Results: []ssa.Type{ssa.TypeI64},
+		}, false))
+
+	e.be.Init()
+	addTrampoline(14,
+		e.machine.CompileGoFunctionTrampoline(wazevoapi.ExitCodeAllocateArray, &ssa.Signature{
+			// exec context, typeIdx (i32), mode (i32), arg1 (i64), arg2 (i64), arg3 (i64) → array ptr
+			// Mode 0 (new): arg1 = init_value, arg2 = length
+			// Mode 1 (new_default): arg1 = length
+			// Mode 2 (new_fixed): arg1 = length (values in gcScratchBuffer)
+			// Mode 3 (new_data): arg1 = dataIdx, arg2 = src offset, arg3 = length
+			// Mode 4 (new_elem): arg1 = elemIdx, arg2 = src offset, arg3 = length
+			Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
+			Results: []ssa.Type{ssa.TypeI64},
+		}, false))
+
 	fns := &sharedFunctions{
 		executable:          mmapExecutable(trampolines),
 		listenerTrampolines: make(listenerTrampolines),
@@ -907,6 +932,10 @@ func (e *engine) compileSharedFunctions() {
 	fns.tryTableLeaveAddress = &fns.executable[offset]
 	offset += sizes[11]
 	fns.callIndirectSubtypeCheckAddress = &fns.executable[offset]
+	offset += sizes[12]
+	fns.allocStructAddress = &fns.executable[offset]
+	offset += sizes[13]
+	fns.allocArrayAddress = &fns.executable[offset]
 
 	if wazevoapi.PerfMapEnabled {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.memoryGrowAddress)), uint64(sizes[0]), "memory_grow_trampoline")
@@ -922,6 +951,8 @@ func (e *engine) compileSharedFunctions() {
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.tryTableEnterAddress)), uint64(sizes[10]), "try_table_enter_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.tryTableLeaveAddress)), uint64(sizes[11]), "try_table_leave_trampoline")
 		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.callIndirectSubtypeCheckAddress)), uint64(sizes[12]), "call_indirect_subtype_check_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.allocStructAddress)), uint64(sizes[13]), "alloc_struct_trampoline")
+		wazevoapi.PerfMap.AddEntry(uintptr(unsafe.Pointer(fns.allocArrayAddress)), uint64(sizes[14]), "alloc_array_trampoline")
 	}
 
 	e.sharedFunctions = fns

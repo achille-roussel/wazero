@@ -30,6 +30,8 @@ type Compiler struct {
 	tableGrowSig           ssa.Signature
 	refFuncSig                  ssa.Signature
 	callIndirectSubtypeCheckSig ssa.Signature
+	allocStructSig              ssa.Signature
+	allocArraySig               ssa.Signature
 	memmoveSig                  ssa.Signature
 	ensureTermination      bool
 
@@ -245,8 +247,24 @@ func (c *Compiler) declareSignatures(listenerOn bool) {
 	}
 	c.ssaBuilder.DeclareSignature(&c.callIndirectSubtypeCheckSig)
 
-	c.memmoveSig = ssa.Signature{
+	c.allocStructSig = ssa.Signature{
 		ID: c.callIndirectSubtypeCheckSig.ID + 1,
+		// exec context, typeIdx (i32), fieldCount (i32) → struct ptr (i64)
+		Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32},
+		Results: []ssa.Type{ssa.TypeI64},
+	}
+	c.ssaBuilder.DeclareSignature(&c.allocStructSig)
+
+	c.allocArraySig = ssa.Signature{
+		ID: c.allocStructSig.ID + 1,
+		// exec context, typeIdx (i32), mode (i32), arg1 (i64), arg2 (i64), arg3 (i64) → array ptr (i64)
+		Params:  []ssa.Type{ssa.TypeI64, ssa.TypeI32, ssa.TypeI32, ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
+		Results: []ssa.Type{ssa.TypeI64},
+	}
+	c.ssaBuilder.DeclareSignature(&c.allocArraySig)
+
+	c.memmoveSig = ssa.Signature{
+		ID: c.allocArraySig.ID + 1,
 		// dst, src, and the byte count.
 		Params: []ssa.Type{ssa.TypeI64, ssa.TypeI64, ssa.TypeI64},
 	}

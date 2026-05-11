@@ -221,6 +221,8 @@ func (m *moduleEngine) NewFunction(index wasm.Index) api.Function {
 	ce.execCtx.tryTableEnterTrampolineAddress = sharedFunctions.tryTableEnterAddress
 	ce.execCtx.tryTableLeaveTrampolineAddress = sharedFunctions.tryTableLeaveAddress
 	ce.execCtx.callIndirectSubtypeCheckTrampolineAddress = sharedFunctions.callIndirectSubtypeCheckAddress
+	ce.execCtx.allocStructTrampolineAddress = sharedFunctions.allocStructAddress
+	ce.execCtx.allocArrayTrampolineAddress = sharedFunctions.allocArrayAddress
 	ce.execCtx.memmoveAddress = memmovPtr
 	ce.init()
 	return ce

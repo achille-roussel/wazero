@@ -3733,6 +3733,87 @@ func (c *Compiler) lowerGC(gcOp wasm.OpcodeGC) {
 	state := c.state()
 	builder := c.ssaBuilder
 	switch gcOp {
+	case wasm.OpcodeGCStructNew:
+		// struct.new typeIdx: pop N field values (in declaration order),
+		// store them to gcScratchBuffer[0..N], call the allocator
+		// trampoline, push the returned pointer.
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		c.lowerStructNew(typeIdx, true /* withFields */)
+
+	case wasm.OpcodeGCStructNewDefault:
+		// struct.new_default typeIdx: allocate a default-zero struct.
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		c.lowerStructNew(typeIdx, false /* withFields */)
+
+	case wasm.OpcodeGCArrayNew:
+		// array.new typeIdx: pop (init, length), allocate length elements
+		// all = init. arg1 = init, arg2 = length.
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		length := state.pop()
+		init := state.pop()
+		c.lowerArrayAlloc(typeIdx, 0 /* mode: new */, init, length, c.iconst64(0))
+
+	case wasm.OpcodeGCArrayNewDefault:
+		// array.new_default typeIdx: pop length, allocate length default
+		// elements. arg1 = length.
+		typeIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		length := state.pop()
+		// Width-extend length (i32) to i64 to fit the trampoline signature.
+		length64 := c.uextendI32To64(length)
+		c.lowerArrayAlloc(typeIdx, 1 /* mode: new_default */, length64, c.iconst64(0), c.iconst64(0))
+
+	case wasm.OpcodeGCArrayNewFixed:
+		// array.new_fixed typeIdx length: pop length values from operand
+		// stack, store them to gcScratchBuffer[0..length], allocate
+		// with mode = 2.
+		typeIdx := c.readI32u()
+		length := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		c.lowerArrayNewFixed(typeIdx, length)
+
+	case wasm.OpcodeGCArrayNewData:
+		// array.new_data typeIdx dataIdx: pop (srcOffset, length), allocate
+		// length elements from data[dataIdx]. arg1 = dataIdx, arg2 = srcOffset, arg3 = length.
+		typeIdx := c.readI32u()
+		dataIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		length := state.pop()
+		srcOff := state.pop()
+		length64 := c.uextendI32To64(length)
+		srcOff64 := c.uextendI32To64(srcOff)
+		c.lowerArrayAlloc(typeIdx, 3 /* mode: new_data */, c.iconst64(uint64(dataIdx)), srcOff64, length64)
+
+	case wasm.OpcodeGCArrayNewElem:
+		// array.new_elem typeIdx elemIdx: pop (srcOffset, length), allocate
+		// length refs from element segment elemIdx. arg1 = elemIdx,
+		// arg2 = srcOffset, arg3 = length.
+		typeIdx := c.readI32u()
+		elemIdx := c.readI32u()
+		if state.unreachable {
+			break
+		}
+		length := state.pop()
+		srcOff := state.pop()
+		length64 := c.uextendI32To64(length)
+		srcOff64 := c.uextendI32To64(srcOff)
+		c.lowerArrayAlloc(typeIdx, 4 /* mode: new_elem */, c.iconst64(uint64(elemIdx)), srcOff64, length64)
+
 	case wasm.OpcodeGCRefI31:
 		// ref.i31(v: i32) -> (ref i31). Tagged uintptr encoding:
 		//   tagged = ((v & 0x7FFFFFFF) << 2) | 0b01
@@ -3790,6 +3871,124 @@ func (c *Compiler) lowerGC(gcOp wasm.OpcodeGC) {
 	default:
 		panic("TODO: unsupported wasm-gc instruction in wazevo: " + wasm.GCInstructionName(gcOp))
 	}
+}
+
+// iconst64 emits an SSA i64 constant and returns its value.
+func (c *Compiler) iconst64(v uint64) ssa.Value {
+	return c.ssaBuilder.AllocateInstruction().AsIconst64(v).Insert(c.ssaBuilder).Return()
+}
+
+// uextendI32To64 zero-extends an i32 value to i64.
+func (c *Compiler) uextendI32To64(v ssa.Value) ssa.Value {
+	return c.ssaBuilder.AllocateInstruction().AsUExtend(v, 32, 64).Insert(c.ssaBuilder).Return()
+}
+
+// lowerStructNew lowers struct.new (withFields=true) and
+// struct.new_default (withFields=false). For struct.new, the N field
+// values are popped from the operand stack and stored to
+// gcScratchBuffer[0..N] before the allocator trampoline call. The
+// trampoline returns the *WasmStruct pointer which is pushed back.
+func (c *Compiler) lowerStructNew(typeIdx uint32, withFields bool) {
+	builder := c.ssaBuilder
+	state := c.state()
+	schema := &c.m.TypeSection[typeIdx]
+	var fieldCount uint32
+	if withFields {
+		fieldCount = uint32(len(schema.Fields))
+		// Pop fieldCount values; store each to gcScratchBuffer in field order.
+		vals := make([]ssa.Value, fieldCount)
+		for i := int(fieldCount) - 1; i >= 0; i-- {
+			vals[i] = state.pop()
+		}
+		bufferBase := builder.AllocateInstruction().
+			AsIadd(
+				c.execCtxPtrValue,
+				c.iconst64(uint64(wazevoapi.ExecutionContextOffsetGCScratchBuffer)),
+			).Insert(builder).Return()
+		for i := uint32(0); i < fieldCount; i++ {
+			// Each slot is 8 bytes wide. Widen i32/f32 to i64 if needed.
+			storeVal := c.widenToI64(vals[i])
+			builder.AllocateInstruction().
+				AsStore(ssa.OpcodeStore, storeVal, bufferBase, i*8).
+				Insert(builder)
+		}
+	}
+	c.storeCallerModuleContext()
+	trampolineAddr := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue,
+			wazevoapi.ExecutionContextOffsetAllocStructTrampolineAddress.U32(),
+			ssa.TypeI64,
+		).Insert(builder).Return()
+	typeIdxVal := builder.AllocateInstruction().AsIconst32(typeIdx).Insert(builder).Return()
+	fieldCountVal := builder.AllocateInstruction().AsIconst32(fieldCount).Insert(builder).Return()
+	args := c.allocateVarLengthValues(3, c.execCtxPtrValue, typeIdxVal, fieldCountVal)
+	ret := builder.AllocateInstruction().
+		AsCallIndirect(trampolineAddr, &c.allocStructSig, args).
+		Insert(builder).Return()
+	state.push(ret)
+}
+
+// lowerArrayAlloc emits the SSA for a single-call array allocation
+// (modes 0/1/3/4). Mode 2 (new_fixed) goes through lowerArrayNewFixed
+// which fills the scratch buffer first.
+func (c *Compiler) lowerArrayAlloc(typeIdx uint32, mode uint32, arg1, arg2, arg3 ssa.Value) {
+	builder := c.ssaBuilder
+	state := c.state()
+	c.storeCallerModuleContext()
+	trampolineAddr := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue,
+			wazevoapi.ExecutionContextOffsetAllocArrayTrampolineAddress.U32(),
+			ssa.TypeI64,
+		).Insert(builder).Return()
+	typeIdxVal := builder.AllocateInstruction().AsIconst32(typeIdx).Insert(builder).Return()
+	modeVal := builder.AllocateInstruction().AsIconst32(mode).Insert(builder).Return()
+	args := c.allocateVarLengthValues(6, c.execCtxPtrValue, typeIdxVal, modeVal, arg1, arg2, arg3)
+	ret := builder.AllocateInstruction().
+		AsCallIndirect(trampolineAddr, &c.allocArraySig, args).
+		Insert(builder).Return()
+	state.push(ret)
+}
+
+// lowerArrayNewFixed pops `length` values from the operand stack,
+// stores them to gcScratchBuffer[0..length], and invokes the array
+// allocator with mode = 2.
+func (c *Compiler) lowerArrayNewFixed(typeIdx, length uint32) {
+	builder := c.ssaBuilder
+	state := c.state()
+	vals := make([]ssa.Value, length)
+	for i := int(length) - 1; i >= 0; i-- {
+		vals[i] = state.pop()
+	}
+	bufferBase := builder.AllocateInstruction().
+		AsIadd(
+			c.execCtxPtrValue,
+			c.iconst64(uint64(wazevoapi.ExecutionContextOffsetGCScratchBuffer)),
+		).Insert(builder).Return()
+	for i := uint32(0); i < length; i++ {
+		storeVal := c.widenToI64(vals[i])
+		builder.AllocateInstruction().
+			AsStore(ssa.OpcodeStore, storeVal, bufferBase, i*8).
+			Insert(builder)
+	}
+	c.lowerArrayAlloc(typeIdx, 2 /* mode: new_fixed */, c.iconst64(uint64(length)), c.iconst64(0), c.iconst64(0))
+}
+
+// widenToI64 zero-extends an i32/f32 value to i64 so it fits in an
+// 8-byte scratch buffer slot. For i64/f64 values it returns the value
+// unchanged.
+func (c *Compiler) widenToI64(v ssa.Value) ssa.Value {
+	builder := c.ssaBuilder
+	switch v.Type() {
+	case ssa.TypeI32:
+		return builder.AllocateInstruction().AsUExtend(v, 32, 64).Insert(builder).Return()
+	case ssa.TypeF32:
+		// Bitcast f32 to i32 then zero-extend to i64.
+		asI32 := builder.AllocateInstruction().AsBitcast(v, ssa.TypeI32).Insert(builder).Return()
+		return builder.AllocateInstruction().AsUExtend(asI32, 32, 64).Insert(builder).Return()
+	case ssa.TypeF64:
+		return builder.AllocateInstruction().AsBitcast(v, ssa.TypeI64).Insert(builder).Return()
+	}
+	return v
 }
 
 func (c *Compiler) lowerExtMul(v1, v2 ssa.Value, from, to ssa.VecLane, signed, low bool) ssa.Value {

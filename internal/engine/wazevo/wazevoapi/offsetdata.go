@@ -74,6 +74,17 @@ const (
 	// is the trampoline address for the wasm-gc subtype-aware
 	// call_indirect / call_ref runtime check.
 	ExecutionContextOffsetCallIndirectSubtypeCheckTrampolineAddress Offset = 1240
+	// ExecutionContextOffsetAllocStructTrampolineAddress is the
+	// trampoline address for wasm-gc struct allocation.
+	ExecutionContextOffsetAllocStructTrampolineAddress Offset = 1248
+	// ExecutionContextOffsetAllocArrayTrampolineAddress is the
+	// trampoline address for wasm-gc array allocation.
+	ExecutionContextOffsetAllocArrayTrampolineAddress Offset = 1256
+	// ExecutionContextOffsetGCScratchBuffer is the offset of the
+	// fixed-size scratch buffer used to pass variable-length argument
+	// vectors (e.g. struct.new field values) from native code to the
+	// Go-side allocator. 256 uint64 entries = 2048 bytes.
+	ExecutionContextOffsetGCScratchBuffer Offset = 1264
 )
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

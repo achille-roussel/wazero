@@ -125,3 +125,59 @@ func TestGC_I31_Compiler(t *testing.T) {
 		require.Equal(t, tt.want, got, "eq(%#x, %#x) = %d, want %d", tt.a, tt.b, got, tt.want)
 	}
 }
+
+// TestGC_StructNewDefault_Compiler builds and runs a module that
+// allocates a default-initialised struct via struct.new_default. Since
+// struct.get isn't implemented yet (Phase 5), the test simply
+// confirms allocation runs without trapping and returns control
+// successfully. The struct is dropped from the stack.
+func TestGC_StructNewDefault_Compiler(t *testing.T) {
+	ctx := context.Background()
+
+	// allocate() -> i32:
+	//   s := struct.new_default $S
+	//   drop
+	//   return 42
+	body := []byte{
+		wasm.OpcodeGCPrefix, byte(wasm.OpcodeGCStructNewDefault), 0x00, // struct.new_default 0
+		wasm.OpcodeDrop,
+		wasm.OpcodeI32Const, 42,
+		wasm.OpcodeEnd,
+	}
+
+	mod := &wasm.Module{
+		TypeSection: []wasm.FunctionType{
+			// type[0]: struct { i32 i64 }
+			{
+				Form: wasm.CompositeFormStruct,
+				Fields: []wasm.FieldType{
+					{ValueType: wasm.ValueTypeI32},
+					{ValueType: wasm.ValueTypeI64},
+				},
+				Final: true,
+			},
+			// type[1]: () -> i32
+			{Form: wasm.CompositeFormFunc, Results: []wasm.ValueType{wasm.ValueTypeI32}, Final: true},
+		},
+		FunctionSection: []wasm.Index{1},
+		CodeSection: []wasm.Code{
+			{Body: body},
+		},
+		ExportSection: []wasm.Export{
+			{Name: "allocate", Type: wasm.ExternTypeFunc, Index: 0},
+		},
+	}
+	bin := binaryencoding.EncodeModule(mod)
+
+	cfg := wazero.NewRuntimeConfigCompiler().
+		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesGC)
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+
+	instance, err := r.Instantiate(ctx, bin)
+	require.NoError(t, err)
+
+	res, err := instance.ExportedFunction("allocate").Call(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint32(42), uint32(res[0]))
+}
