@@ -268,13 +268,17 @@ func (c commandActionVal) toUint64() (ret uint64) {
 	strValue := c.Value.(string)
 	if strings.Contains(strValue, "nan") {
 		ret = getNaNBits(strValue, c.ValType == "f32")
-	} else if c.ValType == "externref" {
+	} else if c.ValType == "externref" || c.ValType == "anyref" {
 		if c.Value == "null" {
 			ret = 0
 		} else {
 			original, _ := strconv.ParseUint(strValue, 10, 64)
-			// In wazero, externref is opaque pointer, so "0" is considered as null.
-			// So in order to treat "externref 0" in spectest non nullref, we increment the value.
+			// In wazero, externref / anyref are opaque pointers, so "0"
+			// is considered null. To treat "externref 0" / host ref 0 as
+			// distinct from null we increment the value. The
+			// spec-test framework uses the same incremented value for
+			// the matching anyref result (any.convert_extern is the
+			// identity at runtime).
 			ret = original + 1
 		}
 	} else if strings.Contains(c.ValType, "32") {
@@ -326,7 +330,8 @@ func (c command) expectedError() (err error) {
 	case "out of bounds array access":
 		err = wasmruntime.ErrRuntimeOutOfBoundsArrayAccess
 	case "null structure reference", "null array reference",
-		"null function reference", "null reference":
+		"null function reference", "null reference",
+		"null i31 reference":
 		err = wasmruntime.ErrRuntimeNullReference
 	default:
 		if strings.HasPrefix(c.Text, "uninitialized") {
@@ -614,7 +619,15 @@ func valuesEq(actual, exps []uint64, valTypes []wasm.ValueType, laneTypes map[in
 			msgActualValuesStrs = append(msgActualValuesStrs, fmt.Sprintf("%d", uint32(actual[uint64RepPos])))
 			matched = matched && uint32(exps[uint64RepPos]) == uint32(actual[uint64RepPos])
 			uint64RepPos++
-		case wasm.ValueTypeI64, wasm.ValueTypeExternref, wasm.ValueTypeFuncref:
+		case wasm.ValueTypeI64, wasm.ValueTypeExternref, wasm.ValueTypeFuncref,
+			// wasm-gc ref-type bytes are also opaque uint64-shaped at the
+			// caller boundary; treat them like funcref/externref for the
+			// comparison (the skipIndices wildcard above already handles
+			// "any matching ref" cases).
+			wasm.ValueTypeAnyref, wasm.ValueTypeEqref, wasm.ValueTypeI31ref,
+			wasm.ValueTypeStructref, wasm.ValueTypeArrayref, wasm.ValueTypeNullref,
+			wasm.ValueTypeNoFuncref, wasm.ValueTypeNoExternref, wasm.ValueTypeNoExnref,
+			wasm.ValueTypeExnref:
 			msgExpValuesStrs = append(msgExpValuesStrs, fmt.Sprintf("%d", exps[uint64RepPos]))
 			msgActualValuesStrs = append(msgActualValuesStrs, fmt.Sprintf("%d", actual[uint64RepPos]))
 			matched = matched && exps[uint64RepPos] == actual[uint64RepPos]

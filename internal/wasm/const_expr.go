@@ -464,10 +464,22 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				stack = stack[:len(stack)-1]
 				typeStack = typeStack[:len(typeStack)-1]
 				stack = append(stack, uint64(PackI31(v)))
-				typeStack = append(typeStack, RefTypeFuncref)
-			case OpcodeGCAnyConvertExtern, OpcodeGCExternConvertAny:
-				// Identity at the const-expr level; the type-check
-				// already happened at decode time.
+				// ref.i31 produces (ref i31): non-null concrete i31. The
+				// byte stored on the type stack is i31ref so the type
+				// check at the end of the const-expr matches the
+				// declared global type byte (i31ref for `(ref i31)`).
+				typeStack = append(typeStack, ValueTypeI31ref)
+			case OpcodeGCAnyConvertExtern:
+				// extern→any: the result is anyref. Keep the same value
+				// on the stack; just update the byte tag.
+				if len(typeStack) >= 1 {
+					typeStack[len(typeStack)-1] = ValueTypeAnyref
+				}
+			case OpcodeGCExternConvertAny:
+				// any→extern: the result is externref.
+				if len(typeStack) >= 1 {
+					typeStack[len(typeStack)-1] = ValueTypeExternref
+				}
 			default:
 				return nil, 0, fmt.Errorf("invalid GC sub-opcode for const expression: 0x%x", sub)
 			}

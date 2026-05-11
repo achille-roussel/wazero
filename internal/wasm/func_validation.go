@@ -2506,6 +2506,16 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if !dst.ArrayField.Mutable {
 					return fmt.Errorf("array.copy destination array %d is immutable", dstIdx)
 				}
+				// The src element storage type must be a subtype of the
+				// dst element storage type. Packed types are invariant
+				// (i8 ≤ i8, i16 ≤ i16), value types must match or — for
+				// refs — be in a subtype relation (handled by
+				// IsValueTypeSubtypeOf via Store at runtime; for the
+				// byte-level validator we compare packed kinds and use
+				// the abstract heap-type hierarchy for ref fields).
+				if !isArrayFieldStorageSubtype(&src.ArrayField, &dst.ArrayField, m) {
+					return fmt.Errorf("array.copy: src array element type does not match dst (array types do not match)")
+				}
 				// pop count, srcIdx, srcRef, dstIdx, dstRef
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
 					return fmt.Errorf("array.copy: cannot pop count: %v", err)
@@ -2557,7 +2567,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					return fmt.Errorf("read array.init_data/elem type index: %v", err)
 				}
 				pc += n
-				_, n2, err := leb128.LoadUint32(body[pc+1:])
+				segIdx, n2, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
 					return fmt.Errorf("read array.init_data/elem segment index: %v", err)
 				}
@@ -2571,6 +2581,32 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				}
 				if !at.ArrayField.Mutable {
 					return fmt.Errorf("array.init_data/elem on immutable array %d", typeIdx)
+				}
+				if sub == OpcodeGCArrayInitData {
+					// The destination array element type must be a numeric or
+					// vector (packed counts as numeric); ref-element arrays
+					// can't be initialised from raw data bytes.
+					f := at.ArrayField
+					isNumericOrVector := f.Packed != PackedTypeNone ||
+						f.ValueType == ValueTypeI32 || f.ValueType == ValueTypeI64 ||
+						f.ValueType == ValueTypeF32 || f.ValueType == ValueTypeF64 ||
+						f.ValueType == ValueTypeV128
+					if !isNumericOrVector {
+						return fmt.Errorf("array.init_data: array type is not numeric or vector")
+					}
+				} else {
+					// array.init_elem: element segment's ref type must be a
+					// subtype of the array element's ref type.
+					if int(segIdx) >= len(m.ElementSection) {
+						return fmt.Errorf("array.init_elem segment index %d out of range", segIdx)
+					}
+					elem := &m.ElementSection[segIdx]
+					// Synthesise a FieldType for the element segment's
+					// reference type to reuse the storage subtype helper.
+					srcF := FieldType{ValueType: elem.Type}
+					if !isArrayFieldStorageSubtype(&srcF, &at.ArrayField, m) {
+						return fmt.Errorf("array.init_elem: type mismatch between element segment and array element type")
+					}
 				}
 				// pop count, src offset, dst offset, array ref
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
@@ -2620,7 +2656,9 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if int(pc) >= len(body) {
 					return fmt.Errorf("truncated %s", GCInstructionName(sub))
 				}
-				_ = body[pc] // cast flags byte (unused for runtime); validated implicitly
+				flags := body[pc]
+				srcNullable := flags&BrOnCastFlagSrcNullable != 0
+				dstNullable := flags&BrOnCastFlagDstNullable != 0
 				labelIdx, ln, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
 					return fmt.Errorf("read %s label: %v", GCInstructionName(sub), err)
@@ -2629,24 +2667,41 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if int(labelIdx) >= len(controlBlockStack.stack) {
 					return fmt.Errorf("invalid label index for %s", GCInstructionName(sub))
 				}
-				// Read src heap type (validates the operand's static type)
-				_, srcN, err := leb128.LoadInt64(body[pc+1:])
+				// Read src heap type.
+				srcHt, srcN, err := leb128.LoadInt64(body[pc+1:])
 				if err != nil {
 					return fmt.Errorf("read %s src heap type: %v", GCInstructionName(sub), err)
 				}
 				pc += srcN
+				srcKind, srcTypeIdx, ok := HeapTypeKindFromBinary(srcHt)
+				if !ok {
+					return fmt.Errorf("invalid src heap type for %s: %d", GCInstructionName(sub), srcHt)
+				}
+				if srcKind == HeapTypeKindConcrete && srcTypeIdx >= uint32(len(m.TypeSection)) {
+					return fmt.Errorf("%s concrete src type index out of range", GCInstructionName(sub))
+				}
 				// Read dst heap type.
 				dstHt, dstN, err := leb128.LoadInt64(body[pc+1:])
 				if err != nil {
 					return fmt.Errorf("read %s dst heap type: %v", GCInstructionName(sub), err)
 				}
 				pc += dstN
-				_, dstTypeIdx, ok := HeapTypeKindFromBinary(dstHt)
+				dstKind, dstTypeIdx, ok := HeapTypeKindFromBinary(dstHt)
 				if !ok {
 					return fmt.Errorf("invalid dst heap type for %s: %d", GCInstructionName(sub), dstHt)
 				}
-				if dstTypeIdx >= uint32(len(m.TypeSection)) && dstHt >= 0 {
-					return fmt.Errorf("br_on_cast concrete dst type index out of range")
+				if dstKind == HeapTypeKindConcrete && dstTypeIdx >= uint32(len(m.TypeSection)) {
+					return fmt.Errorf("%s concrete dst type index out of range", GCInstructionName(sub))
+				}
+				// Spec rule: rt_2 ≤ rt_1 (target type is a subtype of
+				// source type), including nullability.
+				if dstNullable && !srcNullable {
+					return fmt.Errorf("type mismatch: %s target is nullable but source is non-nullable",
+						GCInstructionName(sub))
+				}
+				if !isHeapTypeSubtypeOf(dstKind, dstTypeIdx, srcKind, srcTypeIdx, m) {
+					return fmt.Errorf("type mismatch: %s target heap type is not a subtype of source",
+						GCInstructionName(sub))
 				}
 				// Pop the ref, check the target label expects the rest
 				// of the stack (label's last param is the ref on the
@@ -2661,16 +2716,60 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				}
 				target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(labelIdx)-1]
 				var targetTypes []ValueType
+				var targetRefInfos []*ValueTypeRef
 				if target.op == OpcodeLoop {
 					targetTypes = target.blockType.Params
+					targetRefInfos = target.blockType.ParamRefInfos
 				} else {
 					targetTypes = target.blockType.Results
+					targetRefInfos = target.blockType.ResultRefInfos
 				}
 				if len(targetTypes) == 0 {
 					return fmt.Errorf("%s target label expects no values; needs a trailing ref", GCInstructionName(sub))
 				}
-				if !isReferenceValueType(targetTypes[len(targetTypes)-1]) && targetTypes[len(targetTypes)-1] != valueTypeUnknown {
+				lastIdx := len(targetTypes) - 1
+				if !isReferenceValueType(targetTypes[lastIdx]) && targetTypes[lastIdx] != valueTypeUnknown {
 					return fmt.Errorf("%s target label's last type is not a reference", GCInstructionName(sub))
+				}
+				// Spec rule: rt_2 ≤ rt' (target type is a subtype of
+				// label's expected type). For br_on_cast, the matched
+				// value flows to the label; for br_on_cast_fail, the
+				// non-matched (rt_1 \ rt_2) value flows.
+				labelRefInfo := refInfoAt(targetRefInfos, lastIdx)
+				labelNullable := labelRefInfo == nil || labelRefInfo.Nullable
+				var labelKind HeapTypeKind
+				var labelTypeIdx uint32
+				if labelRefInfo != nil {
+					labelKind = labelRefInfo.HeapKind
+					labelTypeIdx = labelRefInfo.TypeIdx
+				} else {
+					labelKind, _ = HeapTypeKindFromAbstractByte(targetTypes[lastIdx])
+				}
+				if sub == OpcodeGCBrOnCast {
+					// Matched value (rt_2) flows to the label.
+					if dstNullable && !labelNullable {
+						return fmt.Errorf("type mismatch: %s target type nullability does not match label expected type",
+							GCInstructionName(sub))
+					}
+					if labelKind != HeapTypeKindUnknown && !isHeapTypeSubtypeOf(dstKind, dstTypeIdx, labelKind, labelTypeIdx, m) {
+						return fmt.Errorf("type mismatch: %s target heap type is not a subtype of label expected type",
+							GCInstructionName(sub))
+					}
+				} else {
+					// br_on_cast_fail: rt_1 \ rt_2 flows to the label.
+					// Nullability of the diff: if rt_2 is nullable, the
+					// null case was caught by the branch, so the diff is
+					// non-nullable; else the diff retains rt_1's
+					// nullability.
+					diffNullable := srcNullable && !dstNullable
+					if diffNullable && !labelNullable {
+						return fmt.Errorf("type mismatch: %s diff type nullability does not match label expected type",
+							GCInstructionName(sub))
+					}
+					if labelKind != HeapTypeKindUnknown && !isHeapTypeSubtypeOf(srcKind, srcTypeIdx, labelKind, labelTypeIdx, m) {
+						return fmt.Errorf("type mismatch: %s diff heap type is not a subtype of label expected type",
+							GCInstructionName(sub))
+					}
 				}
 				head := targetTypes[:len(targetTypes)-1]
 				if err := valueTypeStack.popResults(op, head, false); err != nil {
@@ -2679,9 +2778,24 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				for _, t := range head {
 					valueTypeStack.push(t)
 				}
-				// The ref is left on the stack for the fall-through path
-				// regardless of which variant (br_on_cast or br_on_cast_fail).
-				valueTypeStack.push(refTy)
+				// Push the fall-through byte. For br_on_cast the
+				// fall-through carries rt_1\rt_2 (still looks like
+				// rt_1's byte). For br_on_cast_fail it carries rt_2 —
+				// map the dst kind to its abstract shorthand byte
+				// (concrete refs use the funcref sentinel).
+				var fallByte ValueType
+				if sub == OpcodeGCBrOnCast {
+					fallByte = refTy
+				} else {
+					if dstKind == HeapTypeKindConcrete {
+						fallByte = ValueTypeFuncref
+					} else if b, ok := dstKind.AbstractShorthandByte(); ok {
+						fallByte = b
+					} else {
+						fallByte = refTy
+					}
+				}
+				valueTypeStack.push(fallByte)
 			default:
 				if name := GCInstructionName(sub); name != "" {
 					return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter", name, sub)
@@ -3304,6 +3418,127 @@ func fieldOperandType(f FieldType) (ValueType, error) {
 		return f.ValueType, nil
 	}
 	return 0, fmt.Errorf("unsupported struct/array field type %#x", f.ValueType)
+}
+
+// isArrayFieldStorageSubtype reports whether `src` is a storage-type
+// subtype of `dst` for the purposes of array.copy / array.init_data /
+// array.init_elem validation. Packed types are invariant; numeric/vector
+// types must match exactly; ref fields use the byte-level reference
+// subtype check (HeapTypeKind hierarchy + concrete-ref TypeIdx via the
+// module's TypeSection where available).
+func isArrayFieldStorageSubtype(src, dst *FieldType, m *Module) bool {
+	if src.Packed != dst.Packed {
+		return false
+	}
+	if src.Packed != PackedTypeNone {
+		// Packed types are invariant; equal Packed value already
+		// implies storage equality.
+		return true
+	}
+	// Non-packed: compare the ValueType byte plus optional RefInfo.
+	if src.ValueType == dst.ValueType && src.RefInfo == nil && dst.RefInfo == nil {
+		return true
+	}
+	// Both must be reference-typed to use the heap-hierarchy / concrete
+	// subtype check; numeric type bytes must match exactly.
+	if !isReferenceValueType(src.ValueType) || !isReferenceValueType(dst.ValueType) {
+		return src.ValueType == dst.ValueType
+	}
+	// Compare nullability: src.Nullable implies dst.Nullable.
+	srcNullable := src.RefInfo == nil || src.RefInfo.Nullable
+	dstNullable := dst.RefInfo == nil || dst.RefInfo.Nullable
+	if srcNullable && !dstNullable {
+		return false
+	}
+	srcKind, srcTypeIdx := refFieldKind(src)
+	dstKind, dstTypeIdx := refFieldKind(dst)
+	// Concrete vs concrete: same type idx (no cross-module subtype
+	// chain check at this level; that's a Phase 4 follow-up).
+	if srcKind == HeapTypeKindConcrete && dstKind == HeapTypeKindConcrete {
+		return srcTypeIdx == dstTypeIdx
+	}
+	// Concrete src vs abstract dst: the concrete must be in the
+	// destination's hierarchy. We map the concrete to its underlying
+	// CompositeForm and accept abstract supertypes accordingly.
+	if srcKind == HeapTypeKindConcrete {
+		if int(srcTypeIdx) >= len(m.TypeSection) {
+			return false
+		}
+		form := m.TypeSection[srcTypeIdx].Form
+		var implied HeapTypeKind
+		switch form {
+		case CompositeFormStruct:
+			implied = HeapTypeKindStruct
+		case CompositeFormArray:
+			implied = HeapTypeKindArray
+		case CompositeFormFunc:
+			implied = HeapTypeKindFunc
+		default:
+			return false
+		}
+		return implied.IsAbstractSubtypeOf(dstKind)
+	}
+	// Abstract src vs concrete dst: only valid if src is the bottom of
+	// the relevant hierarchy (none/nofunc/noextern/noexn).
+	if dstKind == HeapTypeKindConcrete {
+		switch srcKind {
+		case HeapTypeKindBottom, HeapTypeKindNoFunc, HeapTypeKindNoExtern, HeapTypeKindNoExn:
+			return true
+		}
+		return false
+	}
+	// Abstract vs abstract.
+	return srcKind.IsAbstractSubtypeOf(dstKind)
+}
+
+// refFieldKind extracts the HeapTypeKind and TypeIdx from a ref-typed
+// field, falling back to the byte-level shorthand when no RefInfo is
+// present.
+func refFieldKind(f *FieldType) (HeapTypeKind, uint32) {
+	if f.RefInfo != nil {
+		return f.RefInfo.HeapKind, f.RefInfo.TypeIdx
+	}
+	kind, _ := HeapTypeKindFromAbstractByte(f.ValueType)
+	return kind, 0
+}
+
+// isHeapTypeSubtypeOf reports whether the (kind, typeIdx) pair `src` is a
+// subtype of `dst` under the wasm-gc type hierarchy. Concrete-to-concrete
+// pairs are compared by TypeIdx equality only; concrete-to-abstract uses
+// the underlying CompositeForm to map to the right abstract kind.
+func isHeapTypeSubtypeOf(srcKind HeapTypeKind, srcTypeIdx uint32, dstKind HeapTypeKind, dstTypeIdx uint32, m *Module) bool {
+	if srcKind == HeapTypeKindUnknown || dstKind == HeapTypeKindUnknown {
+		return false
+	}
+	if srcKind == HeapTypeKindConcrete && dstKind == HeapTypeKindConcrete {
+		return srcTypeIdx == dstTypeIdx
+	}
+	if srcKind == HeapTypeKindConcrete {
+		if int(srcTypeIdx) >= len(m.TypeSection) {
+			return false
+		}
+		form := m.TypeSection[srcTypeIdx].Form
+		var implied HeapTypeKind
+		switch form {
+		case CompositeFormStruct:
+			implied = HeapTypeKindStruct
+		case CompositeFormArray:
+			implied = HeapTypeKindArray
+		case CompositeFormFunc:
+			implied = HeapTypeKindFunc
+		default:
+			return false
+		}
+		return implied.IsAbstractSubtypeOf(dstKind)
+	}
+	if dstKind == HeapTypeKindConcrete {
+		switch srcKind {
+		case HeapTypeKindBottom, HeapTypeKindNoFunc, HeapTypeKindNoExtern, HeapTypeKindNoExn:
+			return true
+		}
+		return false
+	}
+	return srcKind.IsAbstractSubtypeOf(dstKind)
 }
 
 // refInfoAt returns the rich ref-type info at position i, or nil if the
