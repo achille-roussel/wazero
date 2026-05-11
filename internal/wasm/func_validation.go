@@ -350,7 +350,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 						OpcodeLocalGetName, index, l)
 				}
 				if index < inputLen {
-					valueTypeStack.push(functionType.Params[index])
+					var ref *ValueTypeRef
+					if int(index) < len(functionType.ParamRefInfos) {
+						ref = functionType.ParamRefInfos[index]
+					}
+					valueTypeStack.pushRef(functionType.Params[index], ref)
 				} else {
 					valueTypeStack.push(localTypes[index-inputLen])
 				}
@@ -724,12 +728,21 @@ func (m *Module) validateFunctionWithMaxStackValues(
 
 			funcType := &m.TypeSection[functions[index]]
 			for i := 0; i < len(funcType.Params); i++ {
-				if err := valueTypeStack.popAndVerifyType(funcType.Params[len(funcType.Params)-1-i]); err != nil {
+				idx := len(funcType.Params) - 1 - i
+				var paramRef *ValueTypeRef
+				if idx < len(funcType.ParamRefInfos) {
+					paramRef = funcType.ParamRefInfos[idx]
+				}
+				if err := valueTypeStack.popAndVerifyTypeRich(funcType.Params[idx], paramRef); err != nil {
 					return fmt.Errorf("type mismatch on %s operation param type: %v", opcodeName, err)
 				}
 			}
-			for _, exp := range funcType.Results {
-				valueTypeStack.push(exp)
+			for i, exp := range funcType.Results {
+				var resRef *ValueTypeRef
+				if i < len(funcType.ResultRefInfos) {
+					resRef = funcType.ResultRefInfos[i]
+				}
+				valueTypeStack.pushRef(exp, resRef)
 			}
 			if op == OpcodeTailCallReturnCall {
 				if err := enabledFeatures.RequireEnabled(experimental.CoreFeaturesTailCall); err != nil {
@@ -786,12 +799,21 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			}
 			funcType := &m.TypeSection[typeIndex]
 			for i := 0; i < len(funcType.Params); i++ {
-				if err = valueTypeStack.popAndVerifyType(funcType.Params[len(funcType.Params)-1-i]); err != nil {
+				idx := len(funcType.Params) - 1 - i
+				var paramRef *ValueTypeRef
+				if idx < len(funcType.ParamRefInfos) {
+					paramRef = funcType.ParamRefInfos[idx]
+				}
+				if err = valueTypeStack.popAndVerifyTypeRich(funcType.Params[idx], paramRef); err != nil {
 					return fmt.Errorf("type mismatch on %s operation input type", opcodeName)
 				}
 			}
-			for _, exp := range funcType.Results {
-				valueTypeStack.push(exp)
+			for i, exp := range funcType.Results {
+				var resRef *ValueTypeRef
+				if i < len(funcType.ResultRefInfos) {
+					resRef = funcType.ResultRefInfos[i]
+				}
+				valueTypeStack.pushRef(exp, resRef)
 			}
 
 			if op == OpcodeTailCallReturnCallIndirect {
@@ -3740,14 +3762,33 @@ func refFieldKind(f *FieldType) (HeapTypeKind, uint32) {
 
 // isHeapTypeSubtypeOf reports whether the (kind, typeIdx) pair `src` is a
 // subtype of `dst` under the wasm-gc type hierarchy. Concrete-to-concrete
-// pairs are compared by TypeIdx equality only; concrete-to-abstract uses
+// pairs walk the SuperTypeIndex chain of src; concrete-to-abstract uses
 // the underlying CompositeForm to map to the right abstract kind.
 func isHeapTypeSubtypeOf(srcKind HeapTypeKind, srcTypeIdx uint32, dstKind HeapTypeKind, dstTypeIdx uint32, m *Module) bool {
 	if srcKind == HeapTypeKindUnknown || dstKind == HeapTypeKindUnknown {
 		return false
 	}
 	if srcKind == HeapTypeKindConcrete && dstKind == HeapTypeKindConcrete {
-		return srcTypeIdx == dstTypeIdx
+		// Walk src's super-type chain looking for dst. Identity match
+		// covers the equal case.
+		if m == nil {
+			return srcTypeIdx == dstTypeIdx
+		}
+		cur := int64(srcTypeIdx)
+		for visited := 0; cur >= 0 && visited < 256; visited++ {
+			if uint32(cur) == dstTypeIdx {
+				return true
+			}
+			if int(cur) >= len(m.TypeSection) {
+				return false
+			}
+			sup := m.TypeSection[cur].SuperTypeIndex
+			if sup == nil {
+				return false
+			}
+			cur = int64(*sup)
+		}
+		return false
 	}
 	if srcKind == HeapTypeKindConcrete {
 		if int(srcTypeIdx) >= len(m.TypeSection) {
