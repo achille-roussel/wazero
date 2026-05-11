@@ -1023,6 +1023,26 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					valueTypeStack.push(ValueTypeExternref)
 				case ValueTypeFuncref:
 					valueTypeStack.push(ValueTypeFuncref)
+				case ValueTypeExnref:
+					valueTypeStack.push(ValueTypeExnref)
+				case ValueTypeAnyref:
+					valueTypeStack.push(ValueTypeAnyref)
+				case ValueTypeEqref:
+					valueTypeStack.push(ValueTypeEqref)
+				case ValueTypeI31ref:
+					valueTypeStack.push(ValueTypeI31ref)
+				case ValueTypeStructref:
+					valueTypeStack.push(ValueTypeStructref)
+				case ValueTypeArrayref:
+					valueTypeStack.push(ValueTypeArrayref)
+				case ValueTypeNullref:
+					valueTypeStack.push(ValueTypeNullref)
+				case ValueTypeNoFuncref:
+					valueTypeStack.push(ValueTypeNoFuncref)
+				case ValueTypeNoExternref:
+					valueTypeStack.push(ValueTypeNoExternref)
+				case ValueTypeNoExnref:
+					valueTypeStack.push(ValueTypeNoExnref)
 				default:
 					return fmt.Errorf("unknown type for ref.null: 0x%x", reftype)
 				}
@@ -2151,17 +2171,26 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			pc += subN
 			switch sub {
 			case OpcodeGCRefI31:
-				// ref.i31: pop i32, push i31ref (nullable shorthand byte).
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
 					return fmt.Errorf("cannot pop the operand for ref.i31: %v", err)
 				}
 				valueTypeStack.push(ValueTypeI31ref)
 			case OpcodeGCI31GetS, OpcodeGCI31GetU:
-				// i31.get_s / i31.get_u: pop i31ref (any nullability), push i32.
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI31ref); err != nil {
 					return fmt.Errorf("cannot pop the operand for %s: %v", GCInstructionName(sub), err)
 				}
 				valueTypeStack.push(ValueTypeI32)
+			case OpcodeGCAnyConvertExtern:
+				// pop externref, push anyref. Runtime representations are identical.
+				if err := valueTypeStack.popAndVerifyType(ValueTypeExternref); err != nil {
+					return fmt.Errorf("cannot pop the operand for any.convert_extern: %v", err)
+				}
+				valueTypeStack.push(ValueTypeAnyref)
+			case OpcodeGCExternConvertAny:
+				if err := valueTypeStack.popAndVerifyType(ValueTypeAnyref); err != nil {
+					return fmt.Errorf("cannot pop the operand for extern.convert_any: %v", err)
+				}
+				valueTypeStack.push(ValueTypeExternref)
 			default:
 				if name := GCInstructionName(sub); name != "" {
 					return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter", name, sub)
@@ -2177,8 +2206,21 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				return fmt.Errorf("cannot pop the first operand for ref.eq: %v", err)
 			}
 			valueTypeStack.push(ValueTypeI32)
-		} else if op == OpcodeRefAsNonNull ||
-			op == OpcodeBrOnNull || op == OpcodeBrOnNonNull ||
+		} else if op == OpcodeRefAsNonNull {
+			// ref.as_non_null: pop a ref (any ref type), push back the
+			// same ref (validator-level nullability becomes non-null;
+			// runtime traps if it was the null reference).
+			have, _, ok := valueTypeStack.tryPop()
+			if !ok {
+				return fmt.Errorf("reference type missing for ref.as_non_null")
+			}
+			if have != valueTypeUnknown && !isReferenceValueType(have) {
+				return fmt.Errorf("type mismatch: expected reference type for ref.as_non_null, but was %s", ValueTypeName(have))
+			}
+			// Re-push the same byte; rich-aware non-null tracking is a
+			// Phase 4 residual that the type-stack does not carry today.
+			valueTypeStack.push(have)
+		} else if op == OpcodeBrOnNull || op == OpcodeBrOnNonNull ||
 			op == OpcodeCallRef || op == OpcodeReturnCallRef {
 			// Typed function-reference opcodes (also gated on CoreFeaturesGC).
 			// Same Phase 5 caveat as above.

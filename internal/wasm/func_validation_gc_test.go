@@ -41,11 +41,6 @@ func TestValidateFunction_GCOpcodeMessage(t *testing.T) {
 			body:      []byte{OpcodeGCPrefix, byte(OpcodeGCArrayLen), OpcodeEnd},
 			expectSub: "array.len",
 		},
-		{
-			name:      "any.convert_extern",
-			body:      []byte{OpcodeGCPrefix, byte(OpcodeGCAnyConvertExtern), OpcodeEnd},
-			expectSub: "any.convert_extern",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,7 +79,6 @@ func TestValidateFunction_TypedFuncRefOpcodeMessage(t *testing.T) {
 	}{
 		{"call_ref", OpcodeCallRef, "call_ref"},
 		{"return_call_ref", OpcodeReturnCallRef, "return_call_ref"},
-		{"ref.as_non_null", OpcodeRefAsNonNull, "ref.as_non_null"},
 		{"br_on_null", OpcodeBrOnNull, "br_on_null"},
 		{"br_on_non_null", OpcodeBrOnNonNull, "br_on_non_null"},
 	}

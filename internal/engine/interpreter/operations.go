@@ -461,6 +461,12 @@ func (o operationKind) String() (ret string) {
 		ret = "operationKindI31GetU"
 	case operationKindRefEq:
 		ret = "operationKindRefEq"
+	case operationKindRefAsNonNull:
+		ret = "operationKindRefAsNonNull"
+	case operationKindAnyConvertExtern:
+		ret = "operationKindAnyConvertExtern"
+	case operationKindExternConvertAny:
+		ret = "operationKindExternConvertAny"
 	default:
 		panic(fmt.Errorf("unknown operation %d", o))
 	}
@@ -803,6 +809,18 @@ const (
 	// operationKindRefEq is the Kind for ref.eq: pop two refs, push i32 (1 if equal else 0).
 	operationKindRefEq
 
+	// operationKindRefAsNonNull is the Kind for ref.as_non_null: pop a ref,
+	// trap if it is null, otherwise push it back unchanged.
+	operationKindRefAsNonNull
+
+	// operationKindAnyConvertExtern is the Kind for any.convert_extern: pop an externref,
+	// push it as an anyref. The runtime representation is identical so this is a no-op.
+	operationKindAnyConvertExtern
+
+	// operationKindExternConvertAny is the Kind for extern.convert_any: pop an anyref,
+	// push it as an externref. The runtime representation is identical so this is a no-op.
+	operationKindExternConvertAny
+
 	// operationKindEnd is always placed at the bottom of this iota definition to be used in the test.
 	operationKindEnd
 )
@@ -1144,7 +1162,8 @@ func (o unionOperation) String() string {
 	case operationKindThrowRef:
 		return o.Kind.String()
 
-	case operationKindRefI31, operationKindI31GetS, operationKindI31GetU, operationKindRefEq:
+	case operationKindRefI31, operationKindI31GetS, operationKindI31GetU, operationKindRefEq,
+		operationKindRefAsNonNull, operationKindAnyConvertExtern, operationKindExternConvertAny:
 		return o.Kind.String()
 
 	default:
@@ -2945,4 +2964,22 @@ func newOperationI31GetU() unionOperation {
 // pairs to compare by numeric value per spec.
 func newOperationRefEq() unionOperation {
 	return unionOperation{Kind: operationKindRefEq}
+}
+
+// newOperationRefAsNonNull constructs the operation for ref.as_non_null:
+// pop a reference; if it is null, trap; otherwise push it back unchanged.
+func newOperationRefAsNonNull() unionOperation {
+	return unionOperation{Kind: operationKindRefAsNonNull}
+}
+
+// newOperationAnyConvertExtern constructs the operation for any.convert_extern.
+// Runtime representation is identical to externref, so this is a no-op pass-through.
+func newOperationAnyConvertExtern() unionOperation {
+	return unionOperation{Kind: operationKindAnyConvertExtern}
+}
+
+// newOperationExternConvertAny constructs the operation for extern.convert_any.
+// Runtime representation is identical to anyref, so this is a no-op pass-through.
+func newOperationExternConvertAny() unionOperation {
+	return unionOperation{Kind: operationKindExternConvertAny}
 }

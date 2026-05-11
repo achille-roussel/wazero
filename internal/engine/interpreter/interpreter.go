@@ -4625,6 +4625,23 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				frame.pc++
 
+			case operationKindRefAsNonNull:
+				// ref.as_non_null: pop a reference and trap if it is the
+				// null reference (zero); otherwise push it back unchanged.
+				v := ce.popValue()
+				if v == 0 {
+					panic(wasmruntime.ErrRuntimeNullReference)
+				}
+				ce.pushValue(v)
+				frame.pc++
+
+			case operationKindAnyConvertExtern, operationKindExternConvertAny:
+				// Runtime is identical for both: refs are uint64 uintptrs
+				// regardless of whether the spec types them as anyref or
+				// externref. No bits move; we just advance PC. The validator
+				// has already updated the type-stack to the converted side.
+				frame.pc++
+
 			case operationKindTailCallReturnCall:
 			f := &functions[op.U1]
 			ce.dropForTailCall(frame, f)
