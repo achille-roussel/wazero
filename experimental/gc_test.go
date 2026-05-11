@@ -966,20 +966,3 @@ func TestGC_BrOnCast(t *testing.T) {
 		require.Equal(t, int32(42), api.DecodeI32(res[0]))
 	})
 }
-
-// leb128EncodeU32 is a small helper for building constant expressions
-// in test fixtures. Encodes v as an unsigned LEB128 byte sequence.
-func leb128EncodeU32(v uint32) []byte {
-	var out []byte
-	for {
-		b := byte(v & 0x7F)
-		v >>= 7
-		if v != 0 {
-			b |= 0x80
-			out = append(out, b)
-		} else {
-			out = append(out, b)
-			return out
-		}
-	}
-}

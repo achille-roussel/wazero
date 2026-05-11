@@ -3395,13 +3395,6 @@ func (s *valueTypeStack) popResults(oc Opcode, want []ValueType, checkAboveLimit
 	return s.requireStackValuesRich(false, InstructionName(oc), want, nil, checkAboveLimit)
 }
 
-// popParamsRich is the rich-info counterpart to popParams: wantRefs[i]
-// (if non-nil) carries the precise (nullability, kind, typeidx) the
-// caller expects at position i. Length must match want when non-nil.
-func (s *valueTypeStack) popParamsRich(oc Opcode, want []ValueType, wantRefs []*ValueTypeRef, checkAboveLimit bool) error {
-	return s.requireStackValuesRich(true, InstructionName(oc), want, wantRefs, checkAboveLimit)
-}
-
 // popResultsRich is the rich-info counterpart to popResults.
 func (s *valueTypeStack) popResultsRich(oc Opcode, want []ValueType, wantRefs []*ValueTypeRef, checkAboveLimit bool) error {
 	return s.requireStackValuesRich(false, InstructionName(oc), want, wantRefs, checkAboveLimit)

@@ -11,11 +11,6 @@ import (
 	"github.com/tetratelabs/wazero/internal/wasm"
 )
 
-func decodeValueTypes(r *bytes.Reader, num uint32) ([]wasm.ValueType, error) {
-	types, _, err := decodeValueTypesWithRefInfo(r, num)
-	return types, err
-}
-
 // decodeValueTypesWithRefInfo reads `num` value types and returns both the
 // byte representation (for backward compatibility with code paths that
 // only need the shorthand byte) and a parallel rich-info slice.

@@ -130,8 +130,8 @@ func TestEncodeDecodeRoundTrip_Composite(t *testing.T) {
 			for i, want := range tt.in {
 				// Clear the cached string before comparison since the encoder
 				// won't populate that field on the input fixture.
-				want.String() // populate
-				got[i].String()
+				_ = want.String() // populate
+				_ = got[i].String()
 				require.Equal(t, want.Form, got[i].Form, "type[%d].Form", i)
 				require.Equal(t, want.Params, got[i].Params, "type[%d].Params", i)
 				require.Equal(t, want.Results, got[i].Results, "type[%d].Results", i)

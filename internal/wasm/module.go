@@ -358,7 +358,7 @@ func (m *Module) validateTypeSection(enabledFeatures api.CoreFeatures) error {
 		if ref == nil || ref.HeapKind != HeapTypeKindConcrete {
 			return nil
 		}
-		if ref.TypeIdx < 0 || uint32(ref.TypeIdx) >= numTypes {
+		if ref.TypeIdx >= numTypes {
 			if fieldHint >= 0 {
 				return fmt.Errorf("type[%d] field[%d]: unknown type %d",
 					typeIdx, fieldHint, ref.TypeIdx)
@@ -1888,14 +1888,6 @@ func isRefSubtypeOf(actual, expected ValueType) bool {
 		return false
 	}
 	return aKind.IsAbstractSubtypeOf(eKind)
-}
-
-// isStrictRefSubtypeOf returns true if actual is a strict subtype of expected.
-// Currently, non-nullable ref types are desugared to nullable at decode time,
-// so this reduces to equality. When non-nullable ref types are properly supported,
-// non-nullable should be a subtype of nullable, but NOT vice versa.
-func isStrictRefSubtypeOf(actual, expected ValueType) bool {
-	return actual == expected
 }
 
 // IsValueTypeSubtypeOf reports whether (actualByte, actualRich) is a
