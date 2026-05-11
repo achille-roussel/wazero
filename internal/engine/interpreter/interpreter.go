@@ -5045,7 +5045,11 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				tf := *(**function)(unsafe.Pointer(&v))
 				expectedTypeID := f.moduleInstance.TypeIDs[uint32(op.U1)]
-				if tf.typeID != expectedTypeID {
+				// Subtype-aware runtime type check (wasm-gc): the
+				// function in the table may have a TypeID that's a
+				// subtype of the declared call_indirect type.
+				if tf.typeID != expectedTypeID &&
+					!f.moduleInstance.GetStore().IsSubtype(tf.typeID, expectedTypeID) {
 					panic(wasmruntime.ErrRuntimeIndirectCallTypeMismatch)
 				}
 				frameUnwound := ce.callWithUnwind(ctx, f.moduleInstance, tf)
@@ -5064,7 +5068,11 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				tf := *(**function)(unsafe.Pointer(&v))
 				expectedTypeID := f.moduleInstance.TypeIDs[uint32(op.U1)]
-				if tf.typeID != expectedTypeID {
+				// Subtype-aware runtime type check (wasm-gc): the
+				// function in the table may have a TypeID that's a
+				// subtype of the declared call_indirect type.
+				if tf.typeID != expectedTypeID &&
+					!f.moduleInstance.GetStore().IsSubtype(tf.typeID, expectedTypeID) {
 					panic(wasmruntime.ErrRuntimeIndirectCallTypeMismatch)
 				}
 				if tf.moduleInstance != f.moduleInstance {

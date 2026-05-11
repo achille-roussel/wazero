@@ -344,8 +344,9 @@ func (c command) expectedError() (err error) {
 		"null function reference", "null reference",
 		"null i31 reference":
 		err = wasmruntime.ErrRuntimeNullReference
-	case "cast failure":
+	case "cast failure", "cast":
 		err = wasmruntime.ErrRuntimeCastFailure
+
 	default:
 		if strings.HasPrefix(c.Text, "uninitialized") {
 			err = wasmruntime.ErrRuntimeInvalidTableAccess

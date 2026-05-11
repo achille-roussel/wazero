@@ -2698,19 +2698,31 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if sub == OpcodeGCRefTest || sub == OpcodeGCRefTestNull {
 					valueTypeStack.push(ValueTypeI32)
 				} else {
-					// ref.cast pushes a ref of the target type back. Use
-					// the abstract shorthand byte for the kind (concrete
-					// types use the funcref sentinel per our convention;
-					// nullability info is lost at the byte-stack level).
+					// ref.cast pushes a ref of the target type back.
+					// Use the abstract shorthand byte for the kind
+					// (concrete types use the funcref sentinel per
+					// our existing convention); the nullability is
+					// preserved in rich info, but the heap kind on
+					// the rich side is left abstract (the runtime
+					// cast already enforced the dynamic kind, so
+					// downstream byte-level checks suffice for
+					// abstract-vs-abstract continues).
 					var castByte ValueType
 					if kind == HeapTypeKindConcrete {
 						castByte = ValueTypeFuncref
-					} else if b, sok := kind.AbstractShorthandByte(); sok {
-						castByte = b
+						valueTypeStack.pushRef(castByte, &ValueTypeRef{
+							Nullable: sub == OpcodeGCRefCastNull,
+							HeapKind: kind,
+							TypeIdx:  typeIdx,
+						})
 					} else {
-						castByte = ValueTypeAnyref
+						if b, sok := kind.AbstractShorthandByte(); sok {
+							castByte = b
+						} else {
+							castByte = ValueTypeAnyref
+						}
+						valueTypeStack.push(castByte)
 					}
-					valueTypeStack.push(castByte)
 				}
 			case OpcodeGCBrOnCast, OpcodeGCBrOnCastFail:
 				// Read the cast flags byte, the label index, and BOTH the
