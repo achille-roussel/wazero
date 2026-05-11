@@ -237,9 +237,18 @@ func boolToByte(b bool) (ret byte) {
 
 // typeOfFunction returns the wasm.FunctionType for the given function space index or nil.
 func (m *Module) typeOfFunction(funcIdx Index) *FunctionType {
+	typeIdx, ok := m.typeIndexOfFunction(funcIdx)
+	if !ok {
+		return nil
+	}
+	return &m.TypeSection[typeIdx]
+}
+
+// typeIndexOfFunction returns the type-section index of the function at
+// the given function space index, or (0, false) if the index is invalid.
+func (m *Module) typeIndexOfFunction(funcIdx Index) (Index, bool) {
 	typeSectionLength, importedFunctionCount := uint32(len(m.TypeSection)), m.ImportFunctionCount
 	if funcIdx < importedFunctionCount {
-		// Imports are not exclusively functions. This is the current function index in the loop.
 		cur := Index(0)
 		for i := range m.ImportSection {
 			imp := &m.ImportSection[i]
@@ -248,23 +257,23 @@ func (m *Module) typeOfFunction(funcIdx Index) *FunctionType {
 			}
 			if funcIdx == cur {
 				if imp.DescFunc >= typeSectionLength {
-					return nil
+					return 0, false
 				}
-				return &m.TypeSection[imp.DescFunc]
+				return imp.DescFunc, true
 			}
 			cur++
 		}
+		return 0, false
 	}
-
 	funcSectionIdx := funcIdx - m.ImportFunctionCount
 	if funcSectionIdx >= uint32(len(m.FunctionSection)) {
-		return nil
+		return 0, false
 	}
 	typeIdx := m.FunctionSection[funcSectionIdx]
 	if typeIdx >= typeSectionLength {
-		return nil
+		return 0, false
 	}
-	return &m.TypeSection[typeIdx]
+	return typeIdx, true
 }
 
 func (m *Module) Validate(enabledFeatures api.CoreFeatures) error {
@@ -336,6 +345,15 @@ func (m *Module) validateTypeSection(enabledFeatures api.CoreFeatures) error {
 	gcFeature := api.CoreFeatureSIMD << 5
 
 	numTypes := uint32(len(m.TypeSection))
+	// Pre-compute canonical keys so that the per-subtype structural
+	// check can compare two concrete refs by canonical equivalence
+	// (e.g. (ref $f1) and (ref $f2) that look different at the
+	// type-index level but reduce to the same iso-recursive canonical
+	// form).
+	canonKeys := make([]string, len(m.TypeSection))
+	for i := range m.TypeSection {
+		canonKeys[i] = canonicalTypeKeyWithCtx(&m.TypeSection[i], uint32(i), m.TypeSection, canonKeys)
+	}
 	validateRef := func(typeIdx, fieldHint int, ref *ValueTypeRef) error {
 		if ref == nil || ref.HeapKind != HeapTypeKindConcrete {
 			return nil
@@ -370,6 +388,18 @@ func (m *Module) validateTypeSection(enabledFeatures api.CoreFeatures) error {
 			if *t.SuperTypeIndex >= numTypes {
 				return fmt.Errorf("type[%d] supertype index %d out of range",
 					i, *t.SuperTypeIndex)
+			}
+			sup := &m.TypeSection[*t.SuperTypeIndex]
+			if sup.Final {
+				return fmt.Errorf("type[%d] sub type extends final supertype %d",
+					i, *t.SuperTypeIndex)
+			}
+			if sup.Form != t.Form {
+				return fmt.Errorf("type[%d] sub type form %s does not match supertype[%d] form %s",
+					i, t.Form, *t.SuperTypeIndex, sup.Form)
+			}
+			if err := validateSubtypeStructure(m, canonKeys, i, t, *t.SuperTypeIndex, sup); err != nil {
+				return err
 			}
 		}
 		// Validate that any concrete type-index reference inside this
@@ -413,6 +443,214 @@ func (m *Module) validateTagSection() error {
 		}
 	}
 	return nil
+}
+
+// validateSubtypeStructure verifies that sub structurally matches its
+// declared supertype per the Wasm 3.0 subtype matching rules. The forms
+// have already been checked to be equal; this function checks the body.
+//
+// Matching rules:
+//   - func: same number of params and results; each sub.param is a supertype
+//     of super.param (contravariant); each sub.result is a subtype of
+//     super.result (covariant).
+//   - struct: sub.fields starts with super.fields (so len(sub.fields) >=
+//     len(super.fields)); for non-mutable shared fields, sub's type is a
+//     subtype of super's; for mutable shared fields, the types are equal.
+//   - array: array element types equal for mutable, sub <: super for
+//     immutable.
+//
+// Concrete-ref equality is checked structurally by canonical key when
+// the references cross rec-group boundaries, and by rec-position when
+// they refer within the same rec group.
+func validateSubtypeStructure(m *Module, canonKeys []string, subIdx int, sub *FunctionType, supIdx Index, sup *FunctionType) error {
+	switch sub.Form {
+	case CompositeFormFunc:
+		if len(sub.Params) != len(sup.Params) || len(sub.Results) != len(sup.Results) {
+			return fmt.Errorf("type[%d] sub func arity does not match supertype[%d]",
+				subIdx, supIdx)
+		}
+		for j := range sub.Params {
+			subRef := refInfoAt(sub.ParamRefInfos, j)
+			supRef := refInfoAt(sup.ParamRefInfos, j)
+			if !subtypeFieldTypeOK(m, canonKeys, sup.Params[j], supRef, sub.Params[j], subRef, false) {
+				return fmt.Errorf("type[%d] sub func param[%d] is not a supertype of supertype[%d] param",
+					subIdx, j, supIdx)
+			}
+		}
+		for j := range sub.Results {
+			subRef := refInfoAt(sub.ResultRefInfos, j)
+			supRef := refInfoAt(sup.ResultRefInfos, j)
+			if !subtypeFieldTypeOK(m, canonKeys, sub.Results[j], subRef, sup.Results[j], supRef, false) {
+				return fmt.Errorf("type[%d] sub func result[%d] is not a subtype of supertype[%d] result",
+					subIdx, j, supIdx)
+			}
+		}
+	case CompositeFormStruct:
+		if len(sub.Fields) < len(sup.Fields) {
+			return fmt.Errorf("type[%d] sub struct has fewer fields than supertype[%d]",
+				subIdx, supIdx)
+		}
+		for j := range sup.Fields {
+			if sub.Fields[j].Mutable != sup.Fields[j].Mutable {
+				return fmt.Errorf("type[%d] sub struct field[%d] mutability differs from supertype[%d]",
+					subIdx, j, supIdx)
+			}
+			if sub.Fields[j].Packed != sup.Fields[j].Packed {
+				return fmt.Errorf("type[%d] sub struct field[%d] packed storage differs from supertype[%d]",
+					subIdx, j, supIdx)
+			}
+			if !subtypeFieldTypeOK(m, canonKeys, sub.Fields[j].ValueType, sub.Fields[j].RefInfo,
+				sup.Fields[j].ValueType, sup.Fields[j].RefInfo, sub.Fields[j].Mutable) {
+				return fmt.Errorf("type[%d] sub struct field[%d] is not a subtype of supertype[%d] field",
+					subIdx, j, supIdx)
+			}
+		}
+	case CompositeFormArray:
+		if sub.ArrayField.Mutable != sup.ArrayField.Mutable {
+			return fmt.Errorf("type[%d] sub array mutability differs from supertype[%d]",
+				subIdx, supIdx)
+		}
+		if sub.ArrayField.Packed != sup.ArrayField.Packed {
+			return fmt.Errorf("type[%d] sub array packed storage differs from supertype[%d]",
+				subIdx, supIdx)
+		}
+		if !subtypeFieldTypeOK(m, canonKeys, sub.ArrayField.ValueType, sub.ArrayField.RefInfo,
+			sup.ArrayField.ValueType, sup.ArrayField.RefInfo, sub.ArrayField.Mutable) {
+			return fmt.Errorf("type[%d] sub array element is not a subtype of supertype[%d] element",
+				subIdx, supIdx)
+		}
+	}
+	return nil
+}
+
+// subtypeFieldTypeOK checks whether subVT is a subtype of supVT for use
+// as a struct/array field or func result; if invariant is true (e.g. for
+// mutable storage), the types must be equal. The (ValueType, *ValueTypeRef)
+// pair encodes the type: when the rich ref is nil, the byte alone is
+// authoritative (an abstract nullable shorthand like funcref/anyref or
+// a non-ref type like i32).
+func subtypeFieldTypeOK(m *Module, canonKeys []string, subVT ValueType, subRef *ValueTypeRef,
+	supVT ValueType, supRef *ValueTypeRef, invariant bool,
+) bool {
+	subNullable, subKind, subTypeIdx, subIsRef := refTypeOfPair(subVT, subRef)
+	supNullable, supKind, supTypeIdx, supIsRef := refTypeOfPair(supVT, supRef)
+	if !subIsRef && !supIsRef {
+		return subVT == supVT
+	}
+	if subIsRef != supIsRef {
+		return false
+	}
+	if invariant {
+		if subNullable != supNullable || subKind != supKind {
+			return false
+		}
+		if subKind == HeapTypeKindConcrete {
+			return concreteKeysEqual(canonKeys, subTypeIdx, supTypeIdx)
+		}
+		return true
+	}
+	if !supNullable && subNullable {
+		return false
+	}
+	if subKind == HeapTypeKindConcrete && supKind == HeapTypeKindConcrete {
+		if concreteKeysEqual(canonKeys, subTypeIdx, supTypeIdx) {
+			return true
+		}
+		return concreteTypeIsSubtypeWithin(m, subTypeIdx, supTypeIdx)
+	}
+	if subKind == HeapTypeKindConcrete && supKind != HeapTypeKindConcrete {
+		return concreteAbstractKind(m, subTypeIdx).IsAbstractSubtypeOf(supKind)
+	}
+	if subKind != HeapTypeKindConcrete && supKind == HeapTypeKindConcrete {
+		return false
+	}
+	return subKind.IsAbstractSubtypeOf(supKind)
+}
+
+func concreteKeysEqual(canonKeys []string, a, b uint32) bool {
+	if int(a) >= len(canonKeys) || int(b) >= len(canonKeys) {
+		return false
+	}
+	return canonKeys[a] == canonKeys[b]
+}
+
+// refTypeOfPair returns the (nullable, kind, typeIdx, isRef) tuple for
+// the (byte, *rich) ValueType pair. When ref is non-nil it wins; when
+// ref is nil but the byte is a known ref shorthand, the abstract type
+// and Nullable=true are derived from the byte.
+func refTypeOfPair(vt ValueType, ref *ValueTypeRef) (nullable bool, kind HeapTypeKind, typeIdx uint32, isRef bool) {
+	if ref != nil {
+		return ref.Nullable, ref.HeapKind, ref.TypeIdx, true
+	}
+	switch vt {
+	case ValueTypeFuncref:
+		return true, HeapTypeKindFunc, 0, true
+	case ValueTypeExternref:
+		return true, HeapTypeKindExtern, 0, true
+	case ValueTypeAnyref:
+		return true, HeapTypeKindAny, 0, true
+	case ValueTypeEqref:
+		return true, HeapTypeKindEq, 0, true
+	case ValueTypeI31ref:
+		return true, HeapTypeKindI31, 0, true
+	case ValueTypeStructref:
+		return true, HeapTypeKindStruct, 0, true
+	case ValueTypeArrayref:
+		return true, HeapTypeKindArray, 0, true
+	case ValueTypeExnref:
+		return true, HeapTypeKindExn, 0, true
+	case ValueTypeNullref:
+		return true, HeapTypeKindBottom, 0, true
+	case ValueTypeNoFuncref:
+		return true, HeapTypeKindNoFunc, 0, true
+	case ValueTypeNoExternref:
+		return true, HeapTypeKindNoExtern, 0, true
+	case ValueTypeNoExnref:
+		return true, HeapTypeKindNoExn, 0, true
+	}
+	return false, 0, 0, false
+}
+
+// concreteTypeIsSubtypeWithin walks the SuperTypeIndex chain of sub
+// looking for sup, using only type-section information. This is the
+// pre-store subtype check used during validateTypeSection.
+func concreteTypeIsSubtypeWithin(m *Module, sub, sup uint32) bool {
+	visited := 0
+	for cur := sub; ; {
+		if cur == sup {
+			return true
+		}
+		if cur >= uint32(len(m.TypeSection)) {
+			return false
+		}
+		t := &m.TypeSection[cur]
+		if t.SuperTypeIndex == nil {
+			return false
+		}
+		cur = *t.SuperTypeIndex
+		visited++
+		if visited > len(m.TypeSection) {
+			return false
+		}
+	}
+}
+
+// concreteAbstractKind returns the abstract heap kind corresponding to a
+// concrete type's composite form: func → Func, struct → Struct, array →
+// Array.
+func concreteAbstractKind(m *Module, idx uint32) HeapTypeKind {
+	if idx >= uint32(len(m.TypeSection)) {
+		return HeapTypeKindUnknown
+	}
+	switch m.TypeSection[idx].Form {
+	case CompositeFormFunc:
+		return HeapTypeKindFunc
+	case CompositeFormStruct:
+		return HeapTypeKindStruct
+	case CompositeFormArray:
+		return HeapTypeKindArray
+	}
+	return HeapTypeKindUnknown
 }
 
 func (m *Module) validateStartSection() error {
@@ -1023,6 +1261,43 @@ func funcKey(params, results []ValueType) string {
 	return ret
 }
 
+// funcKeyWithCtx is the rec-group-aware function-type key shape,
+// preserving the rich (Nullable, HeapKind, TypeIdx) info for ref-typed
+// params and results so that two functions whose signatures differ only
+// in concrete-typed refs receive distinct canonical keys.
+func funcKeyWithCtx(params []ValueType, paramRefs []*ValueTypeRef, results []ValueType, resultRefs []*ValueTypeRef,
+	groupStart, groupEnd uint32, types []FunctionType, priorKeys []string,
+) string {
+	var ret string
+	for j, b := range params {
+		ret += paramOrResultKeyWithCtx(b, refInfoAt(paramRefs, j), groupStart, groupEnd, types, priorKeys)
+	}
+	if len(params) == 0 {
+		ret += "v_"
+	} else {
+		ret += "_"
+	}
+	for j, b := range results {
+		ret += paramOrResultKeyWithCtx(b, refInfoAt(resultRefs, j), groupStart, groupEnd, types, priorKeys)
+	}
+	if len(results) == 0 {
+		ret += "v"
+	}
+	return ret
+}
+
+func paramOrResultKeyWithCtx(vt ValueType, ref *ValueTypeRef,
+	groupStart, groupEnd uint32, types []FunctionType, priorKeys []string,
+) string {
+	if ref == nil {
+		return ValueTypeName(vt)
+	}
+	if ref.HeapKind == HeapTypeKindConcrete {
+		return refConcreteKey(ref, groupStart, groupEnd, types, priorKeys)
+	}
+	return ref.String()
+}
+
 // structKey produces a canonical key for a struct type, e.g.
 // "struct{i32,mut i64,i8}".
 func structKey(fields []FieldType) string {
@@ -1119,16 +1394,45 @@ func arrayKeyWithCtx(elem FieldType, groupStart, groupEnd uint32, types []Functi
 // forward references inside rec groups by short-circuiting to
 // rec-relative).
 func canonicalTypeKeyWithCtx(t *FunctionType, modulePos uint32, types []FunctionType, priorKeys []string) string {
-	groupSize := t.RecGroupSize
+	groupSize := uint32(t.RecGroupSize)
 	if groupSize < 1 {
 		groupSize = 1
 	}
 	groupStart := modulePos - uint32(t.RecGroupPosition)
-	groupEnd := groupStart + uint32(groupSize)
+	groupEnd := groupStart + groupSize
+	if groupSize == 1 {
+		return localFormOfType(t, groupStart, groupEnd, types, priorKeys)
+	}
+	// Rec group canonicalization: form a pattern over all members of
+	// the rec group so that two types in different rec groups with
+	// matching iso-recursive structures receive equal canonical keys,
+	// and types in differently-shaped rec groups receive distinct keys
+	// even when individual member shapes happen to match.
+	if int(groupEnd) > len(types) {
+		// Legacy fallback (single-type callers without a full types
+		// slice): emit local form with a |recN/M suffix so two callers
+		// of the legacy path still distinguish positions.
+		local := localFormOfType(t, groupStart, groupEnd, types, priorKeys)
+		return fmt.Sprintf("%s|rec%d/%d", local, t.RecGroupPosition, groupSize)
+	}
+	parts := make([]string, 0, groupSize)
+	for j := groupStart; j < groupEnd; j++ {
+		parts = append(parts, localFormOfType(&types[j], groupStart, groupEnd, types, priorKeys))
+	}
+	pattern := "[" + strings.Join(parts, ",") + "]"
+	return fmt.Sprintf("%s#%d", pattern, t.RecGroupPosition)
+}
+
+// localFormOfType returns the per-type structural fingerprint, with
+// intra-rec-group concrete refs encoded as rec.N (de Bruijn-style) and
+// extra-rec refs resolved via priorKeys. The rec-position suffix is
+// added by canonicalTypeKeyWithCtx when assembling the rec-group key.
+func localFormOfType(t *FunctionType, groupStart, groupEnd uint32, types []FunctionType, priorKeys []string) string {
 	var ret string
 	switch t.Form {
 	case CompositeFormFunc:
-		ret = funcKey(t.Params, t.Results)
+		ret = funcKeyWithCtx(t.Params, t.ParamRefInfos, t.Results, t.ResultRefInfos,
+			groupStart, groupEnd, types, priorKeys)
 	case CompositeFormStruct:
 		ret = structKeyWithCtx(t.Fields, groupStart, groupEnd, types, priorKeys)
 	case CompositeFormArray:
@@ -1148,9 +1452,6 @@ func canonicalTypeKeyWithCtx(t *FunctionType, modulePos uint32, types []Function
 	}
 	if t.Final {
 		ret += "|final"
-	}
-	if t.RecGroupSize > 1 {
-		ret += fmt.Sprintf("|rec%d/%d", t.RecGroupPosition, t.RecGroupSize)
 	}
 	return ret
 }

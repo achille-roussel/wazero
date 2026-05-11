@@ -5530,6 +5530,19 @@ func refMatches(v uint64, kind wasm.HeapTypeKind, nullable bool, typeIdx uint32,
 		// Null reference. Matches iff the target permits null.
 		return nullable
 	}
+	// Externref / nofunc / nofuncref / noexn live in the func/extern/
+	// exn hierarchies which are disjoint from the any hierarchy. The
+	// i31 / extern-as-any tag bits live in the any hierarchy, so for
+	// ref.test against the func/extern hierarchies we skip those tag
+	// checks and treat any non-null value as matching the static
+	// type (the validator already enforced the value's static origin
+	// is in the right hierarchy).
+	switch kind {
+	case wasm.HeapTypeKindExtern:
+		return true
+	case wasm.HeapTypeKindNoExtern:
+		return false
+	}
 	if wasm.IsTaggedI31(uintptr(v)) {
 		// Tagged i31: matches i31, eq, any (and itself).
 		switch kind {
@@ -5562,18 +5575,39 @@ func refMatches(v uint64, kind wasm.HeapTypeKind, nullable bool, typeIdx uint32,
 	objTypeID := *(*wasm.FunctionTypeID)(unsafe.Pointer(uintptr(v)))
 	store := mi.GetStore()
 	if !store.IsResolvedType(objTypeID) {
-		// Treat as function ref: load *function and read its typeID.
-		// Func / NoFunc kinds match; abstract Any / Eq / Struct /
-		// Array / I31 do not (functions are in their own hierarchy).
-		// Concrete kinds need a subtype check against the function's
-		// canonical TypeID.
-		tf := functionFromUintptr(uintptr(v))
+		// Not a heap struct/array (offset 0 didn't read a known
+		// TypeID). The value could be either:
+		//   - a *function pointer (TypeID at offset 16)
+		//   - an externref value (host-supplied uintptr, no type tag)
+		// Try the function-ref interpretation first for the func/
+		// nofunc/concrete-func cases; fall back to extern semantics
+		// for the extern / noextern / any kinds.
 		switch kind {
 		case wasm.HeapTypeKindFunc:
+			// Heuristic: real function pointers point to a
+			// *function struct that is part of the engine's
+			// functions array. We can't precisely distinguish
+			// from externref values here, so accept any non-null
+			// non-tagged value as a function ref.
 			return true
 		case wasm.HeapTypeKindNoFunc:
 			return false
+		case wasm.HeapTypeKindExtern:
+			// Non-tagged values that aren't heap allocations are
+			// treated as externref values.
+			return true
+		case wasm.HeapTypeKindNoExtern:
+			return false
+		case wasm.HeapTypeKindAny:
+			// Externref-derived values aren't in the any
+			// hierarchy unless wrapped via any.convert_extern
+			// (which would have set the extern-as-any tag).
+			return false
 		case wasm.HeapTypeKindConcrete:
+			// Attempt the function-ref subtype check; if the
+			// runtime value really is a function, this resolves
+			// correctly.
+			tf := functionFromUintptr(uintptr(v))
 			if int(typeIdx) >= len(mi.TypeIDs) {
 				return false
 			}

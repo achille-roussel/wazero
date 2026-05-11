@@ -63,7 +63,7 @@ const InvokePrefix = "invoke_"
 func NewInvokeFunc(importName string, params, results []api.ValueType) *wasm.HostFunc {
 	// The type we invoke is the same type as the import except without the
 	// index parameter.
-	fn := &InvokeFunc{&wasm.FunctionType{Results: results}}
+	fn := &InvokeFunc{&wasm.FunctionType{Results: results, Final: true}}
 	if len(params) > 1 {
 		fn.FunctionType.Params = params[1:]
 	}

@@ -174,6 +174,6 @@ func (m *Module) maybeAddType(params, results []ValueType, enabledFeatures api.C
 	}
 
 	result := m.SectionElementCount(SectionIDType)
-	m.TypeSection = append(m.TypeSection, FunctionType{Params: params, Results: results})
+	m.TypeSection = append(m.TypeSection, FunctionType{Params: params, Results: results, Final: true})
 	return result, nil
 }

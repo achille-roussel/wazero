@@ -205,12 +205,44 @@ func evaluateConstExprRich(e *ConstantExpression, globalResolver func(globalInde
 				if hterr != nil {
 					return nil, 0, nil, fmt.Errorf("read ref.null heap type: %w", hterr)
 				}
-				if _, _, ok := HeapTypeKindFromBinary(ht); !ok {
+				kind, typeIdx, ok := HeapTypeKindFromBinary(ht)
+				if !ok {
 					return nil, 0, nil, fmt.Errorf("invalid heap type for ref.null: %d", ht)
 				}
 				pc += n
 				stack = append(stack, 0)
-				typeStack = append(typeStack, RefTypeFuncref)
+				var byteType ValueType
+				switch kind {
+				case HeapTypeKindFunc, HeapTypeKindNoFunc:
+					byteType = ValueTypeFuncref
+				case HeapTypeKindExtern, HeapTypeKindNoExtern:
+					byteType = ValueTypeExternref
+				case HeapTypeKindExn, HeapTypeKindNoExn:
+					byteType = ValueTypeExnref
+				case HeapTypeKindConcrete:
+					if int(typeIdx) < len(gcCtx.FuncTypes) {
+						byteType = ValueTypeFuncref
+					} else {
+						byteType = ValueTypeAnyref
+					}
+				default:
+					byteType = ValueTypeAnyref
+				}
+				typeStack = append(typeStack, byteType)
+				if kind == HeapTypeKindConcrete {
+					typeRefs = padRefs(typeRefs, len(typeStack)-1)
+					typeRefs = append(typeRefs, &ValueTypeRef{
+						Nullable: true,
+						HeapKind: HeapTypeKindConcrete,
+						TypeIdx:  typeIdx,
+					})
+				} else if kind != HeapTypeKindFunc && kind != HeapTypeKindExtern {
+					typeRefs = padRefs(typeRefs, len(typeStack)-1)
+					typeRefs = append(typeRefs, &ValueTypeRef{
+						Nullable: true,
+						HeapKind: kind,
+					})
+				}
 			} else {
 				valType := ValueType(data[pc])
 				if valType != RefTypeFuncref && valType != RefTypeExternref {

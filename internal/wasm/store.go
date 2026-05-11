@@ -475,6 +475,20 @@ func (m *ModuleInstance) resolveImports(ctx context.Context, module *Module) (er
 					err = errorInvalidImport(i, fmt.Errorf("signature mismatch: %s != %s", expectedType, actual))
 					return
 				}
+				// Subtype-aware compatibility check: the actual function's
+				// canonical type must be a subtype of the declared import
+				// type. This catches GC-specific mismatches that byte-level
+				// EqualsSignature accepts (e.g. final vs non-final, or
+				// (ref $t) where $t is a rec-group-typed return).
+				expectedID := m.TypeIDs[i.DescFunc]
+				if actualTypeIdx, ok := src.typeIndexOfFunction(imported.Index); ok &&
+					int(actualTypeIdx) < len(importedModule.TypeIDs) {
+					actualID := importedModule.TypeIDs[actualTypeIdx]
+					if actualID != expectedID && !m.s.IsSubtype(actualID, expectedID) {
+						err = errorInvalidImport(i, fmt.Errorf("incompatible import type: %s vs %s", expectedType, actual))
+						return
+					}
+				}
 
 				m.Engine.ResolveImportedFunction(i.IndexPerType, i.DescFunc, imported.Index, importedModule.Engine)
 			case ExternTypeTable:

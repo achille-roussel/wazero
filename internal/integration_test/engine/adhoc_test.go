@@ -1212,7 +1212,7 @@ func testTwoIndirection(t *testing.T, r wazero.Runtime) {
 	}).Export("div").Instantiate(ctx)
 	require.NoError(t, err)
 
-	ft := wasm.FunctionType{Params: []wasm.ValueType{i32}, Results: []wasm.ValueType{i32}}
+	ft := wasm.FunctionType{Params: []wasm.ValueType{i32}, Results: []wasm.ValueType{i32}, Final: true}
 	hostImporter := binaryencoding.EncodeModule(&wasm.Module{
 		ImportSection:   []wasm.Import{{Module: "host", Name: "div", DescFunc: 0}},
 		TypeSection:     []wasm.FunctionType{ft},
@@ -1690,10 +1690,10 @@ func manyParamsResultsMod() (bin []byte, params []uint64) {
 	mainType := wasm.FunctionType{}
 	swapperType := wasm.FunctionType{}
 	doublerType := wasm.FunctionType{}
-	manyConstsType := wasm.FunctionType{}
-	callManyConstsType := wasm.FunctionType{}
-	pickLastVectorType := wasm.FunctionType{Results: []wasm.ValueType{v128}}
-	callManyConstsAndPickLastVectorType := wasm.FunctionType{Results: []wasm.ValueType{v128}}
+	manyConstsType := wasm.FunctionType{Final: true}
+	callManyConstsType := wasm.FunctionType{Final: true}
+	pickLastVectorType := wasm.FunctionType{Results: []wasm.ValueType{v128}, Final: true}
+	callManyConstsAndPickLastVectorType := wasm.FunctionType{Results: []wasm.ValueType{v128}, Final: true}
 	for i := 0; i < 20; i++ {
 		swapperType.Params = append(swapperType.Params, i32, i64, f32, f64, v128)
 		swapperType.Results = append(swapperType.Results, v128, f64, f32, i64, i32)
@@ -2450,7 +2450,7 @@ func testHugeBinary(t *testing.T, r wazero.Runtime) {
 	}
 	codes[functionCount-1] = wasm.Code{Body: lastFunctionBody}
 
-	funcType := wasm.FunctionType{Params: []wasm.ValueType{i32}, Results: []wasm.ValueType{i32}}
+	funcType := wasm.FunctionType{Params: []wasm.ValueType{i32}, Results: []wasm.ValueType{i32}, Final: true}
 	m := &wasm.Module{}
 	m.FunctionSection = make([]wasm.Index, functionCount)
 	m.CodeSection = codes

@@ -59,13 +59,12 @@ func decodeSubType(enabledFeatures api.CoreFeatures, r *bytes.Reader, ret *wasm.
 		return decodeCompositeForm(enabledFeatures, r, ret)
 
 	case 0x60, 0x5F, 0x5E:
-		// Shorthand: implicit sub final, zero supertypes. Final is left at
-		// its zero value (false) in Phase 2 to avoid churn in existing
-		// tests that compare full FunctionType{} structs; Phase 4 will set
-		// Final properly when subtype validation is implemented.
+		// Shorthand: per spec, a bare composite type desugars to
+		// (sub final () comptype) — implicit final, no super list.
 		if err := r.UnreadByte(); err != nil {
 			return err
 		}
+		ret.Final = true
 		return decodeCompositeForm(enabledFeatures, r, ret)
 	}
 	return fmt.Errorf("invalid sub-type form byte: %#x", b)
