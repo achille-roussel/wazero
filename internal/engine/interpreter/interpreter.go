@@ -4639,11 +4639,27 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				ce.pushValue(v)
 				frame.pc++
 
-			case operationKindAnyConvertExtern, operationKindExternConvertAny:
-				// Runtime is identical for both: refs are uint64 uintptrs
-				// regardless of whether the spec types them as anyref or
-				// externref. No bits move; we just advance PC. The validator
-				// has already updated the type-stack to the converted side.
+			case operationKindAnyConvertExtern:
+				// extern → any: wrap the externref value with the
+				// extern-as-any tag so subsequent ref.test / ref.cast
+				// can distinguish it from i31s and heap-allocated
+				// struct/array refs. Null passes through.
+				v := ce.popValue()
+				ce.pushValue(uint64(wasm.PackExternAsAny(uintptr(v))))
+				frame.pc++
+
+			case operationKindExternConvertAny:
+				// any → extern: unwrap. For non-tagged values (real
+				// heap refs / i31s) the spec defines extern.convert_any
+				// to wrap them as a host reference; in our runtime we
+				// just keep the same uintptr value (the host can't
+				// observe wazero heap refs anyway).
+				v := ce.popValue()
+				if wasm.IsTaggedExternAsAny(uintptr(v)) {
+					ce.pushValue(uint64(wasm.UnpackExternAsAny(uintptr(v))))
+				} else {
+					ce.pushValue(v)
+				}
 				frame.pc++
 
 			case operationKindStructNew:
@@ -5509,6 +5525,15 @@ func refMatches(v uint64, kind wasm.HeapTypeKind, nullable bool, typeIdx uint32,
 			// An i31 is not an instance of any concrete struct/array
 			// type (those are different forms).
 			return false
+		}
+		return false
+	}
+	if wasm.IsTaggedExternAsAny(uintptr(v)) {
+		// Externref-wrapped-in-anyref via any.convert_extern: the
+		// value is in the any hierarchy but is NOT a struct / array /
+		// i31, and is NOT an extern in the func hierarchy.
+		if kind == wasm.HeapTypeKindAny {
+			return true
 		}
 		return false
 	}

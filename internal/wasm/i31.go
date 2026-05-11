@@ -78,23 +78,45 @@ func (r *I31Ref) Equals(other *I31Ref) bool {
 // objects to at least 8 bytes on the supported 64-bit platforms — so the
 // tag bit is unambiguous.
 
+// Tagged-uintptr representation of "primitive" refs (i31 and
+// externref-wrapped-in-anyref). The low 2 bits encode the tag:
+//
+//	0b00 — heap pointer (Go-allocated WasmStruct / WasmArray / etc.)
+//	0b01 — i31: payload in bits 2..32 (31 bits of value)
+//	0b11 — extern-wrapped-in-anyref: payload in bits 2..63 (62 bits)
+//
+// 0b10 is reserved.
+//
+// Externref values in wazero are opaque uintptrs supplied by the host.
+// Storing them directly in an anyref slot is ambiguous because some
+// host externref values overlap with the i31 bit pattern (any odd
+// integer looks like a tagged i31). The 0b11 tag distinguishes
+// externref-converted-to-anyref values so refMatches can return the
+// correct answer for ref.test eqref / ref.test i31ref / etc.
+
+const (
+	primTagMask  uintptr = 0b11
+	primTagI31   uintptr = 0b01
+	primTagExtAn uintptr = 0b11
+)
+
 // PackI31 returns the tagged-uintptr representation of an i31 value. The
 // 32-bit input is narrowed to its low 31 bits per the spec for ref.i31.
 func PackI31(v uint32) uintptr {
-	return uintptr(((v & I31RefMask) << 1) | 1)
+	return (uintptr(v&I31RefMask) << 2) | primTagI31
 }
 
 // IsTaggedI31 reports whether a tagged uintptr is an i31 ref (and not the
 // null reference or a real pointer).
 func IsTaggedI31(t uintptr) bool {
-	return t&1 == 1
+	return t&primTagMask == primTagI31
 }
 
 // UnpackI31Signed extracts an i31 value as a sign-extended i32. Callers
 // must verify t is a tagged i31 (via IsTaggedI31) first; on a null or
 // non-i31 input the result is undefined.
 func UnpackI31Signed(t uintptr) int32 {
-	b := uint32(t>>1) & I31RefMask
+	b := uint32(t>>2) & I31RefMask
 	if b&0x40000000 != 0 {
 		return int32(b | 0x80000000)
 	}
@@ -104,5 +126,30 @@ func UnpackI31Signed(t uintptr) int32 {
 // UnpackI31Unsigned extracts an i31 value as a zero-extended u32. As with
 // UnpackI31Signed, callers verify the tag first.
 func UnpackI31Unsigned(t uintptr) uint32 {
-	return uint32(t>>1) & I31RefMask
+	return uint32(t>>2) & I31RefMask
+}
+
+// PackExternAsAny tags an externref value (raw uintptr from the host)
+// so it can be stored in an anyref slot without colliding with the
+// i31 bit pattern. The top 62 bits carry the original value. A zero
+// externref (null) passes through unchanged.
+func PackExternAsAny(v uintptr) uintptr {
+	if v == 0 {
+		return 0
+	}
+	return (v << 2) | primTagExtAn
+}
+
+// IsTaggedExternAsAny reports whether t was produced by PackExternAsAny.
+func IsTaggedExternAsAny(t uintptr) bool {
+	return t != 0 && t&primTagMask == primTagExtAn
+}
+
+// UnpackExternAsAny extracts the original externref uintptr from a
+// value previously produced by PackExternAsAny.
+func UnpackExternAsAny(t uintptr) uintptr {
+	if t == 0 {
+		return 0
+	}
+	return t >> 2
 }

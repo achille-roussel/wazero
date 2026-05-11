@@ -279,7 +279,18 @@ func (c commandActionVal) toUint64() (ret uint64) {
 			// spec-test framework uses the same incremented value for
 			// the matching anyref result (any.convert_extern is the
 			// identity at runtime).
-			ret = original + 1
+			incremented := original + 1
+			if c.ValType == "anyref" {
+				// Anyref-typed expected values represent host
+				// references (ref.host N) flowing through
+				// any.convert_extern, which tags the value with the
+				// extern-as-any tag so refMatches can distinguish them
+				// from struct/array refs. Match the runtime
+				// representation by tagging here too.
+				ret = uint64(wasm.PackExternAsAny(uintptr(incremented)))
+			} else {
+				ret = incremented
+			}
 		}
 	} else if strings.Contains(c.ValType, "32") {
 		// wasm-tools may output signed decimals (e.g. "-1"); handle both.
