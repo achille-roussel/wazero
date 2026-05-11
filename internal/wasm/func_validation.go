@@ -81,6 +81,7 @@ func (m *Module) validateFunctionWithMaxStackValues(
 
 	sts.reset(functionType)
 	valueTypeStack := &sts.vs
+	valueTypeStack.m = m
 	// We start with the outermost control block which is for function return if the code branches into it.
 	controlBlockStack := &sts.cs
 
@@ -411,12 +412,15 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			// Check type soundness.
 			target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(index)-1]
 			var targetResultType []ValueType
+			var targetResultRefs []*ValueTypeRef
 			if target.op == OpcodeLoop {
 				targetResultType = target.blockType.Params
+				targetResultRefs = target.blockType.ParamRefInfos
 			} else {
 				targetResultType = target.blockType.Results
+				targetResultRefs = target.blockType.ResultRefInfos
 			}
-			if err = valueTypeStack.popResults(op, targetResultType, false); err != nil {
+			if err = valueTypeStack.popResultsRich(op, targetResultType, targetResultRefs, false); err != nil {
 				return err
 			}
 			// br instruction is stack-polymorphic.
@@ -438,12 +442,15 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			// Check type soundness.
 			target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(index)-1]
 			var targetResultType []ValueType
+			var targetResultRefs []*ValueTypeRef
 			if target.op == OpcodeLoop {
 				targetResultType = target.blockType.Params
+				targetResultRefs = target.blockType.ParamRefInfos
 			} else {
 				targetResultType = target.blockType.Results
+				targetResultRefs = target.blockType.ResultRefInfos
 			}
-			if err := valueTypeStack.popResults(op, targetResultType, false); err != nil {
+			if err := valueTypeStack.popResultsRich(op, targetResultType, targetResultRefs, false); err != nil {
 				return err
 			}
 			// Push back the result
@@ -1038,35 +1045,36 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				}
 				switch kind {
 				case HeapTypeKindFunc:
-					valueTypeStack.push(ValueTypeFuncref)
+					valueTypeStack.pushRef(ValueTypeFuncref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindFunc})
 				case HeapTypeKindExtern:
-					valueTypeStack.push(ValueTypeExternref)
+					valueTypeStack.pushRef(ValueTypeExternref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindExtern})
 				case HeapTypeKindExn:
-					valueTypeStack.push(ValueTypeExnref)
+					valueTypeStack.pushRef(ValueTypeExnref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindExn})
 				case HeapTypeKindAny:
-					valueTypeStack.push(ValueTypeAnyref)
+					valueTypeStack.pushRef(ValueTypeAnyref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindAny})
 				case HeapTypeKindEq:
-					valueTypeStack.push(ValueTypeEqref)
+					valueTypeStack.pushRef(ValueTypeEqref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindEq})
 				case HeapTypeKindI31:
-					valueTypeStack.push(ValueTypeI31ref)
+					valueTypeStack.pushRef(ValueTypeI31ref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindI31})
 				case HeapTypeKindStruct:
-					valueTypeStack.push(ValueTypeStructref)
+					valueTypeStack.pushRef(ValueTypeStructref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindStruct})
 				case HeapTypeKindArray:
-					valueTypeStack.push(ValueTypeArrayref)
+					valueTypeStack.pushRef(ValueTypeArrayref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindArray})
 				case HeapTypeKindBottom:
-					valueTypeStack.push(ValueTypeNullref)
+					valueTypeStack.pushRef(ValueTypeNullref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindBottom})
 				case HeapTypeKindNoFunc:
-					valueTypeStack.push(ValueTypeNoFuncref)
+					valueTypeStack.pushRef(ValueTypeNoFuncref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindNoFunc})
 				case HeapTypeKindNoExtern:
-					valueTypeStack.push(ValueTypeNoExternref)
+					valueTypeStack.pushRef(ValueTypeNoExternref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindNoExtern})
 				case HeapTypeKindNoExn:
-					valueTypeStack.push(ValueTypeNoExnref)
+					valueTypeStack.pushRef(ValueTypeNoExnref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindNoExn})
 				case HeapTypeKindConcrete:
 					if typeIdx >= uint32(len(m.TypeSection)) {
 						return fmt.Errorf("ref.null: type index %d out of range", typeIdx)
 					}
-					// Concrete-ref byte sentinel is funcref.
-					valueTypeStack.push(ValueTypeFuncref)
+					// Concrete-ref byte sentinel is funcref; rich info
+					// preserves the concrete kind + index plus nullability.
+					valueTypeStack.pushRef(ValueTypeFuncref, &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindConcrete, TypeIdx: typeIdx})
 				default:
 					return fmt.Errorf("unknown type for ref.null: 0x%x", body[pc])
 				}
@@ -2108,8 +2116,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				ctx = InstructionName(bl.op)
 			}
 
-			// Check return types match
-			if err := valueTypeStack.requireStackValues(false, ctx, bl.blockType.Results, true); err != nil {
+			// Check return types match — rich-aware so non-nullable
+			// concrete (ref $T) declared on the function/block result
+			// is enforced precisely even when the byte-level stack
+			// shows the funcref sentinel.
+			if err := valueTypeStack.requireStackValuesRich(false, ctx, bl.blockType.Results, bl.blockType.ResultRefInfos, true); err != nil {
 				return err
 			}
 
@@ -2123,8 +2134,9 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			// on values previously pushed by outer blocks.
 			valueTypeStack.popStackLimit()
 		} else if op == OpcodeReturn {
-			// Same formatting as OpcodeEnd on the outer-most block
-			if err := valueTypeStack.requireStackValues(false, "", functionType.Results, false); err != nil {
+			// Same formatting as OpcodeEnd on the outer-most block —
+			// rich-aware against the function's declared result types.
+			if err := valueTypeStack.requireStackValuesRich(false, "", functionType.Results, functionType.ResultRefInfos, false); err != nil {
 				return err
 			}
 			// return instruction is stack-polymorphic.
@@ -2198,7 +2210,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI32); err != nil {
 					return fmt.Errorf("cannot pop the operand for ref.i31: %v", err)
 				}
-				valueTypeStack.push(ValueTypeI31ref)
+				// ref.i31 produces a non-null (ref i31).
+				valueTypeStack.pushRef(ValueTypeI31ref, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindI31,
+				})
 			case OpcodeGCI31GetS, OpcodeGCI31GetU:
 				if err := valueTypeStack.popAndVerifyType(ValueTypeI31ref); err != nil {
 					return fmt.Errorf("cannot pop the operand for %s: %v", GCInstructionName(sub), err)
@@ -2247,7 +2263,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				// subtype checks (e.g. ref.test against the actual
 				// struct type) go through Store.IsSubtype using the
 				// runtime TypeID, not the operand-stack byte.
-				valueTypeStack.push(ValueTypeFuncref)
+				valueTypeStack.pushRef(ValueTypeFuncref, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindConcrete,
+					TypeIdx:  typeIdx,
+				})
 			case OpcodeGCStructGet, OpcodeGCStructGetS, OpcodeGCStructGetU:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2351,7 +2371,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				}
 				// push the funcref sentinel: array.new produces a
 				// concrete (ref $T). See struct.new for rationale.
-				valueTypeStack.push(ValueTypeFuncref)
+				valueTypeStack.pushRef(ValueTypeFuncref, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindConcrete,
+					TypeIdx:  typeIdx,
+				})
 			case OpcodeGCArrayGet, OpcodeGCArrayGetS, OpcodeGCArrayGetU:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2450,7 +2474,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				}
 				// push the funcref sentinel: array.new_fixed produces
 				// a concrete (ref $T). See struct.new for rationale.
-				valueTypeStack.push(ValueTypeFuncref)
+				valueTypeStack.pushRef(ValueTypeFuncref, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindConcrete,
+					TypeIdx:  typeIdx,
+				})
 			case OpcodeGCArrayFill:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2560,7 +2588,11 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				// push the funcref sentinel: array.new_data /
 				// array.new_elem produce a concrete (ref $T). See
 				// struct.new for rationale.
-				valueTypeStack.push(ValueTypeFuncref)
+				valueTypeStack.pushRef(ValueTypeFuncref, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindConcrete,
+					TypeIdx:  typeIdx,
+				})
 			case OpcodeGCArrayInitData, OpcodeGCArrayInitElem:
 				typeIdx, n, err := leb128.LoadUint32(body[pc+1:])
 				if err != nil {
@@ -2787,14 +2819,27 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				for _, t := range head {
 					valueTypeStack.push(t)
 				}
-				// Push the fall-through byte. For br_on_cast the
-				// fall-through carries rt_1\rt_2 (still looks like
-				// rt_1's byte). For br_on_cast_fail it carries rt_2 —
-				// map the dst kind to its abstract shorthand byte
-				// (concrete refs use the funcref sentinel).
+				// Push the fall-through value's byte + rich info.
+				//
+				// For br_on_cast the fall-through carries rt_1\rt_2:
+				//   - heap kind: rt_1's
+				//   - nullability: if dst caught the null case (rt_2
+				//     nullable), the leftover is non-null; else the
+				//     leftover keeps rt_1's nullability.
+				//
+				// For br_on_cast_fail the fall-through carries rt_2
+				// (the matched type): heap kind = rt_2's, nullability
+				// = rt_2's.
 				var fallByte ValueType
+				var fallRef *ValueTypeRef
 				if sub == OpcodeGCBrOnCast {
 					fallByte = refTy
+					leftoverNullable := srcNullable && !dstNullable
+					fallRef = &ValueTypeRef{
+						Nullable: leftoverNullable,
+						HeapKind: srcKind,
+						TypeIdx:  srcTypeIdx,
+					}
 				} else {
 					if dstKind == HeapTypeKindConcrete {
 						fallByte = ValueTypeFuncref
@@ -2803,8 +2848,13 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					} else {
 						fallByte = refTy
 					}
+					fallRef = &ValueTypeRef{
+						Nullable: dstNullable,
+						HeapKind: dstKind,
+						TypeIdx:  dstTypeIdx,
+					}
 				}
-				valueTypeStack.push(fallByte)
+				valueTypeStack.pushRef(fallByte, fallRef)
 			default:
 				if name := GCInstructionName(sub); name != "" {
 					return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter", name, sub)
@@ -2812,11 +2862,12 @@ func (m *Module) validateFunctionWithMaxStackValues(
 				return fmt.Errorf("unknown GC sub-opcode 0xfb 0x%x", sub)
 			}
 		} else if op == OpcodeRefEq {
-			// ref.eq: pop two refs (any ref types), push i32.
-			if err := valueTypeStack.popReferenceType(); err != nil {
+			// ref.eq: pop two refs, both must be subtypes of eqref.
+			eqExpected := &ValueTypeRef{Nullable: true, HeapKind: HeapTypeKindEq}
+			if err := valueTypeStack.popAndVerifyTypeRich(ValueTypeEqref, eqExpected); err != nil {
 				return fmt.Errorf("cannot pop the second operand for ref.eq: %v", err)
 			}
-			if err := valueTypeStack.popReferenceType(); err != nil {
+			if err := valueTypeStack.popAndVerifyTypeRich(ValueTypeEqref, eqExpected); err != nil {
 				return fmt.Errorf("cannot pop the first operand for ref.eq: %v", err)
 			}
 			valueTypeStack.push(ValueTypeI32)
@@ -3063,7 +3114,20 @@ func (s *controlBlockStack) push(startAt, elseAt, endAt uint64, blockType *Funct
 }
 
 type valueTypeStack struct {
-	stack               []ValueType
+	stack []ValueType
+	// refs is the parallel rich-info slice for `stack`. refs[i] is
+	// either nil (no rich info; byte alone is the type, e.g. for
+	// numeric types and nullable-abstract refs) or a *ValueTypeRef
+	// describing the precise (Nullable, HeapKind, TypeIdx) of the
+	// reference value sitting at stack[i]. Maintained in lockstep with
+	// stack by push / pushRef / pop / tryPop / unreachable.
+	refs []*ValueTypeRef
+	// m is the module being validated; used by the rich subtype check
+	// to resolve concrete TypeIdx ↔ CompositeForm mapping when
+	// comparing concrete refs against abstract heap types like
+	// structref / arrayref. nil if no module context is available
+	// (legacy callers / tests).
+	m                   *Module
 	stackLimits         []int
 	maximumStackPointer int
 	// requireStackValuesTmp is used in requireStackValues function to reduce the allocation.
@@ -3087,9 +3151,38 @@ func (s *valueTypeStack) tryPop() (vt ValueType, limit int, ok bool) {
 	} else {
 		vt = s.stack[stackLen-1]
 		s.stack = s.stack[:stackLen-1]
+		if len(s.refs) >= stackLen {
+			s.refs = s.refs[:stackLen-1]
+		}
 		ok = true
 		return
 	}
+}
+
+// tryPopRich is the rich-aware counterpart to tryPop: it returns the
+// byte plus its parallel *ValueTypeRef (nil if the position has no
+// rich info). Used by GC-aware validators that need precise (kind,
+// nullability, typeIdx) info to satisfy spec subtype rules.
+func (s *valueTypeStack) tryPopRich() (vt ValueType, ref *ValueTypeRef, limit int, ok bool) {
+	if len(s.stackLimits) > 0 {
+		limit = s.stackLimits[len(s.stackLimits)-1]
+	}
+	stackLen := len(s.stack)
+	if stackLen <= limit {
+		return
+	} else if stackLen == limit+1 && s.stack[limit] == valueTypeUnknown {
+		vt = valueTypeUnknown
+		ok = true
+		return
+	}
+	vt = s.stack[stackLen-1]
+	s.stack = s.stack[:stackLen-1]
+	if len(s.refs) >= stackLen {
+		ref = s.refs[stackLen-1]
+		s.refs = s.refs[:stackLen-1]
+	}
+	ok = true
+	return
 }
 
 func (s *valueTypeStack) pop() (ValueType, error) {
@@ -3110,6 +3203,70 @@ func (s *valueTypeStack) popAndVerifyType(expected ValueType) error {
 		return fmt.Errorf("type mismatch: expected %s, but was %s", ValueTypeName(expected), ValueTypeName(have))
 	}
 	return nil
+}
+
+// isValueTypeSubtypeRich reports whether (haveByte, haveRef) is a
+// subtype of (wantByte, wantRef), with full module context so that
+// concrete TypeIdx ↔ abstract-kind comparisons resolve correctly via
+// the type section's CompositeForm.
+//
+// This is the validator's preferred subtype primitive once rich
+// ValueTypeRef info is available on both sides of a comparison.
+func isValueTypeSubtypeRich(have ValueType, haveRef *ValueTypeRef, want ValueType, wantRef *ValueTypeRef, m *Module) bool {
+	if have == valueTypeUnknown || want == valueTypeUnknown {
+		return true
+	}
+	haveIsRef := isReferenceValueType(have)
+	wantIsRef := isReferenceValueType(want)
+	// Non-ref-vs-anything must match exactly on byte.
+	if !haveIsRef || !wantIsRef {
+		return have == want
+	}
+	// Derive (Nullable, Kind, TypeIdx) for both sides.
+	haveNull, haveKind, haveIdx := classifyRef(have, haveRef)
+	wantNull, wantKind, wantIdx := classifyRef(want, wantRef)
+	// Nullability: nullable can't satisfy non-nullable.
+	if haveNull && !wantNull {
+		return false
+	}
+	return isHeapTypeSubtypeOf(haveKind, haveIdx, wantKind, wantIdx, m)
+}
+
+// classifyRef derives the (nullability, HeapTypeKind, TypeIdx) of a
+// reference-typed (byte, *ValueTypeRef) pair. When ref is non-nil it
+// is authoritative; otherwise the byte's abstract shorthand provides
+// the kind (nullability defaults to true for abstract shorthand bytes
+// since those are spec-defined as `ref null heap`).
+func classifyRef(b ValueType, ref *ValueTypeRef) (nullable bool, kind HeapTypeKind, typeIdx uint32) {
+	if ref != nil {
+		return ref.Nullable, ref.HeapKind, ref.TypeIdx
+	}
+	if k, ok := HeapTypeKindFromAbstractByte(b); ok {
+		return true, k, 0
+	}
+	// Fallback (e.g. funcref sentinel without RefInfo): treat as
+	// nullable abstract func kind. The validator should never hit
+	// this for concrete refs in practice — concrete refs always
+	// carry RefInfo when produced by struct.new / array.new / etc.
+	if b == ValueTypeFuncref {
+		return true, HeapTypeKindFunc, 0
+	}
+	return true, HeapTypeKindUnknown, 0
+}
+// It uses IsValueTypeSubtypeOf so checks honour nullability and concrete
+// TypeIdx info when present on either side.
+func (s *valueTypeStack) popAndVerifyTypeRich(expected ValueType, expectedRef *ValueTypeRef) error {
+	have, haveRef, _, ok := s.tryPopRich()
+	if !ok {
+		return fmt.Errorf("%s missing", ValueTypeName(expected))
+	}
+	if have == valueTypeUnknown || expected == valueTypeUnknown {
+		return nil
+	}
+	if isValueTypeSubtypeRich(have, haveRef, expected, expectedRef, s.m) {
+		return nil
+	}
+	return fmt.Errorf("type mismatch: expected %s, but was %s", ValueTypeName(expected), ValueTypeName(have))
 }
 
 // popReferenceType pops a value from the stack and verifies it is some
@@ -3137,6 +3294,29 @@ func (s *valueTypeStack) push(v ValueType) {
 	}
 }
 
+// pushRef pushes a reference-typed value with its rich-info side
+// information. The byte must be a valid reference-typed ValueType (or
+// the funcref sentinel used for concrete refs). ref may be nil if the
+// caller only has the byte (e.g. abstract-shorthand refs whose
+// nullability is implicit in the byte).
+func (s *valueTypeStack) pushRef(v ValueType, ref *ValueTypeRef) {
+	s.stack = append(s.stack, v)
+	if ref != nil {
+		// Ensure refs has same length as stack; pad with nils.
+		for len(s.refs) < len(s.stack)-1 {
+			s.refs = append(s.refs, nil)
+		}
+		s.refs = append(s.refs, ref)
+	} else if len(s.refs) >= len(s.stack)-1 {
+		// Only pad refs if it's already being maintained (we don't
+		// want to allocate for non-GC modules).
+		s.refs = append(s.refs, nil)
+	}
+	if sp := len(s.stack); sp > s.maximumStackPointer {
+		s.maximumStackPointer = sp
+	}
+}
+
 func (s *valueTypeStack) unreachable() {
 	s.resetAtStackLimit()
 	s.stack = append(s.stack, valueTypeUnknown)
@@ -3144,9 +3324,14 @@ func (s *valueTypeStack) unreachable() {
 
 func (s *valueTypeStack) resetAtStackLimit() {
 	if len(s.stackLimits) != 0 {
-		s.stack = s.stack[:s.stackLimits[len(s.stackLimits)-1]]
+		limit := s.stackLimits[len(s.stackLimits)-1]
+		s.stack = s.stack[:limit]
+		if len(s.refs) > limit {
+			s.refs = s.refs[:limit]
+		}
 	} else {
 		s.stack = s.stack[:0]
+		s.refs = s.refs[:0]
 	}
 }
 
@@ -3163,17 +3348,39 @@ func (s *valueTypeStack) pushStackLimit(params int) {
 }
 
 func (s *valueTypeStack) popParams(oc Opcode, want []ValueType, checkAboveLimit bool) error {
-	return s.requireStackValues(true, InstructionName(oc), want, checkAboveLimit)
+	return s.requireStackValuesRich(true, InstructionName(oc), want, nil, checkAboveLimit)
 }
 
 func (s *valueTypeStack) popResults(oc Opcode, want []ValueType, checkAboveLimit bool) error {
-	return s.requireStackValues(false, InstructionName(oc), want, checkAboveLimit)
+	return s.requireStackValuesRich(false, InstructionName(oc), want, nil, checkAboveLimit)
+}
+
+// popParamsRich is the rich-info counterpart to popParams: wantRefs[i]
+// (if non-nil) carries the precise (nullability, kind, typeidx) the
+// caller expects at position i. Length must match want when non-nil.
+func (s *valueTypeStack) popParamsRich(oc Opcode, want []ValueType, wantRefs []*ValueTypeRef, checkAboveLimit bool) error {
+	return s.requireStackValuesRich(true, InstructionName(oc), want, wantRefs, checkAboveLimit)
+}
+
+// popResultsRich is the rich-info counterpart to popResults.
+func (s *valueTypeStack) popResultsRich(oc Opcode, want []ValueType, wantRefs []*ValueTypeRef, checkAboveLimit bool) error {
+	return s.requireStackValuesRich(false, InstructionName(oc), want, wantRefs, checkAboveLimit)
 }
 
 func (s *valueTypeStack) requireStackValues(
 	isParam bool,
 	context string,
 	want []ValueType,
+	checkAboveLimit bool,
+) error {
+	return s.requireStackValuesRich(isParam, context, want, nil, checkAboveLimit)
+}
+
+func (s *valueTypeStack) requireStackValuesRich(
+	isParam bool,
+	context string,
+	want []ValueType,
+	wantRefs []*ValueTypeRef,
 	checkAboveLimit bool,
 ) error {
 	limit := 0
@@ -3185,8 +3392,10 @@ func (s *valueTypeStack) requireStackValues(
 
 	// First, check if there are enough values on the stack.
 	s.requireStackValuesTmp = s.requireStackValuesTmp[:0]
+	// Also collect rich info for the popped values in parallel.
+	haveRefs := make([]*ValueTypeRef, 0, countWanted)
 	for i := countWanted - 1; i >= 0; i-- {
-		popped, _, ok := s.tryPop()
+		popped, poppedRef, _, ok := s.tryPopRich()
 		if !ok {
 			if len(s.requireStackValuesTmp) > len(want) {
 				return typeCountError(isParam, context, s.requireStackValuesTmp, want)
@@ -3194,6 +3403,7 @@ func (s *valueTypeStack) requireStackValues(
 			return typeCountError(isParam, context, s.requireStackValuesTmp, want)
 		}
 		s.requireStackValuesTmp = append(s.requireStackValuesTmp, popped)
+		haveRefs = append(haveRefs, poppedRef)
 	}
 
 	// Now, check if there are too many values.
@@ -3205,8 +3415,25 @@ func (s *valueTypeStack) requireStackValues(
 
 	// Finally, check the types of the values:
 	for i, v := range s.requireStackValuesTmp {
-		nextWant := want[countWanted-i-1] // have is in reverse order (stack)
-		if v != nextWant && v != valueTypeUnknown && nextWant != valueTypeUnknown && !isRefSubtypeOf(v, nextWant) {
+		idx := countWanted - i - 1 // have is in reverse order (stack)
+		nextWant := want[idx]
+		if v == valueTypeUnknown || nextWant == valueTypeUnknown {
+			continue
+		}
+		// Rich-aware comparison when either side carries
+		// nullability / heap-kind / TypeIdx info.
+		var nextWantRef *ValueTypeRef
+		if idx < len(wantRefs) {
+			nextWantRef = wantRefs[idx]
+		}
+		haveRef := haveRefs[i]
+		if haveRef != nil || nextWantRef != nil {
+			if isValueTypeSubtypeRich(v, haveRef, nextWant, nextWantRef, s.m) {
+				continue
+			}
+			return typeMismatchError(isParam, context, v, nextWant, i)
+		}
+		if v != nextWant && !isRefSubtypeOf(v, nextWant) {
 			return typeMismatchError(isParam, context, v, nextWant, i)
 		}
 	}
