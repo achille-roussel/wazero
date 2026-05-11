@@ -1018,33 +1018,57 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			switch op {
 			case OpcodeRefNull:
 				pc++
-				switch reftype := body[pc]; reftype {
-				case ValueTypeExternref:
-					valueTypeStack.push(ValueTypeExternref)
-				case ValueTypeFuncref:
+				// Parse the heap type as s33 LEB128; the legacy
+				// single-byte funcref/externref shorthand still
+				// decodes correctly because their s33 encodings are
+				// the same bytes (-16, -17 etc.).
+				ht, n, herr := leb128.DecodeInt33AsInt64(bytes.NewReader(body[pc:]))
+				if herr != nil {
+					return fmt.Errorf("read ref.null heap type: %w", herr)
+				}
+				kind, typeIdx, ok := HeapTypeKindFromBinary(ht)
+				if !ok {
+					return fmt.Errorf("unknown type for ref.null: 0x%x", body[pc])
+				}
+				// Advance past the s33 bytes. The first byte is
+				// covered by the pc++ below to keep the existing
+				// dispatch loop structure happy; we add (n-1) here.
+				if n > 0 {
+					pc += uint64(n) - 1
+				}
+				switch kind {
+				case HeapTypeKindFunc:
 					valueTypeStack.push(ValueTypeFuncref)
-				case ValueTypeExnref:
+				case HeapTypeKindExtern:
+					valueTypeStack.push(ValueTypeExternref)
+				case HeapTypeKindExn:
 					valueTypeStack.push(ValueTypeExnref)
-				case ValueTypeAnyref:
+				case HeapTypeKindAny:
 					valueTypeStack.push(ValueTypeAnyref)
-				case ValueTypeEqref:
+				case HeapTypeKindEq:
 					valueTypeStack.push(ValueTypeEqref)
-				case ValueTypeI31ref:
+				case HeapTypeKindI31:
 					valueTypeStack.push(ValueTypeI31ref)
-				case ValueTypeStructref:
+				case HeapTypeKindStruct:
 					valueTypeStack.push(ValueTypeStructref)
-				case ValueTypeArrayref:
+				case HeapTypeKindArray:
 					valueTypeStack.push(ValueTypeArrayref)
-				case ValueTypeNullref:
+				case HeapTypeKindBottom:
 					valueTypeStack.push(ValueTypeNullref)
-				case ValueTypeNoFuncref:
+				case HeapTypeKindNoFunc:
 					valueTypeStack.push(ValueTypeNoFuncref)
-				case ValueTypeNoExternref:
+				case HeapTypeKindNoExtern:
 					valueTypeStack.push(ValueTypeNoExternref)
-				case ValueTypeNoExnref:
+				case HeapTypeKindNoExn:
 					valueTypeStack.push(ValueTypeNoExnref)
+				case HeapTypeKindConcrete:
+					if typeIdx >= uint32(len(m.TypeSection)) {
+						return fmt.Errorf("ref.null: type index %d out of range", typeIdx)
+					}
+					// Concrete-ref byte sentinel is funcref.
+					valueTypeStack.push(ValueTypeFuncref)
 				default:
-					return fmt.Errorf("unknown type for ref.null: 0x%x", reftype)
+					return fmt.Errorf("unknown type for ref.null: 0x%x", body[pc])
 				}
 			case OpcodeRefIsNull:
 				tp, err := valueTypeStack.pop()

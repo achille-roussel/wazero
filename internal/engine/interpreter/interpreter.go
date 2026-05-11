@@ -4882,7 +4882,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				srcOff := uint32(ce.popValue())
 				elem := f.moduleInstance.ElementInstances[segIdx]
 				if uint64(srcOff)+uint64(count) > uint64(len(elem)) {
-					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+					panic(wasmruntime.ErrRuntimeInvalidTableAccess)
 				}
 				elems := make([]any, count)
 				for i := uint32(0); i < count; i++ {
@@ -4940,7 +4940,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 					panic(wasmruntime.ErrRuntimeOutOfBoundsArrayAccess)
 				}
 				if uint64(srcOff)+uint64(count) > uint64(len(elem)) {
-					panic(wasmruntime.ErrRuntimeOutOfBoundsMemoryAccess)
+					panic(wasmruntime.ErrRuntimeInvalidTableAccess)
 				}
 				for i := uint32(0); i < count; i++ {
 					if err := a.Set(dstOff+i, uintptr(elem[srcOff+i])); err != nil {

@@ -199,14 +199,21 @@ func (m *ModuleInstance) GetStore() *Store {
 func (m *ModuleInstance) buildElementInstances(elements []ElementSegment) {
 	m.ElementInstances = make([][]Reference, len(elements))
 	for i, elm := range elements {
-		if elm.Type == RefTypeFuncref && elm.Mode == ElementModePassive {
-			// Only passive elements can be access as element instances.
-			// See https://www.w3.org/TR/2022/WD-wasm-core-2-20220419/syntax/modules.html#element-segments
-			inits := elm.Init
-			inst := make([]Reference, len(inits))
-			m.ElementInstances[i] = inst
-			for j, idx := range inits {
-				initExprResults := evaluateConstExprInModuleInstance(&idx, m)
+		// Passive (and wasm-gc declarative) element segments can be
+		// accessed as element instances via array.new_elem /
+		// array.init_elem. We evaluate the init expressions and
+		// store the resulting refs regardless of the segment's
+		// declared reference type — non-funcref segments are common
+		// in wasm-gc.
+		if elm.Mode != ElementModePassive {
+			continue
+		}
+		inits := elm.Init
+		inst := make([]Reference, len(inits))
+		m.ElementInstances[i] = inst
+		for j, idx := range inits {
+			initExprResults := evaluateConstExprInModuleInstance(&idx, m)
+			if len(initExprResults) > 0 {
 				inst[j] = Reference(initExprResults[0])
 			}
 		}
