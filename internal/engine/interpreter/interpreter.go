@@ -727,7 +727,10 @@ func (e *moduleEngine) LookupFunction(t *wasm.TableInstance, typeId wasm.Functio
 	}
 
 	tf := functionFromUintptr(rawPtr)
-	if tf.typeID != typeId {
+	// Subtype-aware runtime type check (wasm-gc): the table function's
+	// TypeID may be a subtype of the requested type.
+	if tf.typeID != typeId &&
+		!tf.moduleInstance.GetStore().IsSubtype(tf.typeID, typeId) {
 		panic(wasmruntime.ErrRuntimeIndirectCallTypeMismatch)
 	}
 	return tf.moduleInstance, tf.parent.index
@@ -961,7 +964,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 		case operationKindCallIndirect:
 			offset := ce.popValue()
 			table := tables[op.U2]
-			tf := ce.functionForOffset(table, offset, typeIDs[op.U1])
+			tf := ce.functionForOffset(table, offset, typeIDs[op.U1], f.moduleInstance)
 
 			frameUnwound := ce.callWithUnwind(ctx, f.moduleInstance, tf)
 			if frameUnwound {
@@ -5096,7 +5099,7 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 		case operationKindTailCallReturnCallIndirect:
 			offset := ce.popValue()
 			table := tables[op.U2]
-			tf := ce.functionForOffset(table, offset, typeIDs[op.U1])
+			tf := ce.functionForOffset(table, offset, typeIDs[op.U1], f.moduleInstance)
 
 			// We are allowing proper tail calls only across functions that belong to the same
 			// module; for indirect calls, we have to enforce it at run-time.
@@ -5145,7 +5148,7 @@ func (ce *callEngine) resetPc(frame *callFrame, f *function) (body []unionOperat
 	return body, bodyLen
 }
 
-func (ce *callEngine) functionForOffset(table *wasm.TableInstance, offset uint64, expectedTypeID wasm.FunctionTypeID) *function {
+func (ce *callEngine) functionForOffset(table *wasm.TableInstance, offset uint64, expectedTypeID wasm.FunctionTypeID, mi *wasm.ModuleInstance) *function {
 	if offset >= uint64(len(table.References)) {
 		panic(wasmruntime.ErrRuntimeInvalidTableAccess)
 	}
@@ -5155,7 +5158,10 @@ func (ce *callEngine) functionForOffset(table *wasm.TableInstance, offset uint64
 	}
 
 	tf := functionFromUintptr(rawPtr)
-	if tf.typeID != expectedTypeID {
+	// Subtype-aware runtime check (wasm-gc): the table function's
+	// TypeID may be a subtype of the declared call_indirect type.
+	if tf.typeID != expectedTypeID &&
+		!mi.GetStore().IsSubtype(tf.typeID, expectedTypeID) {
 		panic(wasmruntime.ErrRuntimeIndirectCallTypeMismatch)
 	}
 	return tf
