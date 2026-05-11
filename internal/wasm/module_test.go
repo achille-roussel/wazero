@@ -429,7 +429,7 @@ func TestModule_validateStartSection(t *testing.T) {
 func TestModule_validateGlobals(t *testing.T) {
 	t.Run("too many globals", func(t *testing.T) {
 		m := Module{}
-		err := m.validateGlobals(make([]GlobalType, 10), 0, 9)
+		err := m.validateGlobals(make([]GlobalType, 10), nil, 9)
 		require.Error(t, err)
 		require.EqualError(t, err, "too many globals in a module")
 	})
