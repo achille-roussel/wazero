@@ -182,6 +182,29 @@ type callEngine struct {
 
 	// stackiterator for Listeners to walk frames and stack.
 	stackIterator stackIterator
+
+	// gcKeepAlive holds Go pointers to wasm-gc heap objects (i31Ref,
+	// WasmStruct, WasmArray) that have been allocated during this call.
+	// The operand-stack `stack` slot for a GC ref carries a
+	// uintptr(unsafe.Pointer(...)) cast — Go's GC cannot trace those
+	// uintptrs, so without this keepalive list the pointed-to objects
+	// would be eligible for collection while still live on the wasm
+	// operand stack.
+	//
+	// Phase 5 minimum: append-only; the slice is dropped when the call
+	// engine is GC'd at end-of-call. Phase 5b will replace this with a
+	// proper parallel ref stack indexed in lockstep with `stack` so
+	// per-instruction allocations become eligible for collection as
+	// soon as their stack slot is popped.
+	gcKeepAlive []any
+}
+
+// keepAlive records v on the gcKeepAlive list so Go's GC traces it for
+// the lifetime of the call. Callers separately convert v to a
+// uint64(uintptr(unsafe.Pointer(...))) for placement on the operand
+// stack; this helper handles only the keepalive side.
+func (ce *callEngine) keepAlive(v any) {
+	ce.gcKeepAlive = append(ce.gcKeepAlive, v)
 }
 
 // matchCatchClause checks whether a single catch clause matches the given exception.
@@ -4557,7 +4580,52 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 			}
 			panic(&thrownException{exception: exn})
 
-		case operationKindTailCallReturnCall:
+		case operationKindRefI31:
+				raw := ce.popValue()
+				// ref.i31 narrows the low 31 bits and produces a non-null i31ref.
+				i31 := wasm.NewI31Ref(uint32(raw))
+				ce.keepAlive(i31)
+				ce.pushValue(uint64(uintptr(unsafe.Pointer(i31))))
+				frame.pc++
+
+			case operationKindI31GetS:
+				v := ce.popValue()
+				if v == 0 {
+					// i31.get_s traps on a null i31 ref.
+					panic(wasmruntime.ErrRuntimeNullReference)
+				}
+				i31 := *(**wasm.I31Ref)(unsafe.Pointer(&v))
+				ce.pushValue(uint64(uint32(i31.SignedI32())))
+				frame.pc++
+
+			case operationKindI31GetU:
+				v := ce.popValue()
+				if v == 0 {
+					panic(wasmruntime.ErrRuntimeNullReference)
+				}
+				i31 := *(**wasm.I31Ref)(unsafe.Pointer(&v))
+				ce.pushValue(uint64(i31.UnsignedI32()))
+				frame.pc++
+
+			case operationKindRefEq:
+				// ref.eq pops two refs and pushes 1 iff they are equal.
+				// For non-i31 references we use pointer equality.
+				//
+				// TODO(phase 5b): the spec mandates VALUE equality for i31
+				// pairs; with our current uintptr representation we cannot
+				// distinguish *I31Ref pointers from other ref kinds at
+				// runtime. Once a parallel ref stack lands we'll dispatch
+				// on the Go type at the slot to special-case *I31Ref.
+				b := ce.popValue()
+				a := ce.popValue()
+				if a == b {
+					ce.pushValue(1)
+				} else {
+					ce.pushValue(0)
+				}
+				frame.pc++
+
+			case operationKindTailCallReturnCall:
 			f := &functions[op.U1]
 			ce.dropForTailCall(frame, f)
 			body, bodyLen = ce.resetPc(frame, f)

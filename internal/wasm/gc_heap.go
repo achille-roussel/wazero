@@ -18,7 +18,7 @@ import "fmt"
 //     bits. Read instructions (struct.get_s / struct.get_u) extend at
 //     read time via the SignExtendI8 / ZeroExtendI8 / SignExtendI16 /
 //     ZeroExtendI16 helpers below.
-//   - Reference fields hold *WasmStruct / *WasmArray / *i31Ref / function
+//   - Reference fields hold *WasmStruct / *WasmArray / *I31Ref / function
 //     instances / host externref values (`any`), or the untyped Go nil
 //     for null references.
 type WasmStruct struct {

@@ -58,7 +58,7 @@ func TestWasmStruct_RefField(t *testing.T) {
 	outer := NewWasmStructWith(1, []any{inner, NewI31Ref(7)})
 	got := outer.Get(0).(*WasmStruct)
 	require.Equal(t, int32(99), got.Get(0))
-	got31 := outer.Get(1).(*i31Ref)
+	got31 := outer.Get(1).(*I31Ref)
 	require.Equal(t, int32(7), got31.SignedI32())
 }
 

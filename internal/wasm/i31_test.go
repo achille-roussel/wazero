@@ -90,7 +90,7 @@ func TestI31Ref_Equals(t *testing.T) {
 	require.False(t, a.Equals(c))
 
 	// Nil semantics: only two nils are equal; nil vs non-nil is unequal.
-	var nilRef *i31Ref
+	var nilRef *I31Ref
 	require.True(t, nilRef.Equals(nil))
 	require.False(t, a.Equals(nilRef))
 	require.False(t, nilRef.Equals(a))

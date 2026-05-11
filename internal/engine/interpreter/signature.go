@@ -271,6 +271,24 @@ func (c *compiler) wasmOpcodeSignature(op wasm.Opcode, index uint32) (*signature
 	case wasm.OpcodeThrow, wasm.OpcodeThrowRef, wasm.OpcodeTryTable:
 		// Stack manipulation handled dynamically by the compiler.
 		return signature_None_None, nil
+	case wasm.OpcodeRefEq:
+		// Two refs (uint64) -> i32. Both ref operands occupy one uint64
+		// slot each in the interpreter's stack representation.
+		return signature_I64I64_I32, nil
+	case wasm.OpcodeGCPrefix:
+		// 0xfb-prefixed sub-opcodes have varying signatures. The
+		// caller passes the sub-opcode in index (loaded from the
+		// function body at the matching position by the compiler).
+		switch index {
+		case wasm.OpcodeGCRefI31:
+			// i32 -> i31ref (one uint64 slot).
+			return signature_I32_I64, nil
+		case wasm.OpcodeGCI31GetS, wasm.OpcodeGCI31GetU:
+			// i31ref -> i32.
+			return signature_I64_I32, nil
+		default:
+			return nil, fmt.Errorf("unsupported GC sub-opcode in interpreterir: 0x%x", index)
+		}
 	case wasm.OpcodeBrIf, wasm.OpcodeBrTable:
 		return signature_I32_None, nil
 	case wasm.OpcodeReturn:

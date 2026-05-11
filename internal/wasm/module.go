@@ -1368,7 +1368,14 @@ func ValueTypeName(t ValueType) string {
 }
 
 func isReferenceValueType(vt ValueType) bool {
-	return vt == ValueTypeExternref || vt == ValueTypeFuncref || vt == ValueTypeExnref
+	switch vt {
+	case ValueTypeExternref, ValueTypeFuncref, ValueTypeExnref,
+		ValueTypeAnyref, ValueTypeEqref, ValueTypeI31ref,
+		ValueTypeStructref, ValueTypeArrayref,
+		ValueTypeNullref, ValueTypeNoFuncref, ValueTypeNoExternref, ValueTypeNoExnref:
+		return true
+	}
+	return false
 }
 
 // isRefSubtypeOf returns true if actual is assignment-compatible with expected.
