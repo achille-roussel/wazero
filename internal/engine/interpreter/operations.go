@@ -497,6 +497,10 @@ func (o operationKind) String() (ret string) {
 		ret = "operationKindRefTest"
 	case operationKindRefCast:
 		ret = "operationKindRefCast"
+	case operationKindBrOnNull:
+		ret = "operationKindBrOnNull"
+	case operationKindBrOnNonNull:
+		ret = "operationKindBrOnNonNull"
 	default:
 		panic(fmt.Errorf("unknown operation %d", o))
 	}
@@ -886,6 +890,17 @@ const (
 	// ErrRuntimeCastFailure. Otherwise pushes the same reference back.
 	operationKindRefCast
 
+	// operationKindBrOnNull is the Kind for br_on_null l. Pops a ref; if
+	// null, branches to label l (U1=thenLabel, U2=elseLabel, U3=drop
+	// range). If non-null, pushes the ref back and falls through.
+	operationKindBrOnNull
+
+	// operationKindBrOnNonNull is the Kind for br_on_non_null l. Pops a
+	// ref; if non-null, pushes it back AND branches to label l (the
+	// label's last param is the ref). If null, the ref is consumed and
+	// we fall through.
+	operationKindBrOnNonNull
+
 	// operationKindEnd is always placed at the bottom of this iota definition to be used in the test.
 	operationKindEnd
 )
@@ -1245,6 +1260,8 @@ func (o unionOperation) String() string {
 		return o.Kind.String()
 	case operationKindRefTest, operationKindRefCast:
 		return fmt.Sprintf("%s heapKind=%d nullable=%v typeID=%d", o.Kind, o.B1, o.B3, o.U1)
+	case operationKindBrOnNull, operationKindBrOnNonNull:
+		return fmt.Sprintf("%s thenLabel=%d elseLabel=%d drop=%#x", o.Kind, o.U1, o.U2, o.U3)
 
 	default:
 		panic(fmt.Sprintf("TODO: %v", o.Kind))
@@ -3140,4 +3157,28 @@ func newOperationRefTest(heapKind byte, nullable bool, typeIdx uint32) unionOper
 // Same immediates as RefTest.
 func newOperationRefCast(heapKind byte, nullable bool, typeIdx uint32) unionOperation {
 	return unionOperation{Kind: operationKindRefCast, B1: heapKind, B3: nullable, U1: uint64(typeIdx)}
+}
+
+// newOperationBrOnNull constructs the operation for br_on_null. Same
+// shape as newOperationBrIf: U1=thenLabel, U2=elseLabel, U3=drop range
+// applied on the branch path.
+func newOperationBrOnNull(thenTarget, elseTarget label, thenDrop inclusiveRange) unionOperation {
+	return unionOperation{
+		Kind: operationKindBrOnNull,
+		U1:   uint64(thenTarget),
+		U2:   uint64(elseTarget),
+		U3:   thenDrop.AsU64(),
+	}
+}
+
+// newOperationBrOnNonNull constructs the operation for br_on_non_null.
+// Same shape as BrOnNull, but the branch path keeps the ref on the stack
+// for the target label (the spec says the label's last param is the ref).
+func newOperationBrOnNonNull(thenTarget, elseTarget label, thenDrop inclusiveRange) unionOperation {
+	return unionOperation{
+		Kind: operationKindBrOnNonNull,
+		U1:   uint64(thenTarget),
+		U2:   uint64(elseTarget),
+		U3:   thenDrop.AsU64(),
+	}
 }

@@ -635,6 +635,9 @@ func (e *engine) lowerIR(ir *compilationResult, ret *compiledFunction) error {
 		case operationKindBrIf:
 			e.setLabelAddress(&op.U1, label(op.U1), labelAddressResolutions)
 			e.setLabelAddress(&op.U2, label(op.U2), labelAddressResolutions)
+		case operationKindBrOnNull, operationKindBrOnNonNull:
+			e.setLabelAddress(&op.U1, label(op.U1), labelAddressResolutions)
+			e.setLabelAddress(&op.U2, label(op.U2), labelAddressResolutions)
 		case operationKindBrTable:
 			for j := 0; j < len(op.Us); j += 2 {
 				target := op.Us[j]
@@ -4795,6 +4798,34 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				}
 				ce.pushValue(v)
 				frame.pc++
+
+			case operationKindBrOnNull:
+				// Pop a ref. If null, drop + branch to thenLabel.
+				// Else push it back, fall through to elseLabel.
+				v := ce.popValue()
+				if v == 0 {
+					ce.drop(op.U3)
+					frame.pc = op.U1
+				} else {
+					ce.pushValue(v)
+					frame.pc = op.U2
+				}
+
+			case operationKindBrOnNonNull:
+				// Pop a ref. If non-null, push it back AND branch
+				// (label's last param is the ref). The drop range was
+				// computed with the ref already on the stack so it
+				// targets the values BELOW the ref; pushing back first
+				// then dropping leaves the ref on top for the target.
+				// If null, fall through (ref consumed).
+				v := ce.popValue()
+				if v != 0 {
+					ce.pushValue(v)
+					ce.drop(op.U3)
+					frame.pc = op.U1
+				} else {
+					frame.pc = op.U2
+				}
 
 			case operationKindTailCallReturnCall:
 			f := &functions[op.U1]

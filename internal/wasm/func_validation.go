@@ -2447,8 +2447,88 @@ func (m *Module) validateFunctionWithMaxStackValues(
 			// Re-push the same byte; rich-aware non-null tracking is a
 			// Phase 4 residual that the type-stack does not carry today.
 			valueTypeStack.push(have)
-		} else if op == OpcodeBrOnNull || op == OpcodeBrOnNonNull ||
-			op == OpcodeCallRef || op == OpcodeReturnCallRef {
+		} else if op == OpcodeBrOnNull {
+			// br_on_null l: pop a ref. If null, branch to l. Else push
+			// back and fall through. The target label's expected types
+			// must match the stack WITHOUT the ref.
+			pc++
+			labelIdx, n, err := leb128.LoadUint32(body[pc:])
+			if err != nil {
+				return fmt.Errorf("read br_on_null label: %v", err)
+			} else if int(labelIdx) >= len(controlBlockStack.stack) {
+				return fmt.Errorf("invalid label index %d for br_on_null", labelIdx)
+			}
+			pc += n - 1
+			refTy, _, ok := valueTypeStack.tryPop()
+			if !ok {
+				return fmt.Errorf("reference type missing for br_on_null")
+			}
+			if refTy != valueTypeUnknown && !isReferenceValueType(refTy) {
+				return fmt.Errorf("type mismatch: expected reference type for br_on_null, but was %s", ValueTypeName(refTy))
+			}
+			target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(labelIdx)-1]
+			var targetTypes []ValueType
+			if target.op == OpcodeLoop {
+				targetTypes = target.blockType.Params
+			} else {
+				targetTypes = target.blockType.Results
+			}
+			// Target stack types must match the stack (post-ref-pop) tail.
+			if err := valueTypeStack.popResults(op, targetTypes, false); err != nil {
+				return err
+			}
+			for _, t := range targetTypes {
+				valueTypeStack.push(t)
+			}
+			// Re-push the ref for the fall-through path.
+			valueTypeStack.push(refTy)
+		} else if op == OpcodeBrOnNonNull {
+			// br_on_non_null l: pop a ref. If non-null, push it back AND
+			// branch (label's last param is the ref). Else fall through
+			// (the ref is consumed).
+			pc++
+			labelIdx, n, err := leb128.LoadUint32(body[pc:])
+			if err != nil {
+				return fmt.Errorf("read br_on_non_null label: %v", err)
+			} else if int(labelIdx) >= len(controlBlockStack.stack) {
+				return fmt.Errorf("invalid label index %d for br_on_non_null", labelIdx)
+			}
+			pc += n - 1
+			refTy, _, ok := valueTypeStack.tryPop()
+			if !ok {
+				return fmt.Errorf("reference type missing for br_on_non_null")
+			}
+			if refTy != valueTypeUnknown && !isReferenceValueType(refTy) {
+				return fmt.Errorf("type mismatch: expected reference type for br_on_non_null, but was %s", ValueTypeName(refTy))
+			}
+			target := &controlBlockStack.stack[len(controlBlockStack.stack)-int(labelIdx)-1]
+			var targetTypes []ValueType
+			if target.op == OpcodeLoop {
+				targetTypes = target.blockType.Params
+			} else {
+				targetTypes = target.blockType.Results
+			}
+			// The target's last expected type must be a reference (the
+			// ref the branch passes). The validator accepts any matching
+			// ref type loosely (rich nullability tracking is Phase 4
+			// residual).
+			if len(targetTypes) == 0 {
+				return fmt.Errorf("br_on_non_null target label expects no values; needs a trailing ref")
+			}
+			if !isReferenceValueType(targetTypes[len(targetTypes)-1]) && targetTypes[len(targetTypes)-1] != valueTypeUnknown {
+				return fmt.Errorf("br_on_non_null target label's last type %s is not a reference", ValueTypeName(targetTypes[len(targetTypes)-1]))
+			}
+			// Pop the rest of the target's expected types (everything
+			// except the trailing ref).
+			head := targetTypes[:len(targetTypes)-1]
+			if err := valueTypeStack.popResults(op, head, false); err != nil {
+				return err
+			}
+			for _, t := range head {
+				valueTypeStack.push(t)
+			}
+			// On fall-through the ref is consumed; do NOT push back.
+		} else if op == OpcodeCallRef || op == OpcodeReturnCallRef {
 			// Typed function-reference opcodes (also gated on CoreFeaturesGC).
 			// Same Phase 5 caveat as above.
 			return fmt.Errorf("typed function-reference instruction %s (0x%x) is not yet supported by the interpreter", InstructionName(op), op)
@@ -2835,6 +2915,24 @@ func DecodeBlockType(types []FunctionType, r *bytes.Reader, enabledFeatures api.
 		ret = blockType_v_externref
 	case -23: // 0x69 in original byte = exnref
 		ret = blockType_v_exnref
+	case -13: // 0x73 = nofuncref
+		ret = makeInlineBlockResultRefType(HeapTypeKindNoFunc, 0, true)
+	case -12: // 0x74 = noexnref
+		ret = makeInlineBlockResultRefType(HeapTypeKindNoExn, 0, true)
+	case -14: // 0x72 = noexternref
+		ret = makeInlineBlockResultRefType(HeapTypeKindNoExtern, 0, true)
+	case -15: // 0x71 = nullref (none)
+		ret = makeInlineBlockResultRefType(HeapTypeKindBottom, 0, true)
+	case -18: // 0x6e = anyref
+		ret = makeInlineBlockResultRefType(HeapTypeKindAny, 0, true)
+	case -19: // 0x6d = eqref
+		ret = makeInlineBlockResultRefType(HeapTypeKindEq, 0, true)
+	case -20: // 0x6c = i31ref
+		ret = makeInlineBlockResultRefType(HeapTypeKindI31, 0, true)
+	case -21: // 0x6b = structref
+		ret = makeInlineBlockResultRefType(HeapTypeKindStruct, 0, true)
+	case -22: // 0x6a = arrayref
+		ret = makeInlineBlockResultRefType(HeapTypeKindArray, 0, true)
 	case -29: // 0x63 = ref null (nullable) — GC proposal
 		ht, htNum, err := leb128.DecodeInt33AsInt64(r)
 		if err != nil {
