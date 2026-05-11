@@ -182,6 +182,13 @@ func (m *ModuleInstance) GetFunctionTypeID(t *FunctionType) FunctionTypeID {
 	return id
 }
 
+// GetStore returns the Store on which this module is instantiated. Used
+// by the interpreter's ref.test / ref.cast handlers to look up Cohen
+// subtype displays and CompositeForm at runtime.
+func (m *ModuleInstance) GetStore() *Store {
+	return m.s
+}
+
 func (m *ModuleInstance) buildElementInstances(elements []ElementSegment) {
 	m.ElementInstances = make([][]Reference, len(elements))
 	for i, elm := range elements {
@@ -664,10 +671,16 @@ func (s *Store) getOrAssignTypeID(key string) (FunctionTypeID, error) {
 // Resolved is false for newly-reserved entries whose display has not yet
 // been computed (e.g., during a single GetFunctionTypeIDs call where a
 // later type in the same rec group is the supertype of an earlier one).
+//
+// Form records the composite form (func / struct / array) of the type, so
+// ref.test / ref.cast can dispatch on the abstract `struct` / `array` /
+// `func` heap-type targets without needing to consult the originating
+// module's type section at runtime.
 type subtypeInfo struct {
 	Depth    uint32
 	Display  []FunctionTypeID
 	Resolved bool
+	Form     CompositeForm
 }
 
 // computeSubtypeDisplays fills in the Cohen subtype display for each of
@@ -703,6 +716,7 @@ func (s *Store) computeSubtypeDisplays(ts []FunctionType, ids []FunctionTypeID) 
 					Depth:    0,
 					Display:  []FunctionTypeID{id},
 					Resolved: true,
+					Form:     t.Form,
 				}
 				progressed = true
 				continue
@@ -721,6 +735,7 @@ func (s *Store) computeSubtypeDisplays(ts []FunctionType, ids []FunctionTypeID) 
 				Depth:    supInfo.Depth + 1,
 				Display:  append(append([]FunctionTypeID(nil), supInfo.Display...), id),
 				Resolved: true,
+				Form:     t.Form,
 			}
 			progressed = true
 		}
@@ -754,6 +769,35 @@ func (s *Store) IsSubtype(sub, sup FunctionTypeID) bool {
 		return false
 	}
 	return subInfo.Display[supInfo.Depth] == sup
+}
+
+// TypeForm returns the canonical composite form of the type registered
+// under the given FunctionTypeID. Used by ref.test / ref.cast at runtime
+// to dispatch on the abstract `struct` / `array` / `func` heap-type
+// targets without consulting the originating module's type section.
+//
+// Returns CompositeFormFunc as the zero-value default for unknown or
+// not-yet-resolved IDs; callers that care should check IsResolvedType
+// first if they need to distinguish the genuine func form from an
+// unknown ID.
+func (s *Store) TypeForm(id FunctionTypeID) CompositeForm {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+	if int(id) >= len(s.subtypes) {
+		return CompositeFormFunc
+	}
+	return s.subtypes[id].Form
+}
+
+// IsResolvedType reports whether the given FunctionTypeID has been
+// registered and its subtype display computed.
+func (s *Store) IsResolvedType(id FunctionTypeID) bool {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+	if int(id) >= len(s.subtypes) {
+		return false
+	}
+	return s.subtypes[id].Resolved
 }
 
 // CloseWithExitCode implements the same method as documented on wazero.Runtime.

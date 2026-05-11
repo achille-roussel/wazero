@@ -493,6 +493,10 @@ func (o operationKind) String() (ret string) {
 		ret = "operationKindArraySet"
 	case operationKindArrayLen:
 		ret = "operationKindArrayLen"
+	case operationKindRefTest:
+		ret = "operationKindRefTest"
+	case operationKindRefCast:
+		ret = "operationKindRefCast"
 	default:
 		panic(fmt.Errorf("unknown operation %d", o))
 	}
@@ -869,6 +873,19 @@ const (
 	operationKindArraySet
 	operationKindArrayLen
 
+	// operationKindRefTest is the Kind for ref.test. Immediates:
+	//   B1 = HeapTypeKind (target abstract kind, or HeapTypeKindConcrete)
+	//   B3 = nullable target (true if (ref null ht), false if (ref ht))
+	//   U1 = target concrete FunctionTypeID (meaningful only when B1 == HeapTypeKindConcrete)
+	// Pops a reference, pushes i32 (1 if the ref is a subtype of the
+	// target, else 0).
+	operationKindRefTest
+
+	// operationKindRefCast is the Kind for ref.cast. Same immediates as
+	// RefTest. Pops a reference; if the subtype check fails, traps with
+	// ErrRuntimeCastFailure. Otherwise pushes the same reference back.
+	operationKindRefCast
+
 	// operationKindEnd is always placed at the bottom of this iota definition to be used in the test.
 	operationKindEnd
 )
@@ -1226,6 +1243,8 @@ func (o unionOperation) String() string {
 		return fmt.Sprintf("%s typeIdx=%d", o.Kind, o.U1)
 	case operationKindArrayLen:
 		return o.Kind.String()
+	case operationKindRefTest, operationKindRefCast:
+		return fmt.Sprintf("%s heapKind=%d nullable=%v typeID=%d", o.Kind, o.B1, o.B3, o.U1)
 
 	default:
 		panic(fmt.Sprintf("TODO: %v", o.Kind))
@@ -3104,4 +3123,21 @@ func newOperationArraySet(typeIdx uint32) unionOperation {
 
 func newOperationArrayLen() unionOperation {
 	return unionOperation{Kind: operationKindArrayLen}
+}
+
+// newOperationRefTest constructs the operation for ref.test (ref ht) and
+// ref.test (ref null ht). For abstract heap-type targets, typeIdx is unused.
+// For concrete heap-type targets, typeIdx is the module-local type-section
+// index — the runtime indirects through ModuleInstance.TypeIDs.
+//
+// heapKind is the byte form of HeapTypeKind (kept untyped here to avoid an
+// internal/wasm import).
+func newOperationRefTest(heapKind byte, nullable bool, typeIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindRefTest, B1: heapKind, B3: nullable, U1: uint64(typeIdx)}
+}
+
+// newOperationRefCast constructs the operation for ref.cast / ref.cast null.
+// Same immediates as RefTest.
+func newOperationRefCast(heapKind byte, nullable bool, typeIdx uint32) unionOperation {
+	return unionOperation{Kind: operationKindRefCast, B1: heapKind, B3: nullable, U1: uint64(typeIdx)}
 }

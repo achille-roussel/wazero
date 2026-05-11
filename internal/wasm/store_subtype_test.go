@@ -120,3 +120,26 @@ func TestIsSubtype_SeparateRegistrationsShareID(t *testing.T) {
 	require.Equal(t, ids1[0], ids2[0], "structurally identical types should share a TypeID")
 	require.True(t, s.IsSubtype(ids1[0], ids2[0]))
 }
+
+func TestTypeForm(t *testing.T) {
+	// TypeForm returns the canonical composite form, populated at
+	// registration time. Used by ref.test for the abstract struct/array
+	// heap-type targets.
+	s := newSubtypeTestStore()
+	ts := []FunctionType{
+		{Form: CompositeFormFunc, Params: []ValueType{ValueTypeI32}},
+		{Form: CompositeFormStruct, Fields: []FieldType{{ValueType: ValueTypeI32}}},
+		{Form: CompositeFormArray, ArrayField: FieldType{ValueType: ValueTypeI32}},
+	}
+	ids, err := s.GetFunctionTypeIDs(ts)
+	require.NoError(t, err)
+
+	require.True(t, s.IsResolvedType(ids[0]))
+	require.True(t, s.IsResolvedType(ids[1]))
+	require.True(t, s.IsResolvedType(ids[2]))
+	require.False(t, s.IsResolvedType(FunctionTypeID(99)))
+
+	require.Equal(t, CompositeFormFunc, s.TypeForm(ids[0]))
+	require.Equal(t, CompositeFormStruct, s.TypeForm(ids[1]))
+	require.Equal(t, CompositeFormArray, s.TypeForm(ids[2]))
+}

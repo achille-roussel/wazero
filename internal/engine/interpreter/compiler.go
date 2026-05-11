@@ -1860,6 +1860,24 @@ operatorSwitch:
 			}
 		case wasm.OpcodeGCArrayLen:
 			c.emit(newOperationArrayLen())
+		case wasm.OpcodeGCRefTest, wasm.OpcodeGCRefTestNull,
+			wasm.OpcodeGCRefCast, wasm.OpcodeGCRefCastNull:
+			// Read the heap-type immediate.
+			c.pc++
+			ht, n, err := leb128.LoadInt64(c.body[c.pc:])
+			if err != nil {
+				return fmt.Errorf("read ref.test heap type: %v", err)
+			}
+			c.pc += n - 1
+			kind, typeIdx, _ := wasm.HeapTypeKindFromBinary(ht)
+			nullable := index == wasm.OpcodeGCRefTestNull || index == wasm.OpcodeGCRefCastNull
+			// Pass the module-local type index for concrete kinds; the
+			// runtime handler resolves it via f.moduleInstance.TypeIDs.
+			if index == wasm.OpcodeGCRefTest || index == wasm.OpcodeGCRefTestNull {
+				c.emit(newOperationRefTest(byte(kind), nullable, typeIdx))
+			} else {
+				c.emit(newOperationRefCast(byte(kind), nullable, typeIdx))
+			}
 		default:
 			return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter",
 				wasm.GCInstructionName(index), index)

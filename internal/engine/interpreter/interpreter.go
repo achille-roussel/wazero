@@ -4777,6 +4777,25 @@ func (ce *callEngine) callNativeFunc(ctx context.Context, m *wasm.ModuleInstance
 				ce.pushValue(uint64(a.Len()))
 				frame.pc++
 
+			case operationKindRefTest:
+				v := ce.popValue()
+				matches := refMatches(v, wasm.HeapTypeKind(op.B1), op.B3, uint32(op.U1), f.moduleInstance)
+				if matches {
+					ce.pushValue(1)
+				} else {
+					ce.pushValue(0)
+				}
+				frame.pc++
+
+			case operationKindRefCast:
+				v := ce.popValue()
+				matches := refMatches(v, wasm.HeapTypeKind(op.B1), op.B3, uint32(op.U1), f.moduleInstance)
+				if !matches {
+					panic(wasmruntime.ErrRuntimeInvalidConversionToInteger)
+				}
+				ce.pushValue(v)
+				frame.pc++
+
 			case operationKindTailCallReturnCall:
 			f := &functions[op.U1]
 			ce.dropForTailCall(frame, f)
@@ -5164,4 +5183,71 @@ func decodeFieldValueRead(f wasm.FieldType, stored any, readKind operationKind) 
 		return math.Float64bits(stored.(float64))
 	}
 	panic(fmt.Sprintf("unsupported struct/array field type %#x", f.ValueType))
+}
+
+// refMatches implements the runtime subtype check used by ref.test and
+// ref.cast. It returns true iff the reference `v` is a subtype of the
+// target heap type encoded by (kind, nullable, typeIdx).
+//
+// Discrimination strategy:
+//   - v == 0 is the null reference. Matches iff the target is nullable.
+//   - v & 1 == 1 is a tagged i31. Matches iff the target's kind is in
+//     {i31, eq, any} (those that include i31 in their hierarchy).
+//   - Otherwise v is a heap pointer. First field of the pointed-to object
+//     is a FunctionTypeID; we look up its registered Form via the Store
+//     and dispatch on (Form, kind) and Store.IsSubtype for concrete
+//     targets.
+//
+// Funcref / externref values are uintptrs into existing module data and
+// match the func / extern abstract heap types respectively; the validator
+// constrains the operand's static type so we know the popped reference is
+// in the right hierarchy if `kind` belongs there. As a simplification,
+// any non-tagged non-null pointer reaching this helper from a func/extern
+// context is treated as matching the func/extern hierarchy targets.
+func refMatches(v uint64, kind wasm.HeapTypeKind, nullable bool, typeIdx uint32, mi *wasm.ModuleInstance) bool {
+	if v == 0 {
+		// Null reference. Matches iff the target permits null.
+		return nullable
+	}
+	if wasm.IsTaggedI31(uintptr(v)) {
+		// Tagged i31: matches i31, eq, any (and itself).
+		switch kind {
+		case wasm.HeapTypeKindI31, wasm.HeapTypeKindEq, wasm.HeapTypeKindAny:
+			return true
+		case wasm.HeapTypeKindConcrete:
+			// An i31 is not an instance of any concrete struct/array
+			// type (those are different forms).
+			return false
+		}
+		return false
+	}
+	// Heap pointer. Read the TypeID from the first field of the pointed-to
+	// object. WasmStruct and WasmArray both place TypeID first.
+	objTypeID := *(*wasm.FunctionTypeID)(unsafe.Pointer(uintptr(v)))
+	store := mi.GetStore()
+	if !store.IsResolvedType(objTypeID) {
+		return false
+	}
+	objForm := store.TypeForm(objTypeID)
+	switch kind {
+	case wasm.HeapTypeKindAny, wasm.HeapTypeKindEq:
+		// Any non-null non-i31 heap object is in the any hierarchy.
+		return objForm == wasm.CompositeFormStruct || objForm == wasm.CompositeFormArray
+	case wasm.HeapTypeKindStruct:
+		return objForm == wasm.CompositeFormStruct
+	case wasm.HeapTypeKindArray:
+		return objForm == wasm.CompositeFormArray
+	case wasm.HeapTypeKindFunc:
+		return objForm == wasm.CompositeFormFunc
+	case wasm.HeapTypeKindI31:
+		return false // i31s are tagged; a heap pointer is never an i31
+	case wasm.HeapTypeKindConcrete:
+		// Resolve the module-local target index to an engine FunctionTypeID
+		// and check via Store.IsSubtype.
+		if int(typeIdx) >= len(mi.TypeIDs) {
+			return false
+		}
+		return store.IsSubtype(objTypeID, mi.TypeIDs[typeIdx])
+	}
+	return false
 }

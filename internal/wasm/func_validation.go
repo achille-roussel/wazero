@@ -2390,6 +2390,34 @@ func (m *Module) validateFunctionWithMaxStackValues(
 					return fmt.Errorf("array.len: cannot pop array ref: %v", err)
 				}
 				valueTypeStack.push(ValueTypeI32)
+			case OpcodeGCRefTest, OpcodeGCRefTestNull, OpcodeGCRefCast, OpcodeGCRefCastNull:
+				// Read the heap-type immediate (signed LEB; the abstract
+				// heap-type bytes sit in the negative range, concrete type
+				// indices are non-negative).
+				ht, n, err := leb128.LoadInt64(body[pc+1:])
+				if err != nil {
+					return fmt.Errorf("read ref.test heap type: %v", err)
+				}
+				pc += n
+				kind, typeIdx, ok := HeapTypeKindFromBinary(ht)
+				if !ok {
+					return fmt.Errorf("invalid heap type for %s: %d", GCInstructionName(sub), ht)
+				}
+				if kind == HeapTypeKindConcrete && typeIdx >= uint32(len(m.TypeSection)) {
+					return fmt.Errorf("ref.test concrete type index %d out of range", typeIdx)
+				}
+				// Pop a reference operand.
+				if err := valueTypeStack.popReferenceType(); err != nil {
+					return fmt.Errorf("%s: cannot pop ref: %v", GCInstructionName(sub), err)
+				}
+				if sub == OpcodeGCRefTest || sub == OpcodeGCRefTestNull {
+					valueTypeStack.push(ValueTypeI32)
+				} else {
+					// ref.cast pushes a ref back (we lose nullability info
+					// at the byte-stack level; Phase 4 residual handles
+					// the rich tracking later).
+					valueTypeStack.push(ValueTypeAnyref)
+				}
 			default:
 				if name := GCInstructionName(sub); name != "" {
 					return fmt.Errorf("GC instruction %s (0xfb 0x%x) is not yet supported by the interpreter", name, sub)
