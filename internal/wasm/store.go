@@ -626,13 +626,15 @@ func (g *GlobalInstance) SetValue(lo, hi uint64) {
 
 func (s *Store) GetFunctionTypeIDs(ts []FunctionType) ([]FunctionTypeID, error) {
 	ret := make([]FunctionTypeID, len(ts))
+	priorKeys := make([]string, len(ts))
 	for i := range ts {
 		t := &ts[i]
 		// Populate FunctionType.string (the debug/identity cache) so that
 		// the post-compile Module remains observably the same as before
 		// the iso-recursive canonicalization moved off of t.key().
 		_ = t.key()
-		key := canonicalTypeKey(t, uint32(i))
+		key := canonicalTypeKeyWithCtx(t, uint32(i), ts, priorKeys)
+		priorKeys[i] = key
 		id, err := s.getOrAssignTypeID(key)
 		if err != nil {
 			return nil, err

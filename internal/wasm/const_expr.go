@@ -35,6 +35,11 @@ type gcConstExprCtx struct {
 	// used by validation passes that scan const-exprs for ref.func
 	// indices but don't need real heap allocations.
 	ValidateOnly bool
+	// FuncTypes maps each declared function index (post-import) to
+	// its declared type index, so ref.func can push the precise
+	// concrete-ref rich info ((Nullable=false, Concrete, TypeIdx))
+	// rather than a bare funcref byte.
+	FuncTypes []Index
 }
 
 // refToUint64 casts a GC ref pointer into the uint64 stack slot via
@@ -87,14 +92,52 @@ func float64frombits(b uint64) float64 {
 	return *(*float64)(unsafe.Pointer(&b))
 }
 
+// padRefs grows refs (or trims it) to exactly `want` entries, padding
+// any growth with nil. Used by the const-expr evaluator to keep the
+// rich-info sidecar aligned with typeStack.
+func padRefs(refs []*ValueTypeRef, want int) []*ValueTypeRef {
+	if len(refs) > want {
+		return refs[:want]
+	}
+	for len(refs) < want {
+		refs = append(refs, nil)
+	}
+	return refs
+}
+
+// pushConcreteRefAt grows refs so refs[idx] is the rich info for a
+// concrete (non-nullable) ref to the given type index.
+func pushConcreteRefAt(refs []*ValueTypeRef, idx int, typeIdx uint32) []*ValueTypeRef {
+	refs = padRefs(refs, idx)
+	return append(refs, &ValueTypeRef{
+		Nullable: false,
+		HeapKind: HeapTypeKindConcrete,
+		TypeIdx:  typeIdx,
+	})
+}
+
 func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex Index) (ValueType, uint64, uint64, error), funcRefResolver func(funcIndex Index) (Reference, error), gcCtx *gcConstExprCtx) ([]uint64, ValueType, error) {
+	results, typ, _, err := evaluateConstExprRich(e, globalResolver, funcRefResolver, gcCtx)
+	return results, typ, err
+}
+
+// evaluateConstExprRich is evaluateConstExpr with an extra rich-info
+// return so validators can check refs precisely (nullable / concrete
+// TypeIdx). The rich info is non-nil only when the top of the type
+// stack at OpcodeEnd carries it (e.g. ref.func on a typed function,
+// struct.new / array.new producing concrete refs).
+func evaluateConstExprRich(e *ConstantExpression, globalResolver func(globalIndex Index) (ValueType, uint64, uint64, error), funcRefResolver func(funcIndex Index) (Reference, error), gcCtx *gcConstExprCtx) ([]uint64, ValueType, *ValueTypeRef, error) {
 	var stack []uint64
 	var typeStack []ValueType
+	// typeRefs is the parallel rich-info slice for typeStack — non-nil
+	// entries describe the precise reference type at that position.
+	// Maintained lazily: most non-ref pushes leave it short.
+	var typeRefs []*ValueTypeRef
 	var pc uint64
 	data := e.Data
 	for {
 		if pc >= uint64(len(data)) {
-			return nil, 0, io.ErrUnexpectedEOF
+			return nil, 0, nil, io.ErrUnexpectedEOF
 		}
 		opCode := data[pc]
 		pc++
@@ -102,7 +145,7 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 		case OpcodeI32Const:
 			v, n, err := leb128.LoadInt32(data[pc:])
 			if err != nil {
-				return nil, 0, fmt.Errorf("read i32: %w", err)
+				return nil, 0, nil, fmt.Errorf("read i32: %w", err)
 			}
 			pc += n
 			stack = append(stack, uint64(uint32(v)))
@@ -110,14 +153,14 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 		case OpcodeI64Const:
 			v, n, err := leb128.LoadInt64(data[pc:])
 			if err != nil {
-				return nil, 0, fmt.Errorf("read i64: %w", err)
+				return nil, 0, nil, fmt.Errorf("read i64: %w", err)
 			}
 			pc += n
 			stack = append(stack, uint64(v))
 			typeStack = append(typeStack, ValueTypeI64)
 		case OpcodeF32Const:
 			if len(data[pc:]) < 4 {
-				return nil, 0, io.ErrUnexpectedEOF
+				return nil, 0, nil, io.ErrUnexpectedEOF
 			}
 			v := binary.LittleEndian.Uint32(data[pc:])
 			pc += 4
@@ -125,7 +168,7 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeF32)
 		case OpcodeF64Const:
 			if len(data[pc:]) < 8 {
-				return nil, 0, io.ErrUnexpectedEOF
+				return nil, 0, nil, io.ErrUnexpectedEOF
 			}
 			v := binary.LittleEndian.Uint64(data[pc:])
 			pc += 8
@@ -134,12 +177,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 		case OpcodeGlobalGet:
 			v, n, err := leb128.LoadUint32(data[pc:])
 			if err != nil {
-				return nil, 0, fmt.Errorf("read index of global: %w", err)
+				return nil, 0, nil, fmt.Errorf("read index of global: %w", err)
 			}
 			pc += n
 			typ, lo, hi, err := globalResolver(Index(v))
 			if err != nil {
-				return nil, 0, err
+				return nil, 0, nil, err
 			}
 			switch typ {
 			case ValueTypeV128:
@@ -151,7 +194,7 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 		case OpcodeRefNull:
 			// Reference types are opaque 64bit pointer at runtime.
 			if pc >= uint64(len(data)) {
-				return nil, 0, fmt.Errorf("read reference type for ref.null: %w", io.ErrShortBuffer)
+				return nil, 0, nil, fmt.Errorf("read reference type for ref.null: %w", io.ErrShortBuffer)
 			}
 			// With wasm-gc enabled, the heap type is encoded as s33;
 			// support both the legacy byte-shorthand path and the wider
@@ -160,10 +203,10 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				br := bytes.NewReader(data[pc:])
 				ht, n, hterr := leb128.DecodeInt33AsInt64(br)
 				if hterr != nil {
-					return nil, 0, fmt.Errorf("read ref.null heap type: %w", hterr)
+					return nil, 0, nil, fmt.Errorf("read ref.null heap type: %w", hterr)
 				}
 				if _, _, ok := HeapTypeKindFromBinary(ht); !ok {
-					return nil, 0, fmt.Errorf("invalid heap type for ref.null: %d", ht)
+					return nil, 0, nil, fmt.Errorf("invalid heap type for ref.null: %d", ht)
 				}
 				pc += n
 				stack = append(stack, 0)
@@ -171,7 +214,7 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			} else {
 				valType := ValueType(data[pc])
 				if valType != RefTypeFuncref && valType != RefTypeExternref {
-					return nil, 0, fmt.Errorf("invalid type for ref.null: 0x%x", valType)
+					return nil, 0, nil, fmt.Errorf("invalid type for ref.null: 0x%x", valType)
 				}
 				pc += 1
 				stack = append(stack, 0)
@@ -180,22 +223,35 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 		case OpcodeRefFunc:
 			v, n, err := leb128.LoadUint32(data[pc:])
 			if err != nil {
-				return nil, 0, fmt.Errorf("read i32: %w", err)
+				return nil, 0, nil, fmt.Errorf("read i32: %w", err)
 			}
 			pc += n
 			ref, err := funcRefResolver(Index(v))
 			if err != nil {
-				return nil, 0, err
+				return nil, 0, nil, err
 			}
 			stack = append(stack, uint64(ref))
 			typeStack = append(typeStack, ValueTypeFuncref)
+			// Push rich info for the concrete function type so a
+			// subsequent subtype check against (ref $T) can use
+			// the precise TypeIdx (instead of just matching the
+			// funcref sentinel byte).
+			if gcCtx != nil && int(v) < len(gcCtx.FuncTypes) {
+				typeIdx := gcCtx.FuncTypes[v]
+				typeRefs = padRefs(typeRefs, len(typeStack)-1)
+				typeRefs = append(typeRefs, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindConcrete,
+					TypeIdx:  typeIdx,
+				})
+			}
 		case OpcodeVecPrefix:
 			if data[pc] != OpcodeVecV128Const {
-				return nil, 0, fmt.Errorf("invalid vector opcode for const expression: %#x", data[pc-1])
+				return nil, 0, nil, fmt.Errorf("invalid vector opcode for const expression: %#x", data[pc-1])
 			}
 			pc++
 			if len(data[pc:]) < 16 {
-				return nil, 0, fmt.Errorf("%s needs 16 bytes but was %d bytes", OpcodeVecV128ConstName, len(data[pc:]))
+				return nil, 0, nil, fmt.Errorf("%s needs 16 bytes but was %d bytes", OpcodeVecV128ConstName, len(data[pc:]))
 			}
 			lo := binary.LittleEndian.Uint64(data[pc:])
 			pc += 8
@@ -205,12 +261,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeV128)
 		case OpcodeI32Add:
 			if len(typeStack) < 2 {
-				return nil, 0, errors.New("stack underflow on i32.add")
+				return nil, 0, nil, errors.New("stack underflow on i32.add")
 			}
 			v1 := typeStack[len(typeStack)-1]
 			v2 := typeStack[len(typeStack)-2]
 			if v1 != ValueTypeI32 || v2 != ValueTypeI32 {
-				return nil, 0, fmt.Errorf("type mismatch on i32.add: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
+				return nil, 0, nil, fmt.Errorf("type mismatch on i32.add: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
 			}
 			b, a := stack[len(stack)-1], stack[len(stack)-2]
 			stack = stack[:len(stack)-2]
@@ -219,12 +275,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeI32)
 		case OpcodeI32Sub:
 			if len(typeStack) < 2 {
-				return nil, 0, errors.New("stack underflow on i32.sub")
+				return nil, 0, nil, errors.New("stack underflow on i32.sub")
 			}
 			v1 := typeStack[len(typeStack)-1]
 			v2 := typeStack[len(typeStack)-2]
 			if v1 != ValueTypeI32 || v2 != ValueTypeI32 {
-				return nil, 0, fmt.Errorf("type mismatch on i32.sub: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
+				return nil, 0, nil, fmt.Errorf("type mismatch on i32.sub: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
 			}
 			b, a := stack[len(stack)-1], stack[len(stack)-2]
 			stack = stack[:len(stack)-2]
@@ -233,12 +289,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeI32)
 		case OpcodeI32Mul:
 			if len(typeStack) < 2 {
-				return nil, 0, errors.New("stack underflow on i32.mul")
+				return nil, 0, nil, errors.New("stack underflow on i32.mul")
 			}
 			v1 := typeStack[len(typeStack)-1]
 			v2 := typeStack[len(typeStack)-2]
 			if v1 != ValueTypeI32 || v2 != ValueTypeI32 {
-				return nil, 0, fmt.Errorf("type mismatch on i32.mul: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
+				return nil, 0, nil, fmt.Errorf("type mismatch on i32.mul: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
 			}
 			b, a := stack[len(stack)-1], stack[len(stack)-2]
 			stack = stack[:len(stack)-2]
@@ -247,12 +303,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeI32)
 		case OpcodeI64Add:
 			if len(typeStack) < 2 {
-				return nil, 0, errors.New("stack underflow on i64.add")
+				return nil, 0, nil, errors.New("stack underflow on i64.add")
 			}
 			v1 := typeStack[len(typeStack)-1]
 			v2 := typeStack[len(typeStack)-2]
 			if v1 != ValueTypeI64 || v2 != ValueTypeI64 {
-				return nil, 0, fmt.Errorf("type mismatch on i64.add: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
+				return nil, 0, nil, fmt.Errorf("type mismatch on i64.add: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
 			}
 			b, a := stack[len(stack)-1], stack[len(stack)-2]
 			stack = stack[:len(stack)-2]
@@ -261,12 +317,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeI64)
 		case OpcodeI64Sub:
 			if len(typeStack) < 2 {
-				return nil, 0, errors.New("stack underflow on i64.sub")
+				return nil, 0, nil, errors.New("stack underflow on i64.sub")
 			}
 			v1 := typeStack[len(typeStack)-1]
 			v2 := typeStack[len(typeStack)-2]
 			if v1 != ValueTypeI64 || v2 != ValueTypeI64 {
-				return nil, 0, fmt.Errorf("type mismatch on i64.sub: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
+				return nil, 0, nil, fmt.Errorf("type mismatch on i64.sub: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
 			}
 			b, a := stack[len(stack)-1], stack[len(stack)-2]
 			stack = stack[:len(stack)-2]
@@ -275,12 +331,12 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeI64)
 		case OpcodeI64Mul:
 			if len(typeStack) < 2 {
-				return nil, 0, errors.New("stack underflow on i64.mul")
+				return nil, 0, nil, errors.New("stack underflow on i64.mul")
 			}
 			v1 := typeStack[len(typeStack)-1]
 			v2 := typeStack[len(typeStack)-2]
 			if v1 != ValueTypeI64 || v2 != ValueTypeI64 {
-				return nil, 0, fmt.Errorf("type mismatch on i64.mul: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
+				return nil, 0, nil, fmt.Errorf("type mismatch on i64.mul: %s, %s", ValueTypeName(v2), ValueTypeName(v1))
 			}
 			b, a := stack[len(stack)-1], stack[len(stack)-2]
 			stack = stack[:len(stack)-2]
@@ -289,33 +345,34 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 			typeStack = append(typeStack, ValueTypeI64)
 		case OpcodeGCPrefix:
 			if gcCtx == nil {
-				return nil, 0, fmt.Errorf("GC const expression requires wasm-gc context")
+				return nil, 0, nil, fmt.Errorf("GC const expression requires wasm-gc context")
 			}
 			sub, n, suberr := leb128.LoadUint32(data[pc:])
 			if suberr != nil {
-				return nil, 0, fmt.Errorf("read GC sub-opcode: %w", suberr)
+				return nil, 0, nil, fmt.Errorf("read GC sub-opcode: %w", suberr)
 			}
 			pc += n
 			switch OpcodeGC(sub) {
 			case OpcodeGCStructNew:
 				tIdx, m, err := leb128.LoadUint32(data[pc:])
 				if err != nil {
-					return nil, 0, fmt.Errorf("struct.new typeidx: %w", err)
+					return nil, 0, nil, fmt.Errorf("struct.new typeidx: %w", err)
 				}
 				pc += m
 				if int(tIdx) >= len(gcCtx.Types) {
-					return nil, 0, fmt.Errorf("struct.new: type index %d out of range", tIdx)
+					return nil, 0, nil, fmt.Errorf("struct.new: type index %d out of range", tIdx)
 				}
 				ft := &gcCtx.Types[tIdx]
 				numFields := len(ft.Fields)
 				if len(stack) < numFields {
-					return nil, 0, fmt.Errorf("struct.new: stack underflow (want %d, have %d)", numFields, len(stack))
+					return nil, 0, nil, fmt.Errorf("struct.new: stack underflow (want %d, have %d)", numFields, len(stack))
 				}
 				if gcCtx.ValidateOnly {
 					stack = stack[:len(stack)-numFields]
 					typeStack = typeStack[:len(typeStack)-numFields]
 					stack = append(stack, 0)
 					typeStack = append(typeStack, RefTypeFuncref)
+					typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 					continue
 				}
 				fields := make([]any, numFields)
@@ -329,18 +386,20 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				gcCtx.KeepAlive(ws)
 				stack = append(stack, refToUint64(ws))
 				typeStack = append(typeStack, RefTypeFuncref)
+				typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 			case OpcodeGCStructNewDefault:
 				tIdx, m, err := leb128.LoadUint32(data[pc:])
 				if err != nil {
-					return nil, 0, fmt.Errorf("struct.new_default typeidx: %w", err)
+					return nil, 0, nil, fmt.Errorf("struct.new_default typeidx: %w", err)
 				}
 				pc += m
 				if int(tIdx) >= len(gcCtx.Types) {
-					return nil, 0, fmt.Errorf("struct.new_default: type index %d out of range", tIdx)
+					return nil, 0, nil, fmt.Errorf("struct.new_default: type index %d out of range", tIdx)
 				}
 				if gcCtx.ValidateOnly {
 					stack = append(stack, 0)
 					typeStack = append(typeStack, RefTypeFuncref)
+					typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 					continue
 				}
 				ft := &gcCtx.Types[tIdx]
@@ -353,23 +412,25 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				gcCtx.KeepAlive(ws)
 				stack = append(stack, refToUint64(ws))
 				typeStack = append(typeStack, RefTypeFuncref)
+				typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 			case OpcodeGCArrayNew:
 				tIdx, m, err := leb128.LoadUint32(data[pc:])
 				if err != nil {
-					return nil, 0, fmt.Errorf("array.new typeidx: %w", err)
+					return nil, 0, nil, fmt.Errorf("array.new typeidx: %w", err)
 				}
 				pc += m
 				if int(tIdx) >= len(gcCtx.Types) {
-					return nil, 0, fmt.Errorf("array.new: type index %d out of range", tIdx)
+					return nil, 0, nil, fmt.Errorf("array.new: type index %d out of range", tIdx)
 				}
 				if len(stack) < 2 {
-					return nil, 0, fmt.Errorf("array.new: stack underflow")
+					return nil, 0, nil, fmt.Errorf("array.new: stack underflow")
 				}
 				if gcCtx.ValidateOnly {
 					stack = stack[:len(stack)-2]
 					typeStack = typeStack[:len(typeStack)-2]
 					stack = append(stack, 0)
 					typeStack = append(typeStack, RefTypeFuncref)
+					typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 					continue
 				}
 				ft := &gcCtx.Types[tIdx]
@@ -388,23 +449,25 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				gcCtx.KeepAlive(wa)
 				stack = append(stack, refToUint64(wa))
 				typeStack = append(typeStack, RefTypeFuncref)
+				typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 			case OpcodeGCArrayNewDefault:
 				tIdx, m, err := leb128.LoadUint32(data[pc:])
 				if err != nil {
-					return nil, 0, fmt.Errorf("array.new_default typeidx: %w", err)
+					return nil, 0, nil, fmt.Errorf("array.new_default typeidx: %w", err)
 				}
 				pc += m
 				if int(tIdx) >= len(gcCtx.Types) {
-					return nil, 0, fmt.Errorf("array.new_default: type index %d out of range", tIdx)
+					return nil, 0, nil, fmt.Errorf("array.new_default: type index %d out of range", tIdx)
 				}
 				if len(stack) < 1 {
-					return nil, 0, fmt.Errorf("array.new_default: stack underflow")
+					return nil, 0, nil, fmt.Errorf("array.new_default: stack underflow")
 				}
 				if gcCtx.ValidateOnly {
 					stack = stack[:len(stack)-1]
 					typeStack = typeStack[:len(typeStack)-1]
 					stack = append(stack, 0)
 					typeStack = append(typeStack, RefTypeFuncref)
+					typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 					continue
 				}
 				ft := &gcCtx.Types[tIdx]
@@ -420,28 +483,30 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				gcCtx.KeepAlive(wa)
 				stack = append(stack, refToUint64(wa))
 				typeStack = append(typeStack, RefTypeFuncref)
+				typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 			case OpcodeGCArrayNewFixed:
 				tIdx, m, err := leb128.LoadUint32(data[pc:])
 				if err != nil {
-					return nil, 0, fmt.Errorf("array.new_fixed typeidx: %w", err)
+					return nil, 0, nil, fmt.Errorf("array.new_fixed typeidx: %w", err)
 				}
 				pc += m
 				length, n2, err := leb128.LoadUint32(data[pc:])
 				if err != nil {
-					return nil, 0, fmt.Errorf("array.new_fixed length: %w", err)
+					return nil, 0, nil, fmt.Errorf("array.new_fixed length: %w", err)
 				}
 				pc += n2
 				if int(tIdx) >= len(gcCtx.Types) {
-					return nil, 0, fmt.Errorf("array.new_fixed: type index %d out of range", tIdx)
+					return nil, 0, nil, fmt.Errorf("array.new_fixed: type index %d out of range", tIdx)
 				}
 				if uint32(len(stack)) < length {
-					return nil, 0, fmt.Errorf("array.new_fixed: stack underflow")
+					return nil, 0, nil, fmt.Errorf("array.new_fixed: stack underflow")
 				}
 				if gcCtx.ValidateOnly {
 					stack = stack[:uint32(len(stack))-length]
 					typeStack = typeStack[:uint32(len(typeStack))-length]
 					stack = append(stack, 0)
 					typeStack = append(typeStack, RefTypeFuncref)
+					typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 					continue
 				}
 				ft := &gcCtx.Types[tIdx]
@@ -456,19 +521,22 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 				gcCtx.KeepAlive(wa)
 				stack = append(stack, refToUint64(wa))
 				typeStack = append(typeStack, RefTypeFuncref)
+				typeRefs = pushConcreteRefAt(typeRefs, len(typeStack)-1, tIdx)
 			case OpcodeGCRefI31:
 				if len(stack) < 1 {
-					return nil, 0, fmt.Errorf("ref.i31: stack underflow")
+					return nil, 0, nil, fmt.Errorf("ref.i31: stack underflow")
 				}
 				v := uint32(stack[len(stack)-1])
 				stack = stack[:len(stack)-1]
 				typeStack = typeStack[:len(typeStack)-1]
 				stack = append(stack, uint64(PackI31(v)))
-				// ref.i31 produces (ref i31): non-null concrete i31. The
-				// byte stored on the type stack is i31ref so the type
-				// check at the end of the const-expr matches the
-				// declared global type byte (i31ref for `(ref i31)`).
+				// ref.i31 produces (ref i31): non-null abstract i31.
 				typeStack = append(typeStack, ValueTypeI31ref)
+				typeRefs = padRefs(typeRefs, len(typeStack)-1)
+				typeRefs = append(typeRefs, &ValueTypeRef{
+					Nullable: false,
+					HeapKind: HeapTypeKindI31,
+				})
 			case OpcodeGCAnyConvertExtern:
 				// extern→any: the result is anyref. Keep the same value
 				// on the stack; just update the byte tag.
@@ -481,15 +549,19 @@ func evaluateConstExpr(e *ConstantExpression, globalResolver func(globalIndex In
 					typeStack[len(typeStack)-1] = ValueTypeExternref
 				}
 			default:
-				return nil, 0, fmt.Errorf("invalid GC sub-opcode for const expression: 0x%x", sub)
+				return nil, 0, nil, fmt.Errorf("invalid GC sub-opcode for const expression: 0x%x", sub)
 			}
 		case OpcodeEnd:
 			if len(typeStack) != 1 {
-				return nil, 0, errors.New("stack has more than one value at end of constant expression")
+				return nil, 0, nil, errors.New("stack has more than one value at end of constant expression")
 			}
-			return stack, typeStack[0], nil
+			var topRef *ValueTypeRef
+			if len(typeRefs) > 0 {
+				topRef = typeRefs[len(typeRefs)-1]
+			}
+			return stack, typeStack[0], topRef, nil
 		default:
-			return nil, 0, fmt.Errorf("invalid opcode for const expression: 0x%x", opCode)
+			return nil, 0, nil, fmt.Errorf("invalid opcode for const expression: 0x%x", opCode)
 		}
 	}
 }

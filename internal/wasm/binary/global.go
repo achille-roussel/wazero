@@ -25,13 +25,16 @@ func decodeGlobal(r *bytes.Reader, enabledFeatures api.CoreFeatures, ret *wasm.G
 //
 // See https://www.w3.org/TR/2019/REC-wasm-core-1-20191205/#binary-globaltype
 func decodeGlobalType(r *bytes.Reader) (wasm.GlobalType, error) {
-	vt, err := decodeValueTypes(r, 1)
+	vt, refs, err := decodeValueTypesWithRefInfo(r, 1)
 	if err != nil {
 		return wasm.GlobalType{}, fmt.Errorf("read value type: %w", err)
 	}
 
 	ret := wasm.GlobalType{
 		ValType: vt[0],
+	}
+	if len(refs) > 0 {
+		ret.RefInfo = refs[0]
 	}
 
 	b, err := r.ReadByte()

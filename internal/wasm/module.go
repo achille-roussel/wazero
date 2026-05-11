@@ -290,7 +290,7 @@ func (m *Module) Validate(enabledFeatures api.CoreFeatures) error {
 		return err
 	}
 
-	if err = m.validateGlobals(globals, uint32(len(functions)), MaximumGlobals); err != nil {
+	if err = m.validateGlobals(globals, functions, MaximumGlobals); err != nil {
 		return err
 	}
 
@@ -431,7 +431,7 @@ func (m *Module) validateStartSection() error {
 	return nil
 }
 
-func (m *Module) validateGlobals(globals []GlobalType, numFuncts, maxGlobals uint32) error {
+func (m *Module) validateGlobals(globals []GlobalType, functions []Index, maxGlobals uint32) error {
 	if uint32(len(globals)) > maxGlobals {
 		return fmt.Errorf("too many globals in a module")
 	}
@@ -443,10 +443,12 @@ func (m *Module) validateGlobals(globals []GlobalType, numFuncts, maxGlobals uin
 		Types:        m.TypeSection,
 		KeepAlive:    func(any) {},
 		ValidateOnly: true,
+		FuncTypes:    functions,
 	}
+	numFuncts := uint32(len(functions))
 	for i := range m.GlobalSection {
 		g := &m.GlobalSection[i]
-		if err := validateConstExpression(importedGlobals, numFuncts, &g.Init, g.Type.ValType, validateGCCtx); err != nil {
+		if err := validateConstExpressionRich(importedGlobals, numFuncts, &g.Init, g.Type.ValType, g.Type.RefInfo, validateGCCtx); err != nil {
 			return err
 		}
 	}
@@ -685,7 +687,11 @@ func (m *Module) validateExports(enabledFeatures api.CoreFeatures, functions []I
 }
 
 func validateConstExpression(globals []GlobalType, numFuncs uint32, expr *ConstantExpression, expectedType ValueType, gcCtx *gcConstExprCtx) (err error) {
-	_, typ, err := evaluateConstExpr(
+	return validateConstExpressionRich(globals, numFuncs, expr, expectedType, nil, gcCtx)
+}
+
+func validateConstExpressionRich(globals []GlobalType, numFuncs uint32, expr *ConstantExpression, expectedType ValueType, expectedRef *ValueTypeRef, gcCtx *gcConstExprCtx) (err error) {
+	_, typ, typeRef, err := evaluateConstExprRich(
 		expr,
 		func(globalIndex Index) (ValueType, uint64, uint64, error) {
 			if uint32(len(globals)) <= globalIndex {
@@ -704,13 +710,22 @@ func validateConstExpression(globals []GlobalType, numFuncs uint32, expr *Consta
 	if err != nil {
 		return err
 	}
-	if typ != expectedType {
-		// For reference types, fall through to the rich isRefSubtypeOf
-		// check so that e.g. (ref i31) initialises an anyref-typed
-		// global (i31 ≤ any in the wasm-gc hierarchy).
-		if !(isReferenceValueType(typ) && isReferenceValueType(expectedType) && isRefSubtypeOf(typ, expectedType)) {
-			return fmt.Errorf("const expression type mismatch expected %s but got %s", ValueTypeName(expectedType), ValueTypeName(typ))
+	// Reference-typed expected: use the rich subtype check so
+	// concrete-ref non-matching TypeIdx values (e.g. (ref $g2)
+	// flowing into (ref $g1) where $g2 is not a subtype of $g1)
+	// are rejected.
+	if isReferenceValueType(typ) && isReferenceValueType(expectedType) {
+		var m *Module
+		if gcCtx != nil && len(gcCtx.Types) > 0 {
+			m = &Module{TypeSection: gcCtx.Types}
 		}
+		if isValueTypeSubtypeRich(typ, typeRef, expectedType, expectedRef, m) {
+			return nil
+		}
+		return fmt.Errorf("const expression type mismatch expected %s but got %s", ValueTypeName(expectedType), ValueTypeName(typ))
+	}
+	if typ != expectedType {
+		return fmt.Errorf("const expression type mismatch expected %s but got %s", ValueTypeName(expectedType), ValueTypeName(typ))
 	}
 	return nil
 }
@@ -1038,27 +1053,95 @@ func arrayKey(elem FieldType) string {
 // engine-wide TypeID of the supertype (so cross-module match works through
 // non-recursive subtype chains too) is a Phase 4 refinement.
 func canonicalTypeKey(t *FunctionType, modulePos uint32) string {
+	return canonicalTypeKeyWithCtx(t, modulePos, nil, nil)
+}
+
+// fieldKeyWithCtx canonicalises a struct/array field type with full
+// rec-group context, so that a field type like `(ref $T)` produces
+// "rec.N" for refs within the same rec group and a transitively
+// resolved key for refs to types outside the group.
+func fieldKeyWithCtx(f FieldType, groupStart, groupEnd uint32, types []FunctionType, priorKeys []string) string {
+	var prefix string
+	if f.Mutable {
+		prefix = "mut "
+	}
+	if f.Packed != PackedTypeNone {
+		return prefix + f.Packed.String()
+	}
+	if f.RefInfo != nil && f.RefInfo.HeapKind == HeapTypeKindConcrete {
+		return prefix + refConcreteKey(f.RefInfo, groupStart, groupEnd, types, priorKeys)
+	}
+	if f.RefInfo != nil {
+		return prefix + f.RefInfo.String()
+	}
+	return prefix + ValueTypeName(f.ValueType)
+}
+
+// refConcreteKey produces a canonical key fragment for a concrete-ref
+// ValueTypeRef. Same idea as the supertype path in canonicalTypeKey:
+// rec-relative for in-group, transitive for out-of-group.
+func refConcreteKey(r *ValueTypeRef, groupStart, groupEnd uint32, types []FunctionType, priorKeys []string) string {
+	prefix := "(ref "
+	if r.Nullable {
+		prefix = "(ref null "
+	}
+	idx := r.TypeIdx
+	if idx >= groupStart && idx < groupEnd {
+		return fmt.Sprintf("%srec.%d)", prefix, idx-groupStart)
+	}
+	if types != nil && priorKeys != nil && int(idx) < len(priorKeys) && priorKeys[idx] != "" {
+		return prefix + "#" + priorKeys[idx] + ")"
+	}
+	return fmt.Sprintf("%sabs.%d)", prefix, idx)
+}
+
+func structKeyWithCtx(fields []FieldType, groupStart, groupEnd uint32, types []FunctionType, priorKeys []string) string {
+	out := "struct{"
+	for i, f := range fields {
+		if i > 0 {
+			out += ","
+		}
+		out += fieldKeyWithCtx(f, groupStart, groupEnd, types, priorKeys)
+	}
+	return out + "}"
+}
+
+func arrayKeyWithCtx(elem FieldType, groupStart, groupEnd uint32, types []FunctionType, priorKeys []string) string {
+	return "array(" + fieldKeyWithCtx(elem, groupStart, groupEnd, types, priorKeys) + ")"
+}
+
+// canonicalTypeKeyWithCtx computes the canonical key with optional
+// context: `types` is the full module TypeSection (used to recursively
+// canonicalize out-of-rec-group super references so two rec groups
+// with the same structural shape canonicalize to the same key), and
+// `priorKeys` is a slice of already-computed canonical keys for types
+// at positions 0..modulePos-1 (avoids recomputation and handles
+// forward references inside rec groups by short-circuiting to
+// rec-relative).
+func canonicalTypeKeyWithCtx(t *FunctionType, modulePos uint32, types []FunctionType, priorKeys []string) string {
+	groupSize := t.RecGroupSize
+	if groupSize < 1 {
+		groupSize = 1
+	}
+	groupStart := modulePos - uint32(t.RecGroupPosition)
+	groupEnd := groupStart + uint32(groupSize)
 	var ret string
 	switch t.Form {
 	case CompositeFormFunc:
 		ret = funcKey(t.Params, t.Results)
 	case CompositeFormStruct:
-		ret = structKey(t.Fields)
+		ret = structKeyWithCtx(t.Fields, groupStart, groupEnd, types, priorKeys)
 	case CompositeFormArray:
-		ret = arrayKey(t.ArrayField)
+		ret = arrayKeyWithCtx(t.ArrayField, groupStart, groupEnd, types, priorKeys)
 	default:
 		ret = fmt.Sprintf("<form=%d>", t.Form)
 	}
 	if t.SuperTypeIndex != nil {
-		groupSize := t.RecGroupSize
-		if groupSize < 1 {
-			groupSize = 1
-		}
-		groupStart := modulePos - uint32(t.RecGroupPosition)
-		groupEnd := groupStart + uint32(groupSize)
 		sup := *t.SuperTypeIndex
 		if sup >= groupStart && sup < groupEnd {
 			ret += fmt.Sprintf("|sup=rec.%d", sup-groupStart)
+		} else if types != nil && priorKeys != nil && int(sup) < len(priorKeys) && priorKeys[sup] != "" {
+			ret += "|sup=#" + priorKeys[sup]
 		} else {
 			ret += fmt.Sprintf("|sup=abs.%d", sup)
 		}
@@ -1141,6 +1224,11 @@ type Tag struct {
 type GlobalType struct {
 	ValType ValueType
 	Mutable bool
+	// RefInfo carries the precise reference-type info when ValType
+	// is a reference byte (especially the funcref sentinel for
+	// concrete-ref globals like `(global (ref $T) ...)`. nil when
+	// the byte alone is sufficient (e.g. anyref / eqref / etc.).
+	RefInfo *ValueTypeRef
 }
 
 type Global struct {

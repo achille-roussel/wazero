@@ -3122,6 +3122,7 @@ type stacks struct {
 func (sts *stacks) reset(functionType *FunctionType) {
 	// Reset valueStack for reuse.
 	sts.vs.stack = sts.vs.stack[:0]
+	sts.vs.refs = sts.vs.refs[:0]
 	sts.vs.stackLimits = sts.vs.stackLimits[:0]
 	sts.vs.maximumStackPointer = 0
 	sts.cs.stack = sts.cs.stack[:0]
@@ -3339,17 +3340,18 @@ func (s *valueTypeStack) push(v ValueType) {
 // nullability is implicit in the byte).
 func (s *valueTypeStack) pushRef(v ValueType, ref *ValueTypeRef) {
 	s.stack = append(s.stack, v)
-	if ref != nil {
-		// Ensure refs has same length as stack; pad with nils.
-		for len(s.refs) < len(s.stack)-1 {
-			s.refs = append(s.refs, nil)
-		}
-		s.refs = append(s.refs, ref)
-	} else if len(s.refs) >= len(s.stack)-1 {
-		// Only pad refs if it's already being maintained (we don't
-		// want to allocate for non-GC modules).
+	// The refs sidecar must align with stack indices: refs[i] is
+	// the rich-info for stack[i]. Trim or pad to len(stack)-1 so
+	// the new entry lands at the correct position regardless of
+	// stale state from a prior function's validation.
+	wantLen := len(s.stack) - 1
+	if len(s.refs) > wantLen {
+		s.refs = s.refs[:wantLen]
+	}
+	for len(s.refs) < wantLen {
 		s.refs = append(s.refs, nil)
 	}
+	s.refs = append(s.refs, ref)
 	if sp := len(s.stack); sp > s.maximumStackPointer {
 		s.maximumStackPointer = sp
 	}
@@ -3794,6 +3796,19 @@ func isHeapTypeSubtypeOf(srcKind HeapTypeKind, srcTypeIdx uint32, dstKind HeapTy
 		for visited := 0; cur >= 0 && visited < 256; visited++ {
 			if uint32(cur) == dstTypeIdx {
 				return true
+			}
+			// Canonical-key equivalence: two types in different
+			// rec groups with structurally identical shape (after
+			// rec-relative + transitive super canonicalization) are
+			// the same type.
+			if int(cur) < len(m.TypeSection) && int(dstTypeIdx) < len(m.TypeSection) {
+				priorKeys := make([]string, len(m.TypeSection))
+				for j := range m.TypeSection {
+					priorKeys[j] = canonicalTypeKeyWithCtx(&m.TypeSection[j], uint32(j), m.TypeSection, priorKeys)
+				}
+				if priorKeys[cur] == priorKeys[dstTypeIdx] {
+					return true
+				}
 			}
 			if int(cur) >= len(m.TypeSection) {
 				return false
